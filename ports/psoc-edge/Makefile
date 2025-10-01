@@ -55,8 +55,8 @@ CFLAGS_CORTEX_M33 = -mthumb -mcpu=cortex-m33 -msoft-float -fsingle-precision-con
 
 # std=c11 instead of std=c99 : provides "static_assert" (not available in c99) 
 # -D_XOPEN_SOURCE=700 : makes sure the setenv/unsetenv headers are included
-# CFLAGS  += $(INC) -Wall -Werror -std=c11 $(CFLAGS_CORTEX_M33) $(COPT) -D_XOPEN_SOURCE=700
-# CFLAGS  += -Wno-error=double-promotion -Wno-error=overflow -Wno-error=analyzer-null-dereference -Wno-error=unused-local-typedefs -Wno-error=unused-function -Wno-error=maybe-uninitialized
+CFLAGS  += $(INC) -Wall -Werror -std=c11 $(CFLAGS_CORTEX_M33) $(COPT) -D_XOPEN_SOURCE=700
+CFLAGS  += -Wno-error=double-promotion -Wno-error=overflow -Wno-error=analyzer-null-dereference -Wno-error=unused-local-typedefs -Wno-error=unused-function -Wno-error=maybe-uninitialized
 
 
 # LDFLAGS += -Wl,--cref -Wl,--gc-sections
@@ -115,21 +115,25 @@ DRIVERS_SRC_C +=
 
 MOD_SRC_C +=
 
-SRC_C = help.c \
-		main.c \
-		mphalport.c 
+# SRC_C = help.c \
+# 		main.c \
+# 		mphalport.c 
+
+MTB_C = main.c
 
 SRC_ASM +=
 
 SRC_QSTR += $(SHARED_SRC_C) $(MOD_SRC_C)
 
-OBJ += $(PY_O) 
-OBJ += $(addprefix $(BUILD)/, $(SHARED_SRC_C:.c=.o)) 
-OBJ += $(addprefix $(BUILD)/, $(DRIVERS_SRC_C:.c=.o)) 
-OBJ += $(addprefix $(BUILD)/, $(MOD_SRC_C:.c=.o)) 
-OBJ += $(addprefix $(BUILD)/, $(SRC_C:.c=.o)) 
-OBJ += $(addprefix $(BUILD)/, $(SRC_ASM:.s=.o))
-OBJ += $(addprefix $(BUILD)/, $(SRC_CXX:.cpp=.o))
+# OBJ += $(PY_O) 
+# OBJ += $(addprefix $(BUILD)/, $(SHARED_SRC_C:.c=.o)) 
+# OBJ += $(addprefix $(BUILD)/, $(DRIVERS_SRC_C:.c=.o)) 
+# OBJ += $(addprefix $(BUILD)/, $(MOD_SRC_C:.c=.o)) 
+# OBJ += $(addprefix $(BUILD)/, $(SRC_C:.c=.o)) 
+# OBJ += $(addprefix $(BUILD)/, $(SRC_ASM:.s=.o))
+# OBJ += $(addprefix $(BUILD)/, $(SRC_CXX:.cpp=.o))
+
+MTB_OBJ = $(addprefix $(BUILD)/, $(MTB_C:.c=.o))
 
 # # switch for debug mode, also added to mpconfigport.h
 # # TODO: keep the more suitable one, delete the other
@@ -170,12 +174,30 @@ $(BUILD)/mpy_ns.elf: $(MPY_MTB_LIBRARIES) $(LIBS)
 $(BUILD)/mpy_ns.hex: $(BUILD)/mpy_ns.elf
 	$(Q) $(OBJCOPY) -O ihex $^ $@
 
+$(BUILD)/mpy_cm33_ns.elf: mtb_get_build_flags_ns $(MTB_OBJ)
+	$(info linking static library proj_cm33_ns with main from mpy...)
+	arm-none-eabi-g++ -mcpu=cortex-m33 --specs=nano.specs -mfloat-abi=softfp -mfpu=fpv5-sp-d16 -mthumb -ffunction-sections -fdata-sections -ffat-lto-objects -g -Wall -pipe -Wl,--gc-sections -Wl,--print-memory-usage -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/config/GeneratedSource -T../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/pse84_ns_cm33.ld -o  -Wl,-Map,/home/enriquezgarc/micropython-psoc-edge/lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.map  -Wl,--start-group    ../../lib/mtb-psoc-edge-libs/proj_cm33_s/nsc_veneer.o -Wl,--end-group -o build/mpy_cm33_ns.elf build/main.o ../../lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.a
+
+$(BUILD)/mpy_cm33_ns.hex: $(BUILD)/mpy_cm33_ns.elf
+	$(Q) $(OBJCOPY) -O ihex $^ $@
+
+link_static_lib_cm33_ns: $(BUILD)/mpy_cm33_ns.hex
+
+# From .ldflags file after make BOARD=KIT_PSE84_AI mtb_build_ns (with APPNAME)
+#arm-none-eabi-g++  -mcpu=cortex-m33 --specs=nano.specs -mfloat-abi=softfp -mfpu=fpv5-sp-d16 -mthumb -ffunction-sections -fdata-sections -ffat-lto-objects -g -Wall -pipe -Wl,--gc-sections -Wl,--print-memory-usage -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/config/GeneratedSource -T../bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/pse84_ns_cm33.ld -o  -Wl,-Map,/home/enriquezgarc/micropython-psoc-edge/lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.map  -Wl,--start-group    ../proj_cm33_s/nsc_veneer.o -Wl,--end-group /opt/Tools/mtb-gcc-arm-eabi/14.2.1/gcc/bin/arm-none-eabi-ar rs -o  @/home/enriquezgarc/micropython-psoc-edge/lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/objlist.rsp    /home/enriquezgarc/micropython-psoc-edge/lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/main.o  
+
+# From micropython psoc6 linking (after removing all mpy.o files)
+#arm-none-eabi-gcc   -Wl,--cref -Wl,--gc-sections -Wl,-Map,build/firmware.map  -Wl,--start-group -Wl,--end-group -Wl,--print-memory-usage  -mcpu=cortex-m4 --specs=nano.specs -mfloat-abi=softfp -mfpu=fpv4-sp-d16 -mthumb -ffunction-sections -fdata-sections -ffat-lto-objects -g -Wall -pipe -Wl,--gc-sections -T../../lib/mtb-psoc6-libs/bsps/TARGET_APP_CY8CKIT-062S2-AI/COMPONENT_CM4/TOOLCHAIN_GCC_ARM/linker.ld -o build/firmware.elf ../../lib/mtb-psoc6-libs/build/APP_CY8CKIT-062S2-AI/Debug/libmtb.a
 link_33_ns:
 	$(info )
 	$(info Linking cm33_ns ...)
 	arm-none-eabi-g++ -mcpu=cortex-m33 --specs=nano.specs -mfloat-abi=softfp -mfpu=fpv5-sp-d16 -mthumb -ffunction-sections -fdata-sections -ffat-lto-objects -g -Wall -pipe -Wl,--gc-sections -Wl,--print-memory-usage -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/config/GeneratedSource -T"../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/pse84_ns_cm33.ld" -o ../../lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.elf -Wl,-Map,../../lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.map @../../lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/objlist.rsp -Wl,--start-group ../../lib/mtb-psoc-edge-libs/proj_cm33_s/nsc_veneer.o -Wl,--end-group	
 	$(info Linking cm33_ns done.)
 	$(info )
+
+
+# Archive -> Using LIBNAME
+#arm-none-eabi-ar rs -o C:/Users/enriquezgarc/mtw5/hello-word-edge/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.a @C:/Users/enriquezgarc/mtw5/hello-word-edge/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/objlist.rsp
 
 # with NINJA -> make build VERBOSE=1 MTB_PROJECTS=proj_cm33_ns
 # 	arm-none-eabi-g++ -mcpu=cortex-m33 --specs=nano.specs -mfloat-abi=softfp -mfpu=fpv5-sp-d16 -mthumb -ffunction-sections -fdata-sections -ffat-lto-objects -g -Wall -pipe -Wl,--gc-sections -Wl,--print-memory-usage -Xlinker -L ../bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM                           -Xlinker -L                             /bsps/TARGET_APP_KIT_PSE84_AI/config/GeneratedSource -T                            /bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/pse84_ns_cm33.ld -Wl,-Map,                            /proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.map -Wl,--start-group                                                 APP_KIT_PSE84_AI/Debug/proj_cm33_ns.elf.rsp -Wl,--end-group -o build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.elf
