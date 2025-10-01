@@ -152,7 +152,6 @@ build_mpy_app_ns: $(BUILD)/mpy_edge_app_ns.hex
 $(BUILD)/mpy_edge_app_ns.hex: $(BUILD)/mpy_edge_app_ns.elf
 	$(Q) $(OBJCOPY) -O ihex $^ $@
 
-   																		 -mcpu=cortex-m33 --specs=nano.specs -mfloat-abi=softfp -mfpu=fpv5-sp-d16 -mthumb -ffunction-sections -fdata-sections -ffat-lto-objects -g -Wall -pipe -Wl,--gc-sections -Wl,--print-memory-usage -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/config/GeneratedSource -T"../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/pse84_ns_cm33.ld" -Wl,-Map,@mapfile                                                                                        -Wl,--start-group                                                 -Wl,--end-group -o @elffile -o build/mpy_ns.elf  ../../lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.a
 all: mtb_init build_mpy_app_ns mtb_build_s
 
 rebuild: clean all
