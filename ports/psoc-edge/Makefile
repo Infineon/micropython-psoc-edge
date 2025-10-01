@@ -143,57 +143,69 @@ MTB_OBJ = $(addprefix $(BUILD)/, $(MTB_C:.c=.o))
 #    CFLAGS += -DMICROPY_LOGGER_DEBUG=1
 # endif
 
-$(BUILD)/firmware.elf: $(OBJ) $(MPY_MTB_LIBRARIES) $(LIBS)
-	$(info )
-	$(info Linking $@     $^  $(LIBS) ...)
-	$(Q) $(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
-	$(info Linking $@ done.)
-	$(Q) $(SIZE) $@ -A
-	$(info )
+# $(BUILD)/firmware.elf: $(OBJ) $(MPY_MTB_LIBRARIES) $(LIBS)
+# 	$(info )
+# 	$(info Linking $@     $^  $(LIBS) ...)
+# 	$(Q) $(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
+# 	$(info Linking $@ done.)
+# 	$(Q) $(SIZE) $@ -A
+# 	$(info )
 
 
-$(BUILD)/firmware.hex: $(BUILD)/firmware.elf
-	$(Q) $(OBJCOPY) -O ihex $^ $@
+# $(BUILD)/firmware.hex: $(BUILD)/firmware.elf
+# 	$(Q) $(OBJCOPY) -O ihex $^ $@
 
 # include adapter makefile
 -include $(TOP)/lib/mtb-psoc-edge-libs/mtb-makefile.mk
 
 MPY_CROSS_FLAGS += -march=armv8-m.main
 
-build_ns: mtb_get_build_flags_ns $(BUILD)/firmware.hex
+
 #$(GENERATED_PINS)
 
-$(BUILD)/mpy_ns.elf: $(MPY_MTB_LIBRARIES) $(LIBS)
+# $(BUILD)/mpy_ns.elf: $(MPY_MTB_LIBRARIES) $(LIBS)
+# 	$(info )
+# 	$(info Linking $@ ...)
+# 	$(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
+# 	$(info Linking $@ done.)
+# 	$(Q) $(SIZE) $@ -A
+# 	$(info )
+
+# $(BUILD)/mpy_ns.hex: $(BUILD)/mpy_ns.elf
+# 	$(Q) $(OBJCOPY) -O ihex $^ $@
+
+# The creation of the build directory is only temporary. Removed once created by mpy makefile system.
+create_build_dir:
+	$(Q) mkdir -p $(BUILD)
+
+$(BUILD)/mpy_edge_app_ns.elf: create_build_dir $(MTB_OBJ) 
 	$(info )
 	$(info Linking $@ ...)
-	$(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
+	arm-none-eabi-g++ -mcpu=cortex-m33 --specs=nano.specs -mfloat-abi=softfp -mfpu=fpv5-sp-d16 -mthumb -ffunction-sections -fdata-sections -ffat-lto-objects -g -Wall -pipe -Wl,--gc-sections -Wl,--print-memory-usage -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/config/GeneratedSource -T../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/pse84_ns_cm33.ld -o  -Wl,-Map,/home/enriquezgarc/micropython-psoc-edge/lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.map  -Wl,--start-group    ../../lib/mtb-psoc-edge-libs/proj_cm33_s/nsc_veneer.o -Wl,--end-group -o $@ build/main.o ../../lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.a
 	$(info Linking $@ done.)
 	$(Q) $(SIZE) $@ -A
 	$(info )
 
-$(BUILD)/mpy_ns.hex: $(BUILD)/mpy_ns.elf
+$(BUILD)/mpy_edge_app_ns.hex: $(BUILD)/mpy_edge_app_ns.elf
 	$(Q) $(OBJCOPY) -O ihex $^ $@
 
-$(BUILD)/mpy_cm33_ns.elf: mtb_get_build_flags_ns $(MTB_OBJ)
-	$(info linking static library proj_cm33_ns with main from mpy...)
-	arm-none-eabi-g++ -mcpu=cortex-m33 --specs=nano.specs -mfloat-abi=softfp -mfpu=fpv5-sp-d16 -mthumb -ffunction-sections -fdata-sections -ffat-lto-objects -g -Wall -pipe -Wl,--gc-sections -Wl,--print-memory-usage -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/config/GeneratedSource -T../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/pse84_ns_cm33.ld -o  -Wl,-Map,/home/enriquezgarc/micropython-psoc-edge/lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.map  -Wl,--start-group    ../../lib/mtb-psoc-edge-libs/proj_cm33_s/nsc_veneer.o -Wl,--end-group -o build/mpy_cm33_ns.elf build/main.o ../../lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.a
+# link_static_lib_cm33_ns: $(BUILD)/mpy_cm33_ns.hex
 
-$(BUILD)/mpy_cm33_ns.hex: $(BUILD)/mpy_cm33_ns.elf
-	$(Q) $(OBJCOPY) -O ihex $^ $@
-
-link_static_lib_cm33_ns: $(BUILD)/mpy_cm33_ns.hex
+build_mpy_app_ns: mtb_get_build_flags_ns $(BUILD)/mpy_edge_app_ns.hex
 
 # From .ldflags file after make BOARD=KIT_PSE84_AI mtb_build_ns (with APPNAME)
 #arm-none-eabi-g++  -mcpu=cortex-m33 --specs=nano.specs -mfloat-abi=softfp -mfpu=fpv5-sp-d16 -mthumb -ffunction-sections -fdata-sections -ffat-lto-objects -g -Wall -pipe -Wl,--gc-sections -Wl,--print-memory-usage -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/config/GeneratedSource -T../bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/pse84_ns_cm33.ld -o  -Wl,-Map,/home/enriquezgarc/micropython-psoc-edge/lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.map  -Wl,--start-group    ../proj_cm33_s/nsc_veneer.o -Wl,--end-group /opt/Tools/mtb-gcc-arm-eabi/14.2.1/gcc/bin/arm-none-eabi-ar rs -o  @/home/enriquezgarc/micropython-psoc-edge/lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/objlist.rsp    /home/enriquezgarc/micropython-psoc-edge/lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/main.o  
 
 # From micropython psoc6 linking (after removing all mpy.o files)
 #arm-none-eabi-gcc   -Wl,--cref -Wl,--gc-sections -Wl,-Map,build/firmware.map  -Wl,--start-group -Wl,--end-group -Wl,--print-memory-usage  -mcpu=cortex-m4 --specs=nano.specs -mfloat-abi=softfp -mfpu=fpv4-sp-d16 -mthumb -ffunction-sections -fdata-sections -ffat-lto-objects -g -Wall -pipe -Wl,--gc-sections -T../../lib/mtb-psoc6-libs/bsps/TARGET_APP_CY8CKIT-062S2-AI/COMPONENT_CM4/TOOLCHAIN_GCC_ARM/linker.ld -o build/firmware.elf ../../lib/mtb-psoc6-libs/build/APP_CY8CKIT-062S2-AI/Debug/libmtb.a
-link_33_ns:
-	$(info )
-	$(info Linking cm33_ns ...)
-	arm-none-eabi-g++ -mcpu=cortex-m33 --specs=nano.specs -mfloat-abi=softfp -mfpu=fpv5-sp-d16 -mthumb -ffunction-sections -fdata-sections -ffat-lto-objects -g -Wall -pipe -Wl,--gc-sections -Wl,--print-memory-usage -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/config/GeneratedSource -T"../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/pse84_ns_cm33.ld" -o ../../lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.elf -Wl,-Map,../../lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.map @../../lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/objlist.rsp -Wl,--start-group ../../lib/mtb-psoc-edge-libs/proj_cm33_s/nsc_veneer.o -Wl,--end-group	
-	$(info Linking cm33_ns done.)
-	$(info )
+
+# This is just linking the static library in the mtb project proj_cm33_ns
+# link_33_ns:
+# 	$(info )
+# 	$(info Linking cm33_ns ...)
+# 	arm-none-eabi-g++ -mcpu=cortex-m33 --specs=nano.specs -mfloat-abi=softfp -mfpu=fpv5-sp-d16 -mthumb -ffunction-sections -fdata-sections -ffat-lto-objects -g -Wall -pipe -Wl,--gc-sections -Wl,--print-memory-usage -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/config/GeneratedSource -T"../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/pse84_ns_cm33.ld" -o ../../lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.elf -Wl,-Map,../../lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.map @../../lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/objlist.rsp -Wl,--start-group ../../lib/mtb-psoc-edge-libs/proj_cm33_s/nsc_veneer.o -Wl,--end-group	
+# 	$(info Linking cm33_ns done.)
+# 	$(info )
 
 
 # Archive -> Using LIBNAME
@@ -214,11 +226,11 @@ link_33_ns:
 # 																							 -mcpu=cortex-m55 --specs=nano.specs -mfloat-abi=hard   -mfpu=fpv5-d16    -mthumb -ffunction-sections -fdata-sections -ffat-lto-objects -g -Wall -pipe -Wl,--gc-sections -Wl,--print-memory-usage -Xlinker -L ../bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM                           -Xlinker -L ../bsps/TARGET_APP_KIT_PSE84_AI/config/GeneratedSource                           -T"../bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM55/TOOLCHAIN_GCC_ARM/pse84_ns_cm55.ld"                           -Wl,-Map,@mapfile                                                                                        -Wl,--start-group @objs                                           -Wl,--end-group -o @elffile
 #arm-none-eabi-gcc   																		 -mcpu=cortex-m33 --specs=nano.specs -mfloat-abi=softfp -mfpu=fpv5-sp-d16 -mthumb -ffunction-sections -fdata-sections -ffat-lto-objects -g -Wall -pipe -Wl,--gc-sections -Wl,--print-memory-usage -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM -Xlinker -L ../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/config/GeneratedSource -T"../../lib/mtb-psoc-edge-libs/bsps/TARGET_APP_KIT_PSE84_AI/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/pse84_ns_cm33.ld" -Wl,-Map,@mapfile                                                                                        -Wl,--start-group                                                 -Wl,--end-group -o @elffile -o build/mpy_ns.elf  ../../lib/mtb-psoc-edge-libs/proj_cm33_ns/build/APP_KIT_PSE84_AI/Debug/proj_cm33_ns.a
 
-build_ns_only: mtb_get_build_flags_ns $(BUILD)/mpy_ns.hex
+# build_ns_only: mtb_get_build_flags_ns $(BUILD)/mpy_ns.hex
 
-build_s: mtb_build_s
+# build_s: mtb_build_s
 
-all: build_ns build_s
+all: build_mpy_app_ns mtb_build_s
 
 rebuild: clean mtb_clean all
 

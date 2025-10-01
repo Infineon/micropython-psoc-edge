@@ -13,16 +13,14 @@
 #include "cybsp.h"
 #include "retarget_io_init.h"
 
-int main(void)
-{
+int main(void) {
     cy_rslt_t result = CY_RSLT_SUCCESS;
 
     /* Initialize the device and board peripherals. */
     result = cybsp_init();
 
     /* Board initialization failed. Stop program execution. */
-    if (CY_RSLT_SUCCESS != result)
-    {
+    if (CY_RSLT_SUCCESS != result) {
         handle_app_error();
     }
 
@@ -36,20 +34,15 @@ int main(void)
     printf("\x1b[2J\x1b[;H");
 
     printf("****************** "
-           "PSOC Edge MCU: Hello world "
-           "****************** \r\n\n");
+        "Hello from PSOC Edge 84 AI"
+        "****************** \r\n\n");
 
-    printf("Hello World!\r\n\n");
-    printf("For more projects, "
-           "visit our code examples repositories:\r\n\n");
+    printf("We are gradually getting this to compile all the Micropythons sources!!!\r\n\n");
 
-    printf("https://github.com/Infineon/"
-           "Code-Examples-for-ModusToolbox-Software\r\n\n");
+    printf("To be continued...\r\n\n");
 
-
-    for(;;)
+    for (;;)
     {
 
     }
 }
-
