@@ -36,6 +36,8 @@
 #include "py/runtime.h"
 #include "shared/timeutils/timeutils.h"
 
+#include "cy_retarget_io.h"
+
 
 void mp_hal_delay_ms(mp_uint_t ms) {
 }
@@ -74,7 +76,8 @@ uintptr_t mp_hal_stdio_poll(uintptr_t poll_flags) {
 
 // Send string of given length
 void mp_hal_stdout_tx_strn(const char *str, mp_uint_t len) {
-    printf("WELCOME INTO MICROPYTHON\n");
+    int r = write(STDOUT_FILENO, str, len);
+    (void)r;
 }
 
 int mp_hal_stdin_rx_chr(void) {
