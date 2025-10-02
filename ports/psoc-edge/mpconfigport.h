@@ -27,10 +27,12 @@
 // Options controlling how MicroPython is built, overriding defaults in py/mpconfig.h
 #include <stdint.h>
 
-#include "shared/runtime/interrupt_char.h"
+// #include "shared/runtime/interrupt_char.h"
 #include "mpconfigboard.h"
 
 // options to control how MicroPython is built
+
+#define MICROPY_USE_INTERNAL_PRINTF (0)
 
 // Use the minimal starting configuration (disables all optional features).
 #define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_MINIMUM)
@@ -41,7 +43,7 @@
 #define MICROPY_ENABLE_COMPILER     (1)
 
 #define MICROPY_QSTR_EXTRA_POOL           mp_qstr_frozen_const_pool
-#define MICROPY_ENABLE_GC                 (1)
+#define MICROPY_ENABLE_GC                 (0)
 #define MICROPY_HELPER_REPL               (1)
 #define MICROPY_ENABLE_EXTERNAL_IMPORT    (1)
 
@@ -66,15 +68,15 @@ typedef long mp_off_t;
 #include <alloca.h>
 
 
-#if defined(__linux__) || defined(__APPLE__)
-#define MICROPY_MIN_USE_STDOUT (1)
-#define MICROPY_HEAP_SIZE      (25600) // heap size 25 kilobytes
-#endif
+// #if defined(__linux__) || defined(__APPLE__)
+// #define MICROPY_MIN_USE_STDOUT (1)
+// #define MICROPY_HEAP_SIZE      (25600) // heap size 25 kilobytes
+// #endif
 
-#ifdef __thumb__
-#define MICROPY_MIN_USE_CORTEX_CPU (1)
-#define MICROPY_MIN_USE_STM32_MCU (1)
-#define MICROPY_HEAP_SIZE      (2048) // heap size 2 kilobytes
-#endif
+// #ifdef __thumb__
+// #define MICROPY_MIN_USE_CORTEX_CPU (1)
+// #define MICROPY_MIN_USE_STM32_MCU (1)
+// #define MICROPY_HEAP_SIZE      (2048) // heap size 2 kilobytes
+// #endif
 
 #define MP_STATE_PORT MP_STATE_VM

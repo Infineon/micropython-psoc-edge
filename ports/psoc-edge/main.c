@@ -39,7 +39,7 @@ int main(void) {
 
     printf("We are gradually getting this to compile all the Micropythons sources!!!\r\n\n");
 
-    printf("To be continued...\r\n\n");
+    printf("We should commit the progress now!! \r\n\n");
 
     for (;;)
     {
