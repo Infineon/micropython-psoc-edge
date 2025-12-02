@@ -120,7 +120,7 @@ MOD_SRC_C += \
 	machine_pin.c \
 	machine_pin_irq.c \
 	machine_pdm_pcm.c\
-	\
+	machine_i2c.c\
 	modpsocedge.c
 
 SRC_C = help.c \
