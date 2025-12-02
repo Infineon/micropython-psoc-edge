@@ -98,7 +98,9 @@ SHARED_SRC_C += $(addprefix shared/,\
 DRIVERS_SRC_C += 
 
 MOD_SRC_C += \
-	modpsocedge.c
+	modpsocedge.c \
+	machine_i2c.c 
+
 
 SRC_C = help.c \
 		main.c \
