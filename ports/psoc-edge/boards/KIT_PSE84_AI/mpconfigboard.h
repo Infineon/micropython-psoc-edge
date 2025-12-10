@@ -29,3 +29,14 @@
 #define MICROPY_HW_BOARD_NAME                   "KIT_PSE84_AI"
 
 #define MICROPY_PY_NETWORK_HOSTNAME_DEFAULT     "KIT_PSE84_AI"
+
+#define MICROPY_GC_HEAP_SIZE                    (315 * 1024) // 315 KB
+
+// I2C Configuration
+#define MICROPY_HW_I2C0_SCB                     (SCB5)
+#define MICROPY_HW_I2C0_SCL                     (P17_0_NUM)
+#define MICROPY_HW_I2C0_SDA                     (P17_1_NUM)
+#define MAX_I2C                                 1
+#define MICROPY_HW_I2C_INTR_PRIORITY            (7UL)
+#define MICROPY_HW_I2C_PCLK                     PCLK_SCB5_CLOCK_SCB_EN
+#define MICROPY_HW_I2C_IRQn                     scb_5_interrupt_IRQn
