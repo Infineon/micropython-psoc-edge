@@ -105,6 +105,14 @@ soft_reset:
     return 0;
 }
 
+#if MICROPY_ENABLE_GC
+void gc_collect(void) {
+    gc_collect_start();
+    gc_helper_collect_regs_and_stack();
+    gc_collect_end();
+}
+#endif
+
 // Handle uncaught exceptions (should never be reached in a correct C implementation).
 void nlr_jump_fail(void *val) {
     for (;;) {

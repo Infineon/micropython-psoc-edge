@@ -106,7 +106,7 @@ SRC_C = help.c \
 		main.c \
 		mphalport.c 
 
-SRC_ASM +=
+SRC_ASM += shared/runtime/gchelper_thumb2.s
 
 SRC_QSTR += $(SHARED_SRC_C) $(MOD_SRC_C)
 
@@ -125,6 +125,10 @@ MPY_APP_NAME = mpy_edge_app_ns
 -include $(TOP)/lib/mtb-psoc-edge-libs/mtb-makefile.mk
 
 LDFLAGS += -Wl,-Map,$(BUILD)/$(MPY_APP_NAME).map
+
+# Ensure assembly file is compiled with correct flags
+$(BUILD)/shared/runtime/gchelper_thumb2.o: $(TOP)/shared/runtime/gchelper_thumb2.s | mtb_build_ns_info
+	$(Q)$(CC) -mthumb -mcpu=cortex-m33 -c -o $@ $<
 
 $(BUILD)/$(MPY_APP_NAME).elf: mtb_build_ns_info $(OBJ)
 	$(info )
