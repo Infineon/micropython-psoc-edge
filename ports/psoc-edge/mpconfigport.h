@@ -43,12 +43,16 @@
 // Use the minimal starting configuration (disables all optional features).
 #define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_MINIMUM)
 
+// Enable bytearray for I2C Target memory buffers
+#define MICROPY_PY_BUILTINS_BYTEARRAY (1)
+#define MICROPY_PY_BUILTINS_SLICE (1)
+
 // You can disable the built-in MicroPython compiler by setting the following
 // config option to 0.  If you do this then you won't get a REPL prompt, but you
 // will still be able to execute pre-compiled scripts, compiled with mpy-cross.
 #define MICROPY_ENABLE_COMPILER           (1)
 
-#define MICROPY_ENABLE_GC                 (0)
+#define MICROPY_ENABLE_GC                 (1)
 #define MICROPY_HELPER_REPL               (1)
 #define MICROPY_ENABLE_EXTERNAL_IMPORT    (1)
 
@@ -70,13 +74,21 @@
 #define MICROPY_PY_TIME_INCLUDEFILE             "ports/psoc-edge/modtime.c"
 
 // Logger
-#define MICROPY_LOGGER_DEBUG                    (1)
+#define MICROPY_LOGGER_DEBUG                    (0)
 
 // Machine module
 #define MICROPY_PY_MACHINE                      (1)
+// Use extmod's modmachine.c which includes I2CTarget
 #define MICROPY_PY_MACHINE_INCLUDEFILE          "ports/psoc-edge/modmachine.c"
 #define MICROPY_PY_MACHINE_I2C                  (1)
 #define MICROPY_PY_MACHINE_SOFTI2C              (0)
+
+// I2C Target support (requires GC and Scheduler for IRQ framework)
+#define MICROPY_PY_MACHINE_I2C_TARGET           (1)
+#define MICROPY_PY_MACHINE_I2C_TARGET_MAX       (1)
+#define MICROPY_PY_MACHINE_I2C_TARGET_INCLUDEFILE "ports/psoc-edge/machine_i2c_target.c"
+#define MICROPY_ENABLE_SCHEDULER                (1)
+#define MICROPY_SCHEDULER_DEPTH                 (8)
 
 #define MICROPY_TIME_SUPPORT_Y1969_AND_BEFORE   (1)
 
