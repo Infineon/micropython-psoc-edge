@@ -118,8 +118,6 @@
 
 #define MICROPY_PY_MACHINE_PIN_MAKE_NEW         mp_pin_make_new
 
-#define MICROPY_LOGGER_DEBUG                    (1)
-
 // type definitions for the specific machine
 
 typedef intptr_t mp_int_t; // must be pointer size
