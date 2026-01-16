@@ -174,26 +174,17 @@ Use the ``I2C`` class for controller (master) operations::
     i2c = I2C(freq=400000)
     
     # Pin parameters are optional but ignored on KIT_PSE84_AI
-    i2c = I2C(scl='P17_0', sda='P17_1', freq=100000)  # Prints warning, uses P17_0/P17_1
+    i2c = I2C(scl='P17_0', sda='P17_1', freq=100000)  # You can only uses P17_0/P17_1
 
 Constructor arguments:
 
-    - ``id``: I2C bus number (currently only 0 is available). This parameter is ignored.
+    - ``id``: I2C bus number (currently only 0 is available). **This parameter is ignored**.
     - ``freq``: I2C clock frequency in Hz. Supported: 100000 (100kHz) or 400000 (400kHz). 
       Default is 400000.
     - ``scl``: SCL pin (string 'P<port>_<pin>' or Pin object). **Ignored on KIT_PSE84_AI** 
       - always uses P17_0. Prints warning if specified.
     - ``sda``: SDA pin (string 'P<port>_<pin>' or Pin object). **Ignored on KIT_PSE84_AI** 
       - always uses P17_1. Prints warning if specified.
-
-Standard I2C controller methods are supported:
-
-    - ``scan()``: Scan for I2C devices on the bus.
-    - ``readfrom(addr, nbytes)``: Read from a device.
-    - ``readfrom_into(addr, buf)``: Read into an existing buffer.
-    - ``writeto(addr, buf)``: Write data to a device.
-    - ``readfrom_mem(addr, memaddr, nbytes)``: Read from device memory.
-    - ``writeto_mem(addr, memaddr, buf)``: Write to device memory.
 
 Target mode (Slave)
 ^^^^^^^^^^^^^^^^^^^
