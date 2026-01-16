@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2022-2024 Infineon Technologies AG
+ * Copyright (c) 2022-2025 Infineon Technologies AG
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,10 @@
 
 // Use the minimal starting configuration (disables all optional features).
 #define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_MINIMUM)
+
+// Enable bytearray for I2C Target memory buffers
+#define MICROPY_PY_BUILTINS_BYTEARRAY (1)
+#define MICROPY_PY_BUILTINS_SLICE (1)
 
 // You can disable the built-in MicroPython compiler by setting the following
 // config option to 0.  If you do this then you won't get a REPL prompt, but you
@@ -87,7 +91,23 @@
 #define MICROPY_PY_TIME_GMTIME_LOCALTIME_MKTIME (1)
 #define MICROPY_PY_TIME_TIME_TIME_NS            (1)
 #define MICROPY_PY_TIME_INCLUDEFILE             "ports/psoc-edge/modtime.c"
-#define MICROPY_PY_MACHINE_FREQ_NUM_ARGS_MAX    (2)
+
+// Logger
+#define MICROPY_LOGGER_DEBUG                    (0)
+
+// Machine module
+#define MICROPY_PY_MACHINE                      (1)
+// Use extmod's modmachine.c which includes I2CTarget
+#define MICROPY_PY_MACHINE_INCLUDEFILE          "ports/psoc-edge/modmachine.c"
+#define MICROPY_PY_MACHINE_I2C                  (1)
+#define MICROPY_PY_MACHINE_SOFTI2C              (0)
+
+// I2C Target support (requires GC and Scheduler for IRQ framework)
+#define MICROPY_PY_MACHINE_I2C_TARGET           (1)
+#define MICROPY_PY_MACHINE_I2C_TARGET_MAX       (1)
+#define MICROPY_PY_MACHINE_I2C_TARGET_INCLUDEFILE "ports/psoc-edge/machine_i2c_target.c"
+#define MICROPY_ENABLE_SCHEDULER                (1)
+#define MICROPY_SCHEDULER_DEPTH                 (8)
 
 #define MICROPY_TIME_SUPPORT_Y1969_AND_BEFORE   (1)
 
@@ -97,8 +117,6 @@
 #define MICROPY_PY_MACHINE_PDM_PCM_RING_BUF     (1)
 
 #define MICROPY_PY_MACHINE_PIN_MAKE_NEW         mp_pin_make_new
-
-#define MICROPY_LOGGER_DEBUG                    (1)
 
 // type definitions for the specific machine
 

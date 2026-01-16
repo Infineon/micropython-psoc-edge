@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2022-2024 Infineon Technologies AG
+ * Copyright (c) 2022-2025 Infineon Technologies AG
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,10 +41,11 @@
 #include "modmachine.h"
 #include "mplogger.h"
 #include "modpsocedge.h"
-#if MICROPY_PY_MACHINE
 
 enum clock_freq_type PLL0_freq = AUDIO_SYS_CLOCK_73_728_000_HZ;
 enum clock_freq_type freq_peri;
+
+#if MICROPY_PY_MACHINE
 
 // machine.idle()
 // This executies a wfi machine instruction which reduces power consumption
