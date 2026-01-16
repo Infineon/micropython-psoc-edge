@@ -140,3 +140,77 @@ The following parameters have port-specific behavior:
 .. note::
 
     **None** of the non-core methods from the Pin API are currently implemented for this port.
+
+
+Hardware I2C bus
+----------------
+
+See :ref:`machine.I2C <machine.I2C>` and :ref:`machine.I2CTarget <machine.I2CTarget>` for the complete I2C API reference.
+
+Hardware I2C is available on the PSOC™ Edge E84 using the SCB (Serial Communication Block) 
+peripheral. The port supports both controller (master) and target (slave) modes.
+
+.. note::
+
+    External pull-up resistors (typically 4.7kΩ) are required on both SCL and SDA lines.
+    Only one I2C instance (controller or target) can be active at a time, as both modes 
+    share the same SCB peripheral and pins.
+
+.. warning::
+
+    The KIT_PSE84_AI board has only one hardware I2C peripheral with fixed pins:
+    P17_0 (SCL) and P17_1 (SDA). These pins cannot be changed. If you specify 
+    custom pins in the constructor, they will be ignored and a warning message 
+    will be printed.
+
+Controller mode (Master)
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use the ``I2C`` class for controller (master) operations::
+
+    from machine import I2C
+
+    # Create I2C - uses fixed pins P17_0 (SCL) and P17_1 (SDA)
+    i2c = I2C(freq=400000)
+    
+    # Pin parameters are optional but ignored on KIT_PSE84_AI
+    i2c = I2C(scl='P17_0', sda='P17_1', freq=100000)  # Prints warning, uses P17_0/P17_1
+
+Constructor arguments:
+
+    - ``id``: I2C bus number (currently only 0 is available). This parameter is ignored.
+    - ``freq``: I2C clock frequency in Hz. Supported: 100000 (100kHz) or 400000 (400kHz). 
+      Default is 400000.
+    - ``scl``: SCL pin (string 'P<port>_<pin>' or Pin object). **Ignored on KIT_PSE84_AI** 
+      - always uses P17_0. Prints warning if specified.
+    - ``sda``: SDA pin (string 'P<port>_<pin>' or Pin object). **Ignored on KIT_PSE84_AI** 
+      - always uses P17_1. Prints warning if specified.
+
+Standard I2C controller methods are supported:
+
+    - ``scan()``: Scan for I2C devices on the bus.
+    - ``readfrom(addr, nbytes)``: Read from a device.
+    - ``readfrom_into(addr, buf)``: Read into an existing buffer.
+    - ``writeto(addr, buf)``: Write data to a device.
+    - ``readfrom_mem(addr, memaddr, nbytes)``: Read from device memory.
+    - ``writeto_mem(addr, memaddr, buf)``: Write to device memory.
+
+Target mode (Slave)
+^^^^^^^^^^^^^^^^^^^
+
+The I2CTarget implementation on PSoC Edge has the following port-specific details:
+
+**Fixed pins (KIT_PSE84_AI):**
+    - SCL: P17_0
+    - SDA: P17_1
+    - Custom pin parameters are ignored with a warning message
+
+**Memory addressing:**
+    - ``mem_addrsize``: Only 0 is supported (no memory addressing)
+    - EEPROM-like addressing (8/16/24/32 bit) is not yet implemented
+
+**IRQ events** - All standard events are supported:
+    - ``IRQ_ADDR_MATCH_READ``, ``IRQ_ADDR_MATCH_WRITE``
+    - ``IRQ_READ_REQ``, ``IRQ_WRITE_REQ``
+    - ``IRQ_END_READ``, ``IRQ_END_WRITE``
+
