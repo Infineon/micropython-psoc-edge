@@ -123,6 +123,11 @@ MOD_SRC_C += \
 	\
 	modpsocedge.c
 
+ifeq ($(MICROPY_PY_EXT_FLASH),1)
+	CFLAGS += -DMICROPY_ENABLE_EXT_QSPI_FLASH=1
+	MOD_SRC_C += psoc_edge_qspi_flash.c 
+endif
+
 SRC_C = help.c \
 		main.c \
 		mphalport.c 
