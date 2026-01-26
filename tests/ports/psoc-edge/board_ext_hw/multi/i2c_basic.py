@@ -24,17 +24,32 @@ def instance0():
     mem = bytearray([0xAA, 0xBB, 0xCC, 0xDD, 0x00, 0x00, 0x00, 0x00])
     i2c_target = I2CTarget(addr=SLAVE_ADDR, mem=mem)
 
+    # Define an IRQ handler, for I2C events.
+    def irq_handler(i2c_target):
+        flags = i2c_target.irq().flags()
+        print("[PYTHON] IRQ callback, flags=", hex(flags))
+        if flags & I2CTarget.IRQ_END_READ:
+            print("  -> controller read target at addr", i2c_target.memaddr)
+        if flags & I2CTarget.IRQ_END_WRITE:
+            print("  -> controller wrote target at addr", i2c_target.memaddr)
+
+    i2c_target.irq(irq_handler)
+
     # Signal to master that slave is ready
     multitest.next()
 
-    # Wait for transactions
+    # Wait for transactions to complete and IRQs to fire
     time.sleep(10)
 
     # Verify data was written by master
-    if mem[0] == 0x01 and mem[1] == 0x02 and mem[2] == 0x03:
-        print("target: PASS")
-    else:
-        print("target: FAIL")
+    data_pass = mem[0] == 0x01 and mem[1] == 0x02 and mem[2] == 0x03
+    print(
+        "target: Data check:",
+        "PASS" if data_pass else "FAIL",
+        "- mem =",
+        [hex(b) for b in mem[:4]],
+    )
+    print("target:", "PASS" if data_pass else "FAIL")
 
     i2c_target.deinit()
 
@@ -64,7 +79,6 @@ def instance1():
     print("\n***** Test 2: Write *****\n")
     try:
         i2c.writeto(SLAVE_ADDR, b"\x01\x02\x03")
-        time.sleep_ms(100)
         write_pass = True
         print("Status: PASS")
     except Exception as e:
@@ -86,7 +100,7 @@ def instance1():
     print("\n***** Test 4: Timeout *****\n")
     try:
         # Create I2C with short timeout
-        i2c_timeout = I2C(freq=100000, timeout=10000)  # 10ms timeout (10000us)
+        i2c_timeout = I2C(freq=400000, timeout=10000)  # 10ms timeout (10000us)
         print("Created I2C with timeout=10000us (10ms)")
 
         # Try to read from non-existent device
