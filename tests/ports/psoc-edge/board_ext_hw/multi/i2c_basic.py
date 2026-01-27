@@ -25,6 +25,8 @@ def instance0():
     i2c_target = I2CTarget(addr=SLAVE_ADDR, mem=mem)
 
     # Define an IRQ handler, for I2C events.
+    write_done = [False]
+
     def irq_handler(i2c_target):
         flags = i2c_target.irq().flags()
         print("[PYTHON] IRQ callback, flags=", hex(flags))
@@ -32,16 +34,24 @@ def instance0():
             print("  -> controller read target at addr", i2c_target.memaddr)
         if flags & I2CTarget.IRQ_END_WRITE:
             print("  -> controller wrote target at addr", i2c_target.memaddr)
+            write_done[0] = True
 
     i2c_target.irq(irq_handler)
 
     # Signal to master that slave is ready
     multitest.next()
 
-    # Wait for transactions to complete and IRQs to fire
-    time.sleep(10)
+    # Wait for IRQ_END_WRITE to be triggered
+    timeout = 10  # seconds
+    start_time = time.time()
+    while not write_done[0] and (time.time() - start_time) < timeout:
+        time.sleep(1)  # poll every 100ms
 
-    # Verify data was written by master
+    if not write_done[0]:
+        print("target: Timeout waiting for IRQ_END_WRITE")
+    else:
+        print("target: IRQ_END_WRITE received, proceeding to deinit")
+
     data_pass = mem[0] == 0x01 and mem[1] == 0x02 and mem[2] == 0x03
     print(
         "target: Data check:",

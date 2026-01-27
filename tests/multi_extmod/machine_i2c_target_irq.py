@@ -35,6 +35,9 @@ elif sys.platform == "pyboard":
 elif sys.platform == "samd":
     i2c_args = ()  # pins SCL/SDA
     i2c_kwargs = {}
+elif sys.platform == "psoc-edge":
+    i2c_args = ()  # pins SCL/SDA
+    i2c_kwargs = {}
 elif "zephyr-rpi_pico" in sys.implementation._machine:
     i2c_args = ("i2c1",)  # on gpio7/gpio6
     i2c_kwargs = {}
