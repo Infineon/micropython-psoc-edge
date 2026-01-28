@@ -105,14 +105,13 @@ SHARED_SRC_C += $(addprefix shared/,\
 	\
 	runtime/gchelper_native.c \
 	runtime/interrupt_char.c \
+	runtime/mpirq.c \
 	runtime/pyexec.c \
 	runtime/stdout_helpers.c \
 	runtime/sys_stdio_mphal.c \
 	\
 	timeutils/timeutils.c \
 	)
-
-# TODO: Add this once gc is enabled, required in machine_pin_irq -> runtime/mpirq.c\
 
 
 DRIVERS_SRC_C += 
@@ -121,14 +120,14 @@ MOD_SRC_C += \
 	machine_pin.c \
 	machine_pin_irq.c \
 	machine_pdm_pcm.c\
-	\
+	machine_i2c.c\
 	modpsocedge.c
 
 SRC_C = help.c \
 		main.c \
 		mphalport.c 
 
-SRC_ASM +=
+SRC_ASM += 
 
 SRC_QSTR += $(SHARED_SRC_C) $(MOD_SRC_C) $(GEN_PINS_SRC)
 

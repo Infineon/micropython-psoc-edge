@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2022-2024 Infineon Technologies AG
+ * Copyright (c) 2022-2025 Infineon Technologies AG
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -102,11 +102,13 @@ soft_reset:
     goto soft_reset;
 }
 
+#if MICROPY_ENABLE_GC
 void gc_collect(void) {
     gc_collect_start();
     gc_helper_collect_regs_and_stack();
     gc_collect_end();
 }
+#endif
 
 // Handle uncaught exceptions (should never be reached in a correct C implementation).
 void nlr_jump_fail(void *val) {

@@ -11,12 +11,14 @@
     script: ports/psoc-edge/board_only_hw/single
     device: 
       - board: KIT_PSE84_AI
-
+            
 - name: pin
   test: 
     script: ports/psoc-edge/board_ext_hw/single/pin.py
     device: 
       - board: KIT_PSE84_AI
+        features:
+          - pin
 
 - name: pin_irq
   # TODO: Once the test-run.py stability is fixed, and 
@@ -25,3 +27,14 @@
     script: ports/psoc-edge/board_ext_hw/single/pin_irq.py
     device: 
       - board: KIT_PSE84_AI
+        features:
+          - pin
+
+- name: i2c
+  type: multi
+  test: 
+    script: ports/psoc-edge/board_ext_hw/multi/i2c_basic.py
+    device:
+      - board: KIT_PSE84_AI
+        features:
+          - i2c
