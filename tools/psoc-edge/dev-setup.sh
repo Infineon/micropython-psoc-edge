@@ -26,10 +26,22 @@ function set_gcc_path {
     echo ${tools_path}/mtb-gcc-arm-eabi/14.2.1
 }
 
+function set_llvm_path {
+    tools_path=$2
+    if [ -z "$tools_path" ]; then
+        tools_path=/opt/Tools
+    fi
+
+    echo ${tools_path}/LLVM-ET-Arm-19.1.5-Linux-x86_64
+}
+
+
 function export_path {
     mtb_tools_path=$(set_mtb_tools_path "$1")
     gcc_path=$(set_gcc_path "$1" "$2")
-    export PATH=${mtb_tools_path}/library-manager:${gcc_path}/gcc/bin:$PATH
+    llvm_path=$(set_llvm_path "$1" "$2")
+    export CY_COMPILER_LLVM_ARM_DIR=${llvm_path}
+    export PATH=${mtb_tools_path}/library-manager:${gcc_path}/gcc/bin:${llvm_path}/bin:$PATH
 }
 
 function toolchain_setup {
