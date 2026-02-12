@@ -60,6 +60,7 @@ typedef struct _machine_hw_i2c_obj_t {
     mp_hal_pin_obj_t sda;
     uint32_t freq;
     uint32_t timeout;
+    CySCB_Type *scb;
     cy_stc_scb_i2c_config_t cfg;   // PDL I2C configuration
     cy_stc_scb_i2c_context_t ctx;  // PDL I2C runtime context
 } machine_hw_i2c_obj_t;
@@ -73,7 +74,8 @@ static void machine_i2c_isr(void) {
     for (uint8_t i = 0; i < MAX_I2C; i++) {
         if (machine_hw_i2c_obj[i] != NULL) {
             // Call I2C master interrupt handler (more efficient than generic Cy_SCB_I2C_Interrupt)
-            Cy_SCB_I2C_MasterInterrupt(MICROPY_HW_I2C0_SCB, &machine_hw_i2c_obj[i]->ctx);
+            // TODO:  Review for each SCB!!!
+            Cy_SCB_I2C_MasterInterrupt(SCB5, &machine_hw_i2c_obj[i]->ctx);
         }
     }
 }
@@ -129,7 +131,9 @@ static void machine_hw_i2c_init(machine_hw_i2c_obj_t *self, uint32_t freq_hz) {
 
     mp_hal_periph_pins_af_config(i2c_pins_config, 2);
 
-    result = Cy_SCB_I2C_Init(MICROPY_HW_I2C0_SCB, &self->cfg, &self->ctx);
+    self->scb = (CySCB_Type *)i2c_pins_config[0].af->periph;
+
+    result = Cy_SCB_I2C_Init(self->scb, &self->cfg, &self->ctx);
     if (result != CY_RSLT_SUCCESS) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("I2C init failed: 0x%lx"), result);
     }
@@ -149,7 +153,7 @@ static void machine_hw_i2c_init(machine_hw_i2c_obj_t *self, uint32_t freq_hz) {
     uint32_t clk_scb_freq = Cy_SysClk_PeriphGetFrequency(CY_SYSCLK_DIV_8_BIT, 2U);
     mplogger_print("DEBUG: clk_scb_freq=%u Hz\n", clk_scb_freq);
 
-    uint32_t actual_rate = Cy_SCB_I2C_SetDataRate(MICROPY_HW_I2C0_SCB, freq_hz, clk_scb_freq);
+    uint32_t actual_rate = Cy_SCB_I2C_SetDataRate(self->scb, freq_hz, clk_scb_freq);
     mplogger_print("DEBUG: actual_rate=%u Hz (requested=%u Hz)\n", actual_rate, freq_hz);
 
     if ((actual_rate > freq_hz) || (actual_rate == 0U)) {
@@ -170,7 +174,7 @@ static void machine_hw_i2c_init(machine_hw_i2c_obj_t *self, uint32_t freq_hz) {
     }
     NVIC_EnableIRQ(MICROPY_HW_I2C_IRQn);
 
-    Cy_SCB_I2C_Enable(MICROPY_HW_I2C0_SCB);
+    Cy_SCB_I2C_Enable(self->scb);
 
     mplogger_print("I2C initialized: requested=%u Hz, actual=%u Hz, clk_scb=%u Hz\n",
         freq_hz, actual_rate, clk_scb_freq);
@@ -182,7 +186,7 @@ static void machine_hw_i2c_init(machine_hw_i2c_obj_t *self, uint32_t freq_hz) {
 static int machine_hw_i2c_deinit(mp_obj_base_t *self_in) {
     machine_hw_i2c_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
-    Cy_SCB_I2C_Disable(MICROPY_HW_I2C0_SCB, &self->ctx);
+    Cy_SCB_I2C_Disable(self->scb, &self->ctx);
     NVIC_DisableIRQ(MICROPY_HW_I2C_IRQn);
     Cy_SysClk_PeriphDisableDivider(CY_SYSCLK_DIV_8_BIT, 0U);
 
@@ -206,9 +210,9 @@ static int machine_hw_i2c_transfer(mp_obj_base_t *self_in, uint16_t addr, size_t
     transfer.xferPending = !(flags & MP_MACHINE_I2C_FLAG_STOP);
 
     if (flags & MP_MACHINE_I2C_FLAG_READ) {
-        result = Cy_SCB_I2C_MasterRead(MICROPY_HW_I2C0_SCB, &transfer, &self->ctx);
+        result = Cy_SCB_I2C_MasterRead(self->scb, &transfer, &self->ctx);
     } else {
-        result = Cy_SCB_I2C_MasterWrite(MICROPY_HW_I2C0_SCB, &transfer, &self->ctx);
+        result = Cy_SCB_I2C_MasterWrite(self->scb, &transfer, &self->ctx);
     }
 
     if (result != CY_RSLT_SUCCESS) {
@@ -221,7 +225,7 @@ static int machine_hw_i2c_transfer(mp_obj_base_t *self_in, uint16_t addr, size_t
     uint32_t start_time = mp_hal_ticks_us();
     uint32_t timeout_end = start_time + self->timeout;  // Both in microseconds
 
-    while (0UL != (CY_SCB_I2C_MASTER_BUSY & Cy_SCB_I2C_MasterGetStatus(MICROPY_HW_I2C0_SCB, &self->ctx))) {
+    while (0UL != (CY_SCB_I2C_MASTER_BUSY & Cy_SCB_I2C_MasterGetStatus(self->scb, &self->ctx))) {
         // Yield to allow other tasks/interrupts to run
         MICROPY_EVENT_POLL_HOOK
 
@@ -232,7 +236,7 @@ static int machine_hw_i2c_transfer(mp_obj_base_t *self_in, uint16_t addr, size_t
         }
     }
 
-    uint32_t master_status = Cy_SCB_I2C_MasterGetStatus(MICROPY_HW_I2C0_SCB, &self->ctx);
+    uint32_t master_status = Cy_SCB_I2C_MasterGetStatus(self->scb, &self->ctx);
 
     mplogger_print("I2C Transfer complete, status=0x%08lX\n", master_status);
 
@@ -276,6 +280,7 @@ mp_obj_t machine_hw_i2c_make_new(const mp_obj_type_t *type, size_t n_args, size_
 
     // Check if an I2C instance already exists for this ID
     // If so, deinitialize it first (allows reinitialization)
+    // TODO: Is this needed?
     int requested_id = args[ARG_id].u_int;
     if (requested_id == -1) {
         requested_id = 0;  // Default to ID 0
