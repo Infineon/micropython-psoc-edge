@@ -28,7 +28,11 @@
 #define MICROPY_INCLUDED_PSOC_EDGE_MODIPC_H
 
 #include "py/obj.h"
+#include <stdint.h>
 
 extern const mp_obj_module_t mp_module_ipc;
+
+/* External function to handle messages from CM55 */
+void ipc_handle_cm55_message(uint8_t cmd, uint32_t value);
 
 #endif // MICROPY_INCLUDED_PSOC_EDGE_MODIPC_H
