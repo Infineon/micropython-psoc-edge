@@ -33,6 +33,7 @@
 // MTB includes
 #include "cybsp.h"
 #include "retarget_io_init.h"
+#include "ipc_communication.h"
 
 // micropython includes
 #include "py/builtin.h"
@@ -60,6 +61,29 @@ extern uint8_t __HeapBase, __HeapLimit;
 
 extern void time_init(void);
 extern void machine_pin_irq_deinit_all(void);
+extern void ipc_handle_cm55_message(uint8_t cmd, uint32_t value);
+
+/*******************************************************************************
+* Function Name: cm33_msg_callback
+********************************************************************************
+* Summary:
+*  IPC callback function to handle messages from CM55
+*
+* Parameters:
+*  msgData: Pointer to message data from CM55
+*
+* Return:
+*  void
+*
+*******************************************************************************/
+void cm33_msg_callback(uint32_t *msgData) {
+    if (msgData != NULL) {
+        ipc_msg_t *ipc_recv_msg = (ipc_msg_t *)msgData;
+
+        /* Forward to modipc handler for processing */
+        ipc_handle_cm55_message(ipc_recv_msg->cmd, ipc_recv_msg->value);
+    }
+}
 
 boot_mode_t check_boot_mode(void) {
     boot_mode_t boot_mode;
@@ -110,6 +134,20 @@ int main(void) {
 
     /* Initialize retarget-io middleware */
     init_retarget_io();
+
+    /* Setup IPC communication with CM55 - after retarget_io and CM55 boot */
+    cm33_ipc_communication_setup();
+
+    /* Register callback to receive messages from CM55 */
+    cy_en_ipc_pipe_status_t ipc_status = Cy_IPC_Pipe_RegisterCallback(
+        CM33_IPC_PIPE_EP_ADDR,
+        &cm33_msg_callback,
+        (uint32_t)CM33_IPC_PIPE_CLIENT_ID
+        );
+
+    if (ipc_status == CY_IPC_PIPE_SUCCESS) {
+        mplogger_print("[CM33] IPC initialized and callback registered\r\n");
+    }
 
     // Initialise the MicroPython runtime.
     #if MICROPY_ENABLE_GC
