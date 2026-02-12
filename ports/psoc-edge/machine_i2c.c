@@ -56,8 +56,8 @@
 typedef struct _machine_hw_i2c_obj_t {
     mp_obj_base_t base;
     int id; // This parameter is unused and added for compliance with reference API.
-    uint32_t scl_pin;
-    uint32_t sda_pin;
+    mp_hal_pin_obj_t scl;
+    mp_hal_pin_obj_t sda;
     uint32_t freq;
     uint32_t timeout;
     cy_stc_scb_i2c_config_t cfg;   // PDL I2C configuration
@@ -122,10 +122,12 @@ static void machine_hw_i2c_init(machine_hw_i2c_obj_t *self, uint32_t freq_hz) {
         .highPhaseDutyCycle = 8U,
     };
 
-    Cy_GPIO_SetHSIOM(MICROPY_HW_I2C0_SCL_PORT, self->scl_pin, MICROPY_HW_I2C0_SCL_HSIOM);
-    Cy_GPIO_SetHSIOM(MICROPY_HW_I2C0_SDA_PORT, self->sda_pin, MICROPY_HW_I2C0_SDA_HSIOM);
-    Cy_GPIO_SetDrivemode(MICROPY_HW_I2C0_SCL_PORT, self->scl_pin, CY_GPIO_DM_OD_DRIVESLOW);
-    Cy_GPIO_SetDrivemode(MICROPY_HW_I2C0_SDA_PORT, self->sda_pin, CY_GPIO_DM_OD_DRIVESLOW);
+    const mp_hal_pin_af_config_t i2c_pins_config[] = {
+        MP_HAL_PIN_AF_CONF(self->scl, CY_GPIO_DM_OD_DRIVESLOW, 1, MACHINE_PIN_AF_SIGNAL_I2C_SCL),
+        MP_HAL_PIN_AF_CONF(self->sda, CY_GPIO_DM_OD_DRIVESLOW, 1, MACHINE_PIN_AF_SIGNAL_I2C_SDA),
+    };
+
+    mp_hal_periph_pins_af_config(i2c_pins_config, 2);
 
     result = Cy_SCB_I2C_Init(MICROPY_HW_I2C0_SCB, &self->cfg, &self->ctx);
     if (result != CY_RSLT_SUCCESS) {
@@ -249,9 +251,9 @@ static void machine_hw_i2c_print(const mp_print_t *print, mp_obj_t self_in, mp_p
     machine_hw_i2c_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
     // Print I2C configuration
-    mp_printf(print, "I2C(scl=%u, sda=%u, freq=%u, timeout=%uus)",
-        self->scl_pin,
-        self->sda_pin,
+    mp_printf(print, "I2C(scl='%q', sda='%q', freq=%u, timeout=%u)",
+        self->scl->name,
+        self->sda->name,
         self->freq,
         self->timeout);
 }
@@ -259,13 +261,13 @@ static void machine_hw_i2c_print(const mp_print_t *print, mp_obj_t self_in, mp_p
 mp_obj_t machine_hw_i2c_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
     mp_arg_check_num(n_args, n_kw, 0, 5, true);
 
-    enum { ARG_id, ARG_freq, ARG_scl, ARG_sda, ARG_timeout };
+    enum { ARG_id, ARG_scl, ARG_sda, ARG_freq, ARG_timeout };
 
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_id,   MP_ARG_INT, {.u_int = -1}},
+        { MP_QSTR_scl, MP_ARG_KW_ONLY | MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_sda, MP_ARG_KW_ONLY | MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
         { MP_QSTR_freq, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = DEFAULT_I2C_FREQ} },
-        { MP_QSTR_scl, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
-        { MP_QSTR_sda, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
         { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 50000} }  // Default 50000us (50ms)
     };
 
@@ -295,29 +297,9 @@ mp_obj_t machine_hw_i2c_make_new(const mp_obj_type_t *type, size_t n_args, size_
         self->id = args[ARG_id].u_int;
         mplogger_print("machine.I2C: ID parameter is ignored in this port.\n");
     }
-    // Parse and validate pin arguments, use defaults from mpconfigboard.h if not provided
-    // Note: KIT_PSE84_AI only has one hardware I2C with fixed pins P17_0 (SCL) and P17_1 (SDA)
-    bool warn_pins = false;
-    if (args[ARG_scl].u_obj != MP_ROM_NONE || args[ARG_sda].u_obj != MP_ROM_NONE) {
-        // Allow scl='P17_0', sda='P17_1' without warning
-        bool is_valid_scl = (args[ARG_scl].u_obj == MP_ROM_NONE) ||
-            (mp_obj_is_str(args[ARG_scl].u_obj) &&
-                strcmp(mp_obj_str_get_str(args[ARG_scl].u_obj), "P17_0") == 0);
-        bool is_valid_sda = (args[ARG_sda].u_obj == MP_ROM_NONE) ||
-            (mp_obj_is_str(args[ARG_sda].u_obj) &&
-                strcmp(mp_obj_str_get_str(args[ARG_sda].u_obj), "P17_1") == 0);
 
-        if (!is_valid_scl || !is_valid_sda) {
-            warn_pins = true;
-        }
-    }
-
-    if (warn_pins) {
-        mp_printf(&mp_plat_print, "I2C: KIT_PSE84_AI only supports fixed pins P17_0 (SCL) and P17_1 (SDA). Custom pins ignored.\n");
-    }
-
-    self->scl_pin = MICROPY_HW_I2C0_SCL;
-    self->sda_pin = MICROPY_HW_I2C0_SDA;
+    self->scl = mp_hal_get_pin_obj(args[ARG_scl].u_obj);
+    self->sda = mp_hal_get_pin_obj(args[ARG_sda].u_obj);
 
     self->timeout = args[ARG_timeout].u_int;
     if (self->timeout == 0) {
