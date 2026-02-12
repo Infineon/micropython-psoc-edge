@@ -26,6 +26,7 @@
 
 // std includes
 #include <stdio.h>
+#include <string.h>
 
 // micropython includes
 #include "py/runtime.h"
@@ -38,6 +39,7 @@
 
 // port-specific includes
 #include "modipc.h"
+#include "mplogger.h"
 
 /*******************************************************************************
 * Macros
@@ -53,6 +55,9 @@ static bool cm55_ipc_initialized = false;
 CY_SECTION_SHAREDMEM static ipc_msg_t cm33_msg_data;
 static volatile uint32_t cm55_last_response = 0;
 static volatile bool cm55_response_received = false;
+static volatile bool cm55_command_detected = false;
+static char cm55_last_command[256] = {0};
+static volatile bool cm55_wakeword_detected = false;
 
 /*******************************************************************************
 * Function Name: ipc_enable
@@ -66,16 +71,16 @@ static volatile bool cm55_response_received = false;
 *******************************************************************************/
 static mp_obj_t ipc_enable(void) {
     if (cm55_enabled && cm55_ipc_initialized) {
-        mp_printf(&mp_plat_print, "CM55 already enabled and IPC initialized\n");
+        mplogger_print("CM55 already enabled and IPC initialized\n");
         return mp_const_none;
     }
 
-    mp_printf(&mp_plat_print, "Initializing IPC with CM55 (CM55 already booted by main.c)...\n");
+    mplogger_print("Initializing IPC with CM55 (CM55 already booted by main.c)...\n");
 
     // ToDo: Enable IPC from here instead from main.c
     /* CM55 is already booted by main.c, IPC and callback are already set up */
     if (!cm55_ipc_initialized) {
-        mp_printf(&mp_plat_print, "IPC already set up by main.c\n");
+        mplogger_print("IPC already set up by main.c\n");
         cm55_ipc_initialized = true;
     }
 
@@ -84,6 +89,38 @@ static mp_obj_t ipc_enable(void) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(ipc_enable_obj, ipc_enable);
+
+/*******************************************************************************
+* Function Name: ipc_handle_cm55_message
+********************************************************************************
+* Summary:
+*  External function to handle messages received from CM55
+*  This is called from CM33 IPC callback
+*
+* Parameters:
+*  cmd: Command code received from CM55
+*  value: Value/data associated with the command
+*
+* Return:
+*  void
+*
+*******************************************************************************/
+void ipc_handle_cm55_message(uint8_t cmd, uint32_t value) {
+    if (cmd == IPC_CMD_VA_COMMAND_DETECTED) {
+        /* Command detected - extract command string from value */
+        /* The value contains pointer to command string */
+        const char *cmd_str = (const char *)value;
+        if (cmd_str != NULL && cmd_str[0] != '\0') {
+            strncpy(cm55_last_command, cmd_str, sizeof(cm55_last_command) - 1);
+            cm55_last_command[sizeof(cm55_last_command) - 1] = '\0';
+            cm55_command_detected = true;
+            mplogger_print("\r\n[CM33] Command detected: %s\r\n", cm55_last_command);
+        }
+    } else if (cmd == IPC_CMD_VA_WAKEWORD_DETECTED) {
+        cm55_wakeword_detected = true;
+        mplogger_print("\r\n[CM33] Wake-word detected!\r\n");
+    }
+}
 
 
 /*******************************************************************************
@@ -102,112 +139,171 @@ static mp_obj_t ipc_status(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(ipc_status_obj, ipc_status);
 
 /*******************************************************************************
-* Function Name: ipc_sendcmd_led_on
+* Function Name: ipc_start_cm55_va_model
 ********************************************************************************
 * Summary:
-*  Sends command to CM55 to set LED constantly ON (runs on CM55)
+*  Sends command to CM55 to start voice assistant model
 *
 * Return:
 *  mp_obj_t: None
 *
 *******************************************************************************/
-static mp_obj_t ipc_sendcmd_led_on(void) {
+static mp_obj_t ipc_start_cm55_va_model(void) {
     /* Auto-initialize if not enabled */
     if (!cm55_enabled) {
         ipc_enable();
     }
 
-    mp_printf(&mp_plat_print, "[CM33] Sending LED_SET_ON command to CM55...\n");
+    mplogger_print("[CM33] Sending VA_START command to CM55...\n");
 
-    cm33_msg_data.client_id = CM55_IPC_PIPE_CLIENT_ID;  // Destination client ID
+    cm33_msg_data.client_id = CM55_IPC_PIPE_CLIENT_ID;
     cm33_msg_data.intr_mask = CY_IPC_CYPIPE_INTR_MASK;
-    cm33_msg_data.cmd = IPC_CMD_LED_SET_ON;
+    cm33_msg_data.cmd = IPC_CMD_VA_START;
     cm33_msg_data.value = 0;
 
-    mp_printf(&mp_plat_print, "[CM33] IPC message prepared: client_id=%d, cmd=0x93\n",
-        cm33_msg_data.client_id, cm33_msg_data.cmd);
-
-    /* Use direct IPC channel write instead of IPC Pipe to avoid blocking */
-    mp_printf(&mp_plat_print, "[CM33] Using direct IPC channel write (non-blocking)...\n");
-
-    /* Check if IPC channel 15 (CM55's channel) is unlocked */
+    /* Check if IPC channel is unlocked */
     bool is_locked = Cy_IPC_Drv_IsLockAcquired(Cy_IPC_Drv_GetIpcBaseAddress(CY_IPC_CHAN_CYPIPE_EP2));
-    mp_printf(&mp_plat_print, "[CM33] IPC channel %d lock status: %s\n",
-        CY_IPC_CHAN_CYPIPE_EP2, is_locked ? "LOCKED" : "UNLOCKED");
-
     if (is_locked) {
-        mp_printf(&mp_plat_print, "[CM33] Channel is locked, cannot send\n");
+        mplogger_print("[CM33] IPC channel locked, cannot send\n");
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("IPC channel locked"));
     }
 
-    /* Write directly to IPC channel and trigger CM55 interrupt */
+    /* Send message to CM55 */
     cy_en_ipcdrv_status_t drv_status = Cy_IPC_Drv_SendMsgPtr(
         Cy_IPC_Drv_GetIpcBaseAddress(CY_IPC_CHAN_CYPIPE_EP2),
-        CY_IPC_CYPIPE_INTR_MASK_EP2,  // Notify mask - trigger interrupt on CM55
+        CY_IPC_CYPIPE_INTR_MASK_EP2,
         (void *)&cm33_msg_data
         );
 
-    mp_printf(&mp_plat_print, "[CM33] Direct IPC send status: %d (0=success)\n", drv_status);
-
     if (drv_status != CY_IPC_DRV_SUCCESS) {
-        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("IPC direct send failed"));
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("IPC send failed"));
     }
 
-    mp_printf(&mp_plat_print, "[CM33] Message sent and CM55 interrupt triggered\n");
-
-    mp_printf(&mp_plat_print, "[CM33] LED will be set constantly ON on CM55\n");
+    mplogger_print("[CM33] Voice Assistant START command sent\n");
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(ipc_sendcmd_led_on_obj, ipc_sendcmd_led_on);
+static MP_DEFINE_CONST_FUN_OBJ_0(ipc_start_cm55_va_model_obj, ipc_start_cm55_va_model);
 
 /*******************************************************************************
-* Function Name: ipc_sendcmd_led_off
+* Function Name: ipc_stop_cm55_va_model
 ********************************************************************************
 * Summary:
-*  Sends command to CM55 to set LED constantly OFF (runs on CM55)
+*  Sends command to CM55 to stop voice assistant model
 *
 * Return:
 *  mp_obj_t: None
 *
 *******************************************************************************/
-static mp_obj_t ipc_sendcmd_led_off(void) {
-    mp_printf(&mp_plat_print, "[CM33] Sending LED_SET_OFF command to CM55...\n");
+static mp_obj_t ipc_stop_cm55_va_model(void) {
+    mplogger_print("[CM33] Sending VA_STOP command to CM55...\n");
 
-    // Prepare IPC message with LED_SET_OFF command
-    cm33_msg_data.client_id = CM55_IPC_PIPE_CLIENT_ID;  // Destination is CM55
-    cm33_msg_data.cmd = IPC_CMD_LED_SET_OFF;
+    cm33_msg_data.client_id = CM55_IPC_PIPE_CLIENT_ID;
+    cm33_msg_data.cmd = IPC_CMD_VA_STOP;
     cm33_msg_data.intr_mask = 0;
 
-    mp_printf(&mp_plat_print, "[CM33] IPC message prepared: client_id=%d, cmd=0x%02X\n",
-        cm33_msg_data.client_id, cm33_msg_data.cmd);
-
-    mp_printf(&mp_plat_print, "[CM33] Using direct IPC channel write (non-blocking)...\n");
-
-    // Check if channel is locked
+    /* Check if channel is locked */
     bool is_locked = Cy_IPC_Drv_IsLockAcquired(Cy_IPC_Drv_GetIpcBaseAddress(CY_IPC_CHAN_CYPIPE_EP2));
-    mp_printf(&mp_plat_print, "[CM33] IPC channel 15 lock status: %s\n",
-        is_locked ? "LOCKED" : "UNLOCKED");
+    if (is_locked) {
+        mplogger_print("[CM33] IPC channel locked\n");
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("IPC channel locked"));
+    }
 
-    // Use low-level IPC driver API (non-blocking)
+    /* Send message */
     cy_en_ipcdrv_status_t drv_status = Cy_IPC_Drv_SendMsgPtr(
         Cy_IPC_Drv_GetIpcBaseAddress(CY_IPC_CHAN_CYPIPE_EP2),
-        CY_IPC_CYPIPE_INTR_MASK_EP2,  // Trigger CM55 interrupt
+        CY_IPC_CYPIPE_INTR_MASK_EP2,
         &cm33_msg_data
         );
 
-    mp_printf(&mp_plat_print, "[CM33] Direct IPC send status: %d (0=success)\n", drv_status);
-
     if (drv_status != CY_IPC_DRV_SUCCESS) {
-        mp_printf(&mp_plat_print, "[CM33] Direct send failed with status: %d\n", drv_status);
-        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("IPC direct send failed"));
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("IPC send failed"));
     }
 
-    mp_printf(&mp_plat_print, "[CM33] Message sent and CM55 interrupt triggered\n");
-
-    mp_printf(&mp_plat_print, "[CM33] LED will be set constantly OFF on CM55\n");
+    mplogger_print("[CM33] Voice Assistant STOP command sent\n");
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(ipc_sendcmd_led_off_obj, ipc_sendcmd_led_off);
+static MP_DEFINE_CONST_FUN_OBJ_0(ipc_stop_cm55_va_model_obj, ipc_stop_cm55_va_model);
+
+/*******************************************************************************
+* Function Name: ipc_get_last_command
+********************************************************************************
+* Summary:
+*  Returns the last command detected by CM55 voice assistant
+*
+* Return:
+*  mp_obj_t: String containing the last command, or None if no command
+*
+*******************************************************************************/
+static mp_obj_t ipc_get_last_command(void) {
+    if (cm55_command_detected && cm55_last_command[0] != '\0') {
+        return mp_obj_new_str(cm55_last_command, strlen(cm55_last_command));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ipc_get_last_command_obj, ipc_get_last_command);
+
+/*******************************************************************************
+* Function Name: ipc_has_command
+********************************************************************************
+* Summary:
+*  Returns whether a new command has been detected
+*
+* Return:
+*  mp_obj_t: True if command detected, False otherwise
+*
+*******************************************************************************/
+static mp_obj_t ipc_has_command(void) {
+    return mp_obj_new_bool(cm55_command_detected);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ipc_has_command_obj, ipc_has_command);
+
+/*******************************************************************************
+* Function Name: ipc_clear_command
+********************************************************************************
+* Summary:
+*  Clears the command detected flag
+*
+* Return:
+*  mp_obj_t: None
+*
+*******************************************************************************/
+static mp_obj_t ipc_clear_command(void) {
+    cm55_command_detected = false;
+    cm55_last_command[0] = '\0';
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ipc_clear_command_obj, ipc_clear_command);
+
+/*******************************************************************************
+* Function Name: ipc_has_wakeword
+********************************************************************************
+* Summary:
+*  Returns whether wake word has been detected
+*
+* Return:
+*  mp_obj_t: True if wake word detected, False otherwise
+*
+*******************************************************************************/
+static mp_obj_t ipc_has_wakeword(void) {
+    return mp_obj_new_bool(cm55_wakeword_detected);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ipc_has_wakeword_obj, ipc_has_wakeword);
+
+/*******************************************************************************
+* Function Name: ipc_clear_wakeword
+********************************************************************************
+* Summary:
+*  Clears the wake word detected flag
+*
+* Return:
+*  mp_obj_t: None
+*
+*******************************************************************************/
+static mp_obj_t ipc_clear_wakeword(void) {
+    cm55_wakeword_detected = false;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(ipc_clear_wakeword_obj, ipc_clear_wakeword);
 
 /*******************************************************************************
  * Module globals
@@ -218,8 +314,13 @@ static const mp_rom_map_elem_t ipc_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_ipc) },
     { MP_ROM_QSTR(MP_QSTR_enable), MP_ROM_PTR(&ipc_enable_obj) },
     { MP_ROM_QSTR(MP_QSTR_status), MP_ROM_PTR(&ipc_status_obj) },
-    { MP_ROM_QSTR(MP_QSTR_sendcmd_led_on), MP_ROM_PTR(&ipc_sendcmd_led_on_obj) },
-    { MP_ROM_QSTR(MP_QSTR_sendcmd_led_off), MP_ROM_PTR(&ipc_sendcmd_led_off_obj) },
+    { MP_ROM_QSTR(MP_QSTR_start_cm55_va_model), MP_ROM_PTR(&ipc_start_cm55_va_model_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stop_cm55_va_model), MP_ROM_PTR(&ipc_stop_cm55_va_model_obj) },
+    { MP_ROM_QSTR(MP_QSTR_get_last_command), MP_ROM_PTR(&ipc_get_last_command_obj) },
+    { MP_ROM_QSTR(MP_QSTR_has_command), MP_ROM_PTR(&ipc_has_command_obj) },
+    { MP_ROM_QSTR(MP_QSTR_clear_command), MP_ROM_PTR(&ipc_clear_command_obj) },
+    { MP_ROM_QSTR(MP_QSTR_has_wakeword), MP_ROM_PTR(&ipc_has_wakeword_obj) },
+    { MP_ROM_QSTR(MP_QSTR_clear_wakeword), MP_ROM_PTR(&ipc_clear_wakeword_obj) },
 };
 static MP_DEFINE_CONST_DICT(ipc_module_globals, ipc_module_globals_table);
 
