@@ -42,6 +42,8 @@ INC += -I.
 INC += -I$(TOP)
 INC += -I$(BUILD)
 INC += -I$(BOARD_DIR)
+#ToDo: Check if this is needed
+INC += -I$(MTB_LIBS_DIR)/shared/include
 
 # TODO: Review this flags. Are they all needed?
 CFLAGS_CORTEX_M33 = -mthumb -mcpu=cortex-m33 -msoft-float -fsingle-precision-constant -Wdouble-promotion -Wfloat-conversion -Wno-error=float-conversion
@@ -123,7 +125,8 @@ MOD_SRC_C += \
 	machine_pin_irq.c \
 	machine_pdm_pcm.c\
 	machine_i2c.c\
-	modpsocedge.c
+	modpsocedge.c \
+	modipc.c
 
 ifeq ($(MICROPY_PY_EXT_FLASH),1)
 	CFLAGS += -DMICROPY_ENABLE_EXT_QSPI_FLASH=1
@@ -132,7 +135,7 @@ endif
 
 SRC_C = help.c \
 		main.c \
-		mphalport.c 
+		mphalport.c
 
 SRC_ASM += 
 
@@ -178,11 +181,11 @@ $(BUILD)/$(MPY_APP_NAME).hex: $(BUILD)/$(MPY_APP_NAME).elf
 
 mpy_build: $(BUILD)/$(MPY_APP_NAME).hex
 
-all: mtb_init mpy_build mtb_build_s 
+all: mtb_init mpy_build mtb_build_m55 mtb_build_s
 
 rebuild: clean all
 
-clean: mtb_clean
+clean: mtb_clean mtb_clean_m55
 
 qdeploy: mtb_program
 deploy: all mtb_program
@@ -236,6 +239,9 @@ port_help:
 help: port_help mtb_bsp_help mtb_build_help
 .DEFAULT_GOAL := all
 
-.PHONY: all clean rebuild deploy qdeploy deploy_multi qdeploy_multi help
+.PHONY: all clean rebuild deploy qdeploy deploy_multi qdeploy_multi help deploy_dual
 
 include $(TOP)/py/mkrules.mk
+
+# ToDo: Dual-core deployment target - flashes both CM33 (MicroPython) and CM55 (C app) currently but see if this can be changed to flash specific core
+deploy_dual: all mtb_program
