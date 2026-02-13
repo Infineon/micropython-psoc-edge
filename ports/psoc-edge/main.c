@@ -132,6 +132,9 @@ int main(void) {
     #define CM55_BOOT_WAIT_TIME_USEC    (100000UL)
     Cy_SysEnableCM55(MXCM55, CM55_APP_BOOT_ADDR, CM55_BOOT_WAIT_TIME_USEC);
 
+    /* Additional delay to ensure CM55 completes initialization before CM33 starts UART/REPL */
+    Cy_SysLib_Delay(200);  // 200ms delay
+
     /* Initialize retarget-io middleware */
     init_retarget_io();
 
