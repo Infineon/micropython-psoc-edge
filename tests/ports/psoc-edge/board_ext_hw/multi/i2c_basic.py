@@ -22,7 +22,7 @@ def instance0():
 
     # Create target with memory buffer
     mem = bytearray([0xAA, 0xBB, 0xCC, 0xDD, 0x00, 0x00, 0x00, 0x00])
-    i2c_target = I2CTarget(addr=SLAVE_ADDR, mem=mem)
+    i2c_target = I2CTarget(addr=SLAVE_ADDR, mem=mem, scl="P17_0", sda="P17_1")
 
     # Signal to master that slave is ready
     multitest.next()
