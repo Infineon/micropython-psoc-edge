@@ -157,21 +157,16 @@ Hardware I2C bus
 
 See :ref:`machine.I2C <machine.I2C>` and :ref:`machine.I2CTarget <machine.I2CTarget>` for the complete I2C API reference.
 
-Hardware I2C is available on the PSOC™ Edge E84 using the SCB (Serial Communication Block) 
+Hardware I2C is available on the PSOC™ Edge E84 using the SCB (Serial Communication Block)
 peripheral. The port supports both controller (master) and target (slave) modes.
 
 .. note::
 
     External pull-up resistors (typically 4.7kΩ) are required on both SCL and SDA lines.
-    Only one I2C instance (controller or target) can be active at a time, as both modes 
-    share the same SCB peripheral and pins.
+    Only one I2C instance (controller or target) can be active at a time, as both modes
+    share the same SCB peripheral.
 
-.. warning::
-
-    The KIT_PSE84_AI board has only one hardware I2C peripheral with fixed pins:
-    P17_0 (SCL) and P17_1 (SDA). These pins cannot be changed. If you specify 
-    custom pins in the constructor, they will be ignored and a warning message 
-    will be printed.
+    The pins you specify must support I2C functionality (For now, only P17_0 and P17_1 are supported).
 
 Controller mode (Master)
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -180,39 +175,37 @@ Use the ``I2C`` class for controller (master) operations::
 
     from machine import I2C
 
-    # Create I2C - uses fixed pins P17_0 (SCL) and P17_1 (SDA)
-    i2c = I2C(freq=400000)
+    # Create I2C - scl and sda pins are required
+    i2c = I2C(scl='P17_0', sda='P17_1', freq=400000)
     
     # With custom timeout (default is 50000us = 50ms)
-    i2c = I2C(freq=100000, timeout=100000)  # 100ms timeout
+    i2c = I2C(scl='P17_0', sda='P17_1', freq=100000, timeout=100000)  # 100ms timeout
     
-    # Pin parameters are optional but ignored on KIT_PSE84_AI
-    i2c = I2C(scl='P17_0', sda='P17_1', freq=100000)  # You can only use P17_0/P17_1
+    # You can use any pins that support I2C alternate function
+    # For KIT_PSE84_AI, the exposed I2C pins are P17_0 (SCL) and P17_1 (SDA)
 
 Constructor arguments:
 
     - ``id``: I2C bus number (currently only 0 is available).
       **This parameter is ignored**.
+    - ``scl``: SCL pin (**required**). String 'P<port>_<pin>' or Pin object.
+      Must support I2C SCL alternate function.
+    - ``sda``: SDA pin (**required**). String 'P<port>_<pin>' or Pin object.
+      Must support I2C SDA alternate function.
     - ``freq``: I2C clock frequency in Hz. Supported: 100000 (100kHz) or
       400000 (400kHz). Default is 400000.
     - ``timeout``: Transfer timeout in microseconds. Must be > 0.
       Default is 50000 (50ms).
-    - ``scl``: SCL pin (string 'P<port>_<pin>' or Pin object).
-      **Ignored on KIT_PSE84_AI** - always uses P17_0. Prints warning if
-      specified.
-    - ``sda``: SDA pin (string 'P<port>_<pin>' or Pin object).
-      **Ignored on KIT_PSE84_AI** - always uses P17_1. Prints warning if
-      specified.
 
 Target mode (Slave)
 ^^^^^^^^^^^^^^^^^^^
 
 The I2CTarget implementation on PSoC Edge has the following port-specific details:
 
-**Fixed pins (KIT_PSE84_AI):**
-    - SCL: P17_0
-    - SDA: P17_1
-    - Custom pin parameters are ignored with a warning message
+**Pin configuration:**
+    - ``scl`` and ``sda`` pins are **required** parameters
+    - Pins must support I2C alternate function
+    - For KIT_PSE84_AI, P17_0 (SCL) P17_1 (SDA) are the only supported pins for I2C target mode.
 
 **Memory addressing:**
     - ``mem_addrsize``: Only 0 is supported (no memory addressing)
