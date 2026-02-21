@@ -306,6 +306,7 @@ MOD_SRC_C += \
 	machine_pin_af.c \
 	machine_pin_irq.c \
 	machine_pdm_pcm.c\
+	machine_pdm_pcm_tdd.c \
 	machine_i2c.c\
 	machine_rtc.c \
 	modpsocedge.c \
