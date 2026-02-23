@@ -352,10 +352,6 @@ static mp_obj_t mp_machine_i2c_target_make_new(const mp_obj_type_t *type, size_t
     machine_i2c_target_data_t *data = &machine_i2c_target_data[i2c_id];
     machine_i2c_target_data_init(data, args[ARG_mem].u_obj, args[ARG_mem_addrsize].u_int);
 
-    // Parse pin arguments - scl and sda are now required
-    if (args[ARG_scl].u_obj == mp_const_none || args[ARG_sda].u_obj == mp_const_none) {
-        mp_raise_ValueError(MP_ERROR_TEXT("scl and sda pins are required"));
-    }
     self->scl = mp_hal_get_pin_obj(args[ARG_scl].u_obj);
     self->sda = mp_hal_get_pin_obj(args[ARG_sda].u_obj);
 
