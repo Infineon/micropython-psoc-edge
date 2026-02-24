@@ -247,10 +247,16 @@ void app_pdm_pcm_activate(void) {
     Cy_PDM_PCM_Activate_Channel(PDM0, RIGHT_CH_INDEX);
 }
 
+static bool audio_file_saved = false;
 void save_audio_to_file() {
-    while (!pdm_pcm_flag) {
-        // Wait until the PDM PCM data is ready
+    // while (!pdm_pcm_flag) {
+    //     // Wait until the PDM PCM data is ready
+    // }
+
+    while (ringbuf_available_space(&ring_buffer) > 8) {
+
     }
+    mp_hal_pin_write(&pin_P10_7_obj, 1);
 
     // for(uint32_t i=0; i < rxbuf_len/2; i++)
     // {
@@ -295,6 +301,7 @@ void save_audio_to_file() {
     // Close file
     mp_stream_close(file);
 
+    audio_file_saved = true;
     // return mp_const_none;
 }
 
@@ -434,53 +441,11 @@ int8_t get_frame_mapping_index(int8_t bits, format_t format) {
     return -1;
 }
 
-#define FIFO_BUFF_SIZE_TIMES 4
-
-
-// static void swap_sample_fifo_buffers() {
-//     if (fifo_frames_counter < FIFO_BUFF_SIZE_TIMES) {
-//         return;
-//     }
-//     uint32_t *temp = active_half_rx_fifo_buf_ptr;
-//     active_half_rx_fifo_buf_ptr = processing_half_rx_fifo_buf_ptr;
-//     processing_half_rx_fifo_buf_ptr = temp;
-//     fifo_frames_counter = 0;
-// }
-
-// static void pdm_read_fifo_samples(void) {
-//     for (uint32_t index = 0; index < RX_FIFO_TRIG_LEVEL; index++) {
-//         int32_t data = Cy_PDM_PCM_Channel_ReadFifo(PDM0, LEFT_CH_INDEX);
-//         active_half_rx_fifo_buf_ptr[RX_FIFO_TRIG_LEVEL * fifo_frames_counter + index] = data;
-//         index++; //Even if there is not stereo channel, the index is still incremented.
-//                  //In that case, the second channel will be empty in the buffer.
-//         if (STEREO == STEREO) {
-//             data = Cy_PDM_PCM_Channel_ReadFifo(PDM0, RIGHT_CH_INDEX);
-//             active_half_rx_fifo_buf_ptr[RX_FIFO_TRIG_LEVEL * fifo_frames_counter + index] = data;
-//         }
-//     }
-//     fifo_frames_counter++;
-// }
-
-
-// void read_from_channel(uint8_t channel) {
-//     int32_t data = (int32_t)Cy_PDM_PCM_Channel_ReadFifo(PDM0, channel);
-//     ringbuf_push(&ring_buffer, (uint8_t)(data & 0xFF));
-//     ringbuf_push(&ring_buffer, (uint8_t)(data >> 8));
-// }
-
-// #define HALF_RX_FIFO_SIZE (HW_FIFO_SIZE / 2)
-// void half_fifo_buffer_read(){
-//     static uint8_t half_fifo_count = 0;
-//     uint16_t half_sample_fifo_buf_index =  HALF_RX_FIFO_SIZE * half_fifo_count;
-
-//     half_fifo_count++;
-// }
 
 /**
  * Number of FIFO frames that will be stored
  * in each half of the ping-pong buffer.
  */
-// #define NUM_OF_RX_HW_FIFO_FRAMES_IN_HALF_RX_BUFFER   (SIZEOF_HALF_PDM_PCM_RX_BUFFER / (2*SIZEOF_PDM_PCM_RX_HW_FIFO_FRAME))
 #define NUM_OF_RX_HW_FIFO_FRAMES_IN_RX_BUFFER         16
 #define NUM_OF_RX_HW_FIFO_FRAMES_IN_HALF_RX_BUFFER    (NUM_OF_RX_HW_FIFO_FRAMES_IN_RX_BUFFER / 2)
 
@@ -553,16 +518,12 @@ static void _pdm_pcm_read_half_rx_fifo(uint32_t *half_rx_fifo_buf_ptr) {
          * The mono/left channel uses the even indexes.
          */
         half_rx_fifo_buf_ptr[index * 2] = data;
-        // ringbuf_push(&ring_buffer, (uint8_t)(data & 0xFF));
-        // ringbuf_push(&ring_buffer, (uint8_t)(data >> 8));
         if (format == STEREO) {
             data = Cy_PDM_PCM_Channel_ReadFifo(PDM0, RIGHT_CH_INDEX);
             /**
              * The stereo/right channel uses the odd indexes.
              */
             half_rx_fifo_buf_ptr[index * 2 + 1] = data;
-            // ringbuf_push(&ring_buffer, (uint8_t)(data & 0xFF));
-            // ringbuf_push(&ring_buffer, (uint8_t)(data >> 8));
         }
     }
 }
@@ -601,7 +562,7 @@ static void pdm_pcm_read_rx_buffer(void) {
 static void pdm_pcm_copy_half_rx_buffer_to_ringbuf() {
     uint8_t sample_size_in_bytes = (bits == BITS_16 ? 2 : 4) * (format == STEREO ? 2: 1);
     uint8_t *rx_buf_sample_ptr = (uint8_t *)processing_half_rx_fifo_buf_ptr;
-    uint32_t num_bytes_needed_from_ringbuf = (NUM_OF_SAMPLES_IN_RX_HW_FIFO_FRAME)*sample_size_in_bytes;   // The buffer contains only half its size in samples.
+    uint32_t num_bytes_needed_from_ringbuf = NUM_OF_SAMPLES_IN_RX_HW_FIFO_FRAME * sample_size_in_bytes;
 
     // when space exists, copy samples into ring buffer
     if (ringbuf_available_space(&ring_buffer) >= num_bytes_needed_from_ringbuf) {
@@ -612,10 +573,8 @@ static void pdm_pcm_copy_half_rx_buffer_to_ringbuf() {
                 int8_t r_to_a_mapping = pdm_pcm_frame_map[f_index][j];
                 if (r_to_a_mapping != -1) {
                     ringbuf_push(&ring_buffer, rx_buf_sample_ptr[i]);
-                    // (void)rx_buf_sample_ptr[i];
                 }
                 i++;
-
                 // For now we are not going to add the -1 value to the ring buffer,
                 // we add this later
                 /*
@@ -626,33 +585,6 @@ static void pdm_pcm_copy_half_rx_buffer_to_ringbuf() {
             }
         }
     }
-}
-
-void sample_fifo_read(void) {
-    // uint16_t sample_index = 0;
-    for (uint32_t index = 0; index < RX_FIFO_TRIG_LEVEL; index++)
-    {
-        uint32_t data = (uint32_t)Cy_PDM_PCM_Channel_ReadFifo(PDM0, LEFT_CH_INDEX);
-        // active_half_rx_fifo_buf_ptr[RX_FIFO_TRIG_LEVEL * half_rx_fifo_frames_count + sample_index++] = data;
-        ringbuf_push(&ring_buffer, (uint8_t)(data & 0xFF));
-        ringbuf_push(&ring_buffer, (uint8_t)(data >> 8));
-        if (STEREO == STEREO) {
-            data = Cy_PDM_PCM_Channel_ReadFifo(PDM0, RIGHT_CH_INDEX);
-            // active_half_rx_fifo_buf_ptr[RX_FIFO_TRIG_LEVEL * half_rx_fifo_frames_count + sample_index] = data;
-            ringbuf_push(&ring_buffer, (uint8_t)(data & 0xFF));
-            ringbuf_push(&ring_buffer, (uint8_t)(data >> 8));
-        }
-        // sample_index++; //Even if there is not stereo channel, the index is still incremented.
-        // In that case, the second channel will be empty in the buffer.
-    }
-    // half_rx_fifo_frames_count++; // = (half_rx_fifo_frames_count + 1) % FIFO_BUFF_SIZE_TIMES;
-    // if (half_rx_fifo_frames_count < (SIZEOF_HALF_PDM_PCM_RX_BUFFER_IN_BYTES/SIZEOF_HALF_PDM_PCM_RX_FIFO_HW)) {
-    //     return;
-    // }
-    // uint32_t *temp = active_half_rx_fifo_buf_ptr;
-    // active_half_rx_fifo_buf_ptr = processing_half_rx_fifo_buf_ptr;
-    // processing_half_rx_fifo_buf_ptr = temp;
-    // half_rx_fifo_frames_count = 0;
 }
 
 void pdm_disable() {
@@ -667,25 +599,29 @@ void pdm_disable() {
     NVIC_DisableIRQ(PDM_IRQ_cfg.intrSrc);
 }
 
+void ready_to_save() {
+    mp_hal_pin_write(&pin_P10_7_obj, 1);
+    pdm_pcm_flag = true;
+}
+
 void pdm_interrupt_handler(void) {
     volatile uint32_t intr_status = Cy_PDM_PCM_Channel_GetInterruptStatusMasked(PDM0, RIGHT_CH_INDEX);
-    static bool ringbuf_full = false;
-    if (!ringbuf_full) {
-        if (CY_PDM_PCM_INTR_RX_TRIGGER & intr_status) {
-            // sample_fifo_read();
-            pdm_pcm_read_rx_buffer();
-            Cy_PDM_PCM_Channel_ClearInterrupt(PDM0, RIGHT_CH_INDEX, CY_PDM_PCM_INTR_RX_TRIGGER);
-        }
-        // _pdm_pcm_copy_from_fifo_to_ringbuf();
+    // static bool ringbuf_full = false;
+    // if (!ringbuf_full) {
+    if (CY_PDM_PCM_INTR_RX_TRIGGER & intr_status) {
+        pdm_pcm_read_rx_buffer();
+        Cy_PDM_PCM_Channel_ClearInterrupt(PDM0, RIGHT_CH_INDEX, CY_PDM_PCM_INTR_RX_TRIGGER);
         if (pdm_pcm_is_half_rx_buffer_full()) {
             pdm_pcm_copy_half_rx_buffer_to_ringbuf();
         }
-        if (ringbuf_available_space(&ring_buffer) < (SIZEOF_PDM_PCM_SAMPLE_IN_BYTES)) {
-            ringbuf_full = true;
-        }
-    } else {
-        pdm_disable();
     }
+    // if (ringbuf_available_space(&ring_buffer) < (SIZEOF_PDM_PCM_SAMPLE_IN_BYTES)) {
+    //     // ringbuf_full = true;
+    //     ready_to_save();
+    // }
+    // } else {
+    //     pdm_disable();
+    // }
     if ((CY_PDM_PCM_INTR_RX_FIR_OVERFLOW | CY_PDM_PCM_INTR_RX_OVERFLOW | CY_PDM_PCM_INTR_RX_IF_OVERFLOW |
          CY_PDM_PCM_INTR_RX_UNDERFLOW) & intr_status) {
         Cy_PDM_PCM_Channel_ClearInterrupt(PDM0, RIGHT_CH_INDEX, CY_PDM_PCM_INTR_MASK);
@@ -732,7 +668,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(machine_pdm_pcm_init_obj, machine_pdm_pcm_init)
 static mp_obj_t machine_pdm_pcm_is_ready(mp_obj_t self_in) {
     /* TODO: Add implementation*/
 
-    if (pdm_pcm_flag) {
+    if (audio_file_saved) {
         return mp_const_true;
     } else {
         return mp_const_false;
