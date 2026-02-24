@@ -156,15 +156,11 @@ size_t ringbuf_available_space(ring_buf_t *rbuf) {
     return rbuf->size - ringbuf_available_data(rbuf) - 1;
 }
 
+// ---------------------------//
 
 /* Array containing the recorded data */
-uint8_t audio_buffer0[NUM_CHANNELS * FRAME_SIZE * 2];
-// ringbuf_t ring_buffer;
-// int16_t buf_array[NUM_CHANNELS * FRAME_SIZE * 2]; // 2 bytes per sample for 16-bit audio
 uint32_t rxbuf_len = NUM_CHANNELS * FRAME_SIZE * 2;
 ring_buf_t ring_buffer;
-// ringbuf_t ring_buffer = {(uint8_t *)audio_buffer0, NUM_CHANNELS * FRAME_SIZE * 2, 0, 0}; // Using audio_buffer0 as the storage for the ring buffer
-ring_buf_t ring_buffer = {(uint8_t *)audio_buffer0, NUM_CHANNELS *FRAME_SIZE * 2, 0, 0};  // Initialize with NULL buffer and zero size, will be set in app_pdm_pcm_init
 
 /* PDM PCM interrupt configuration parameters */
 const cy_stc_sysint_t PDM_IRQ_cfg =
@@ -176,23 +172,16 @@ const cy_stc_sysint_t PDM_IRQ_cfg =
 /* PDM PCM flag indicating PCM data is available to process */
 volatile bool pdm_pcm_flag = false;
 
-/* Volume variables */
-// uint32_t volume = 0;
-// uint32_t noise_threshold = THRESHOLD_HYSTERESIS;
-
-/* Counts number of half FIFO frames captured */
-uint32_t static frame_counter = 0;
-
 #include "mphalport.h"
 
 extern const machine_pin_obj_t pin_P10_7_obj;
 static void pdm_pcm_rx_fifo_buffer_init(void);
 
 void app_pdm_pcm_init(void) {
-    cy_en_pdm_pcm_gain_sel_t gain_scale = CY_PDM_PCM_SEL_GAIN_NEGATIVE_37DB;
 
-    // ringbuf_alloc(&ring_buffer, rxbuf_len);
-    // ringbuf_init(&ring_buffer, rxbuf_len);
+    ringbuf_init(&ring_buffer, rxbuf_len);
+
+    cy_en_pdm_pcm_gain_sel_t gain_scale = CY_PDM_PCM_SEL_GAIN_NEGATIVE_37DB;
 
     /* Initialize PDM PCM block */
     if (CY_PDM_PCM_SUCCESS != Cy_PDM_PCM_Init(PDM0, &CYBSP_PDM_config)) {
@@ -229,18 +218,6 @@ void app_pdm_pcm_init(void) {
     pdm_pcm_rx_fifo_buffer_init();
 }
 
-/*******************************************************************************
-* Function Name: app_pdm_pcm_activate
-********************************************************************************
-* Summary: This function activates the left and right channel.
-*
-* Parameters:
-*  none
-*
-* Return :
-*  none
-*
-*******************************************************************************/
 void app_pdm_pcm_activate(void) {
     /* Activate recording from channel after init */
     Cy_PDM_PCM_Activate_Channel(PDM0, LEFT_CH_INDEX);
@@ -249,22 +226,10 @@ void app_pdm_pcm_activate(void) {
 
 static bool audio_file_saved = false;
 void save_audio_to_file() {
-    // while (!pdm_pcm_flag) {
-    //     // Wait until the PDM PCM data is ready
-    // }
 
     while (ringbuf_available_space(&ring_buffer) > 8) {
-
     }
     mp_hal_pin_write(&pin_P10_7_obj, 1);
-
-    // for(uint32_t i=0; i < rxbuf_len/2; i++)
-    // {
-    //     uint8_t msb = audio_buffer0[i] >> 8; // Get the most significant byte
-    //     uint8_t lsb = audio_buffer0[i] & 0xFF; //Get the least significant byte
-    //     ringbuf_put(&ring_buffer, msb);
-    //     ringbuf_put(&ring_buffer, lsb);
-    // }
 
     // Hardcoded file creation and save
     mp_obj_t file_args[2];
@@ -287,22 +252,11 @@ void save_audio_to_file() {
         stream->write(file, data_ptr + i, bytes_to_write, &errcode);
     }
 
-    // int errcode = 0;
-    // for (size_t i = 0; i < total_bytes && errcode == 0; i++) {
-    //     if (ringbuf_available_data(&ring_buffer) == 0) {
-    //         // No more data in ring buffer, break out of loop
-    //         break;
-    //     }
-    //     uint8_t data;
-    //     ringbuf_pop(&ring_buffer, &data);
-    //     stream->write(file, &data, 1, &errcode);
-    // }
-
     // Close file
     mp_stream_close(file);
 
-    audio_file_saved = true;
     // return mp_const_none;
+    audio_file_saved = true;
 }
 
 /*******************************************************************************
@@ -395,21 +349,17 @@ cy_en_pdm_pcm_gain_sel_t convert_db_to_pdm_scale(float db) {
     }
 
 }
-/*******************************************************************************
- * Function Name: set_pdm_pcm_gain
- ********************************************************************************
- *
- * Set PDM scale value for gain.
- *
- *******************************************************************************/
-void set_pdm_pcm_gain(cy_en_pdm_pcm_gain_sel_t gain) {
 
+void set_pdm_pcm_gain(cy_en_pdm_pcm_gain_sel_t gain) {
     Cy_PDM_PCM_SetGain(PDM0, RIGHT_CH_INDEX, gain);
     Cy_PDM_PCM_SetGain(PDM0, LEFT_CH_INDEX, gain);
-
 }
 
-/* note: Actually for 8 to 32 is supported. */
+/**
+ * Note: Actually from 8 to 32 is in 2 increments
+ * is supported. TODO: Evaluate if implementation is
+ * required
+ */
 typedef enum {
     BITS_16 = 16,
     BITS_32 = 32
@@ -420,6 +370,11 @@ typedef enum {
     MONO_RIGHT,
     STEREO
 } format_t;
+
+typedef enum {
+    BLOCKING,
+    NON_BLOCKING,
+} io_mode_t;
 
 static const int8_t pdm_pcm_frame_map[4][PDM_PCM_RX_FRAME_SIZE_IN_BYTES] = {
     { 0,  1, -1, -1, -1, -1, -1, -1 },  // Mono, 16-bits
@@ -502,6 +457,7 @@ uint8_t rx_hw_fifo_frame_count;
 
 pdm_pcm_word_length_t bits = BITS_16;
 format_t format = STEREO;
+io_mode_t io_mode = BLOCKING;
 
 static void pdm_pcm_rx_fifo_buffer_init(void) {
     memset(rx_fifo_buffer, 0, sizeof(rx_fifo_buffer));
@@ -592,7 +548,6 @@ void pdm_disable() {
     mp_hal_pin_write(&pin_P10_7_obj, 1);
 
     pdm_pcm_flag = true;
-    frame_counter = 0;
 
     app_pdm_pcm_deactivate();
     NVIC_ClearPendingIRQ(PDM_IRQ_cfg.intrSrc);
@@ -606,8 +561,6 @@ void ready_to_save() {
 
 void pdm_interrupt_handler(void) {
     volatile uint32_t intr_status = Cy_PDM_PCM_Channel_GetInterruptStatusMasked(PDM0, RIGHT_CH_INDEX);
-    // static bool ringbuf_full = false;
-    // if (!ringbuf_full) {
     if (CY_PDM_PCM_INTR_RX_TRIGGER & intr_status) {
         pdm_pcm_read_rx_buffer();
         Cy_PDM_PCM_Channel_ClearInterrupt(PDM0, RIGHT_CH_INDEX, CY_PDM_PCM_INTR_RX_TRIGGER);
@@ -615,13 +568,6 @@ void pdm_interrupt_handler(void) {
             pdm_pcm_copy_half_rx_buffer_to_ringbuf();
         }
     }
-    // if (ringbuf_available_space(&ring_buffer) < (SIZEOF_PDM_PCM_SAMPLE_IN_BYTES)) {
-    //     // ringbuf_full = true;
-    //     ready_to_save();
-    // }
-    // } else {
-    //     pdm_disable();
-    // }
     if ((CY_PDM_PCM_INTR_RX_FIR_OVERFLOW | CY_PDM_PCM_INTR_RX_OVERFLOW | CY_PDM_PCM_INTR_RX_IF_OVERFLOW |
          CY_PDM_PCM_INTR_RX_UNDERFLOW) & intr_status) {
         Cy_PDM_PCM_Channel_ClearInterrupt(PDM0, RIGHT_CH_INDEX, CY_PDM_PCM_INTR_MASK);
@@ -638,6 +584,22 @@ typedef struct _machine_pdm_pcm_obj_t {
 } machine_pdm_pcm_obj_t;
 
 machine_pdm_pcm_obj_t *pdm_pcm_obj;
+
+static uint32_t fill_appbuf_from_ringbuf(machine_pdm_pcm_obj_t *self, mp_buffer_info_t *appbuf) {
+    uint32_t num_bytes_copied_to_appbuf = 0;
+    uint8_t *app_p = (uint8_t *)appbuf->buf;
+    uint32_t num_bytes_needed_from_ringbuf = appbuf->len;
+    uint8_t data;
+
+    while (num_bytes_needed_from_ringbuf-- > 0) {
+        while (ringbuf_pop(&ring_buffer, &data) == false) {
+            ;
+        }
+        app_p[num_bytes_copied_to_appbuf++] = data;
+        // num_bytes_needed_from_ringbuf--;
+    }
+    return num_bytes_copied_to_appbuf;
+}
 
 static void machine_pdm_pcm_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     /* TODO: Add implementation*/
@@ -659,7 +621,7 @@ static mp_obj_t machine_pdm_pcm_init(mp_obj_t self_in) {
 
     app_pdm_pcm_init();
     app_pdm_pcm_activate();
-    save_audio_to_file();
+    // save_audio_to_file();
 
     return mp_const_none;
 }
@@ -680,61 +642,33 @@ static MP_DEFINE_CONST_FUN_OBJ_1(machine_pdm_pcm_is_ready_obj, machine_pdm_pcm_i
 
 static mp_uint_t machine_pdm_pcm_stream_read(mp_obj_t self_in, void *buf_in, mp_uint_t size, int *errcode) {
     /* TODO: Add implementation*/
+    machine_pdm_pcm_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
-    mp_buffer_info_t appbuf;
-    appbuf.buf = (void *)buf_in;
+    uint8_t appbuf_sample_size_in_bytes = (bits / 8) * (format == STEREO ? 2: 1);
 
-    // for (size_t i = 0; i < size; i++) {
-    //     ((uint8_t *)appbuf.buf)[i] = (uint8_t)(i & 0xFF); // Fill the buffer with dummy data for testing
-    // }
+    if (size % appbuf_sample_size_in_bytes != 0) { // size should be multiple of sample size
+        *errcode = MP_EINVAL;
+        return MP_STREAM_ERROR;
+    }
 
-    // static bool first_read = true;
-    // if (first_read) {
-    //     while (!pdm_pcm_flag) {
-    //         // Wait until the PDM PCM data is ready
-    //     }
-    //     mp_printf(&mp_plat_print, ".");
-    //     first_read = false;
-    // }
-
-    // static uint32_t bytes_left_to_copy = FRAME_SIZE * NUM_CHANNELS;
-    // static uint32_t copy_index = 0;
-    // if (size > bytes_left_to_copy) {
-    //     size = bytes_left_to_copy; // Adjust size to copy only the remaining data
-    // }
-    // appbuf.len = size;
-
-    // // if (pdm_pcm_flag) {
-    // for (size_t i = 0; i < size; i++) {
-    //     ((uint8_t *)appbuf.buf)[i] = audio_buffer0[copy_index++]; // Fill the buffer with recorded data
-    // }
-    // // }
-    // bytes_left_to_copy -= size;
-
-    // return size;
-
-
-    uint32_t available_bytes = ringbuf_available_data(&ring_buffer);
-    if (available_bytes == 0) {
+    if (size == 0) {
         return 0;
     }
-    if (size > available_bytes) {
-        size = available_bytes; // Adjust size to copy only the available data
-    }
-    appbuf.len = size;
 
-    size_t i;
-    for (i = 0; i < size; i++) {
-        uint8_t data;
-        if (ringbuf_pop(&ring_buffer, &data)) {
-            ((uint8_t *)appbuf.buf)[i] = data; // Fill the buffer with recorded data
-        } else {
-            break;
-        }
+    if (io_mode == BLOCKING) {
+        mp_buffer_info_t appbuf;
+        appbuf.buf = (void *)buf_in;
+        appbuf.len = size;
+        // #if MICROPY_PY_MACHINE_PDM_PCM_RING_BUF
+        uint32_t num_bytes_read = fill_appbuf_from_ringbuf(self, &appbuf);
+        // #else
+        // uint32_t num_bytes_read = fill_appbuf_from_dma(self, &appbuf);
+        // #endif
+        return num_bytes_read;
     }
-    appbuf.len = i;
+    /* TODO: NON-BLOCKING implementation */
 
-    return appbuf.len;
+    return 0;
 }
 
 static const mp_stream_p_t pdm_pcm_stream_p = {

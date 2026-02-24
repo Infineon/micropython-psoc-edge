@@ -71,10 +71,7 @@ def play_audio(file, format, rate, channels):
     subprocess.run(command, shell=True)
 
 
-def main():
-    audio_file = "audio.raw"
-    device = "a0"
-
+def main(audio_file, device):
     print(">> Removing previous audio file from host...")
     remove_file_from_host(audio_file)
 
@@ -94,13 +91,18 @@ def main():
 if __name__ == "__main__":
     # Add a simple option to run only play audio without recording
     # if the audio file already exists
+    audio_file = "audio.raw"
+    device = "a1"
 
     args = os.sys.argv[1:]
     if len(args) > 0 and args[0] == "play":
         print(">> Playing recorded audio...")
-        play_audio("audio.raw", "s16le", 16000, 2)
+        play_audio(audio_file, "s16le", 16000, 2)
     elif len(args) > 0 and args[0] == "record":
         print(">> Running script on target to record audio...")
-        run_script_on_target("record-target.py", "a0")
+        run_script_on_target("record-target.py", device)
+    elif len(args) > 0 and args[0] == "load":
+        print(">> Loading recorded audio from target...")
+        load_file_from_target(audio_file, device)
     else:
-        main()
+        main(audio_file, device)
