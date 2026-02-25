@@ -39,17 +39,7 @@
 /* Frame size over which volume is calculated */
 #define FRAME_SIZE                              (32768u)
 
-/* PDM PCM hardware FIFO size */
-#define HW_FIFO_SIZE                            (64u)
-/* Rx FIFO trigger level/threshold configured by user */
-#define RX_FIFO_TRIG_LEVEL                      (HW_FIFO_SIZE / 2)
-/* Total number of interrupts to get the FRAME_SIZE number of samples*/
-#define NUMBER_INTERRUPTS_FOR_FRAME             (FRAME_SIZE / RX_FIFO_TRIG_LEVEL)
 
-/* Noise threshold hysteresis */
-#define THRESHOLD_HYSTERESIS                    (3u)
-/* Volume ratio for noise and print purposes */
-// #define VOLUME_RATIO                            (10*FRAME_SIZE)
 
 /* Gain range for EVK kit PDM mic */
 #define PDM_PCM_MIN_GAIN                        (-103.0)
@@ -99,12 +89,12 @@ cy_en_pdm_pcm_gain_sel_t convert_db_to_pdm_scale(float db);
 void set_pdm_pcm_gain(cy_en_pdm_pcm_gain_sel_t gain);
 
 
-typedef struct _ring_buf_t {
-    uint8_t *buffer;
-    size_t head;
-    size_t tail;
-    size_t size;
-} ring_buf_t;
+// typedef struct _ring_buf_t {
+//     uint8_t *buffer;
+//     size_t head;
+//     size_t tail;
+//     size_t size;
+// } ring_buf_t;
 
 typedef struct _non_blocking_descriptor_t {
     mp_buffer_info_t appbuf;
@@ -112,55 +102,56 @@ typedef struct _non_blocking_descriptor_t {
     bool copy_in_progress;
 } non_blocking_descriptor_t;
 
-void ringbuf_init(ring_buf_t *rbuf, size_t size);
-bool ringbuf_push(ring_buf_t *rbuf, uint8_t data);
-bool ringbuf_pop(ring_buf_t *rbuf, uint8_t *data);
-size_t ringbuf_available_data(ring_buf_t *rbuf);
-size_t ringbuf_available_space(ring_buf_t *rbuf);
+// void ringbuf_init(ring_buf_t *rbuf, size_t size);
+// bool ringbuf_push(ring_buf_t *rbuf, uint8_t data);
+// bool ringbuf_pop(ring_buf_t *rbuf, uint8_t *data);
+// size_t ringbuf_available_data(ring_buf_t *rbuf);
+// size_t ringbuf_available_space(ring_buf_t *rbuf);
 
-void ringbuf_init(ring_buf_t *rbuf, size_t size) {
-    rbuf->buffer = m_new(uint8_t, size);
-    memset(rbuf->buffer, 0, size);
-    rbuf->size = size;
-    rbuf->head = 0;
-    rbuf->tail = 0;
-}
+// void ringbuf_init(ring_buf_t *rbuf, size_t size) {
+//     rbuf->buffer = m_new(uint8_t, size);
+//     memset(rbuf->buffer, 0, size);
+//     rbuf->size = size;
+//     rbuf->head = 0;
+//     rbuf->tail = 0;
+// }
 
-bool ringbuf_push(ring_buf_t *rbuf, uint8_t data) {
-    size_t next_tail = (rbuf->tail + 1) % rbuf->size;
-    if (next_tail != rbuf->head) {
-        rbuf->buffer[rbuf->tail] = data;
-        rbuf->tail = next_tail;
-        return true;
-    }
-    // full
-    return false;
-}
+// bool ringbuf_push(ring_buf_t *rbuf, uint8_t data) {
+//     size_t next_tail = (rbuf->tail + 1) % rbuf->size;
+//     if (next_tail != rbuf->head) {
+//         rbuf->buffer[rbuf->tail] = data;
+//         rbuf->tail = next_tail;
+//         return true;
+//     }
+//     // full
+//     return false;
+// }
 
-bool ringbuf_pop(ring_buf_t *rbuf, uint8_t *data) {
-    if (rbuf->head == rbuf->tail) {
-        // empty
-        return false;
-    }
+// bool ringbuf_pop(ring_buf_t *rbuf, uint8_t *data) {
+//     if (rbuf->head == rbuf->tail) {
+//         // empty
+//         return false;
+//     }
 
-    *data = rbuf->buffer[rbuf->head];
-    rbuf->head = (rbuf->head + 1) % rbuf->size;
-    return true;
-}
+//     *data = rbuf->buffer[rbuf->head];
+//     rbuf->head = (rbuf->head + 1) % rbuf->size;
+//     return true;
+// }
 
-size_t ringbuf_available_data(ring_buf_t *rbuf) {
-    return (rbuf->tail - rbuf->head + rbuf->size) % rbuf->size;
-}
+// size_t ringbuf_available_data(ring_buf_t *rbuf) {
+//     return (rbuf->tail - rbuf->head + rbuf->size) % rbuf->size;
+// }
 
-size_t ringbuf_available_space(ring_buf_t *rbuf) {
-    return rbuf->size - ringbuf_available_data(rbuf) - 1;
-}
+// size_t ringbuf_available_space(ring_buf_t *rbuf) {
+//     return rbuf->size - ringbuf_available_data(rbuf) - 1;
+// }
 
 // ---------------------------//
 
 /* Array containing the recorded data */
-uint32_t rxbuf_len = NUM_CHANNELS * FRAME_SIZE * 2;
-ring_buf_t ring_buffer;
+uint32_t rxbuf_len = 20000;
+// ring_buf_t ring_buffer;
+ringbuf_t ring_buffer;
 
 /* PDM PCM interrupt configuration parameters */
 const cy_stc_sysint_t PDM_IRQ_cfg =
@@ -179,7 +170,8 @@ static void pdm_pcm_rx_fifo_buffer_init(void);
 
 void app_pdm_pcm_init(void) {
 
-    ringbuf_init(&ring_buffer, rxbuf_len);
+    // ringbuf_init(&ring_buffer, rxbuf_len);
+    ringbuf_alloc(&ring_buffer, rxbuf_len);
 
     cy_en_pdm_pcm_gain_sel_t gain_scale = CY_PDM_PCM_SEL_GAIN_NEGATIVE_37DB;
 
@@ -227,7 +219,8 @@ void app_pdm_pcm_activate(void) {
 static bool audio_file_saved = false;
 void save_audio_to_file() {
 
-    while (ringbuf_available_space(&ring_buffer) > 8) {
+    // while (ringbuf_available_space(&ring_buffer) > 8) {
+    while (ringbuf_free(&ring_buffer) > 8) {
     }
     mp_hal_pin_write(&pin_P10_7_obj, 1);
 
@@ -244,7 +237,8 @@ void save_audio_to_file() {
     size_t total_bytes = FRAME_SIZE * NUM_CHANNELS;
     size_t chunk_size = 1024;
     // uint8_t *data_ptr = (uint8_t *)audio_buffer0;
-    uint8_t *data_ptr = ring_buffer.buffer;
+    // uint8_t *data_ptr = ring_buffer.buffer;
+    uint8_t *data_ptr = ring_buffer.buf;
 
     int errcode = 0;
     for (size_t i = 0; i < total_bytes && errcode == 0; i += chunk_size) {
@@ -521,21 +515,25 @@ static void pdm_pcm_copy_half_rx_buffer_to_ringbuf() {
     uint32_t num_bytes_needed_from_ringbuf = NUM_OF_SAMPLES_IN_RX_HW_FIFO_FRAME * sample_size_in_bytes;
 
     // when space exists, copy samples into ring buffer
-    if (ringbuf_available_space(&ring_buffer) >= num_bytes_needed_from_ringbuf) {
+    // if (ringbuf_available_space(&ring_buffer) >= num_bytes_needed_from_ringbuf) {
+    if (ringbuf_free(&ring_buffer) >= num_bytes_needed_from_ringbuf) {
         uint8_t f_index = get_frame_mapping_index(bits, format);
         uint32_t i = 0;
         while (i < (SIZEOF_HALF_RX_BUFFER_IN_SAMPLES * SIZEOF_PDM_PCM_SAMPLE_IN_BYTES)) {
             for (uint8_t j = 0; j < SIZEOF_PDM_PCM_SAMPLE_IN_BYTES; j++) {
                 int8_t r_to_a_mapping = pdm_pcm_frame_map[f_index][j];
                 if (r_to_a_mapping != -1) {
-                    ringbuf_push(&ring_buffer, rx_buf_sample_ptr[i]);
+                    // ringbuf_push(&ring_buffer, rx_buf_sample_ptr[i]);
+                    ringbuf_put(&ring_buffer, rx_buf_sample_ptr[i]);
+
                 }
                 i++;
                 // For now we are not going to add the -1 value to the ring buffer,
                 // we add this later
                 /*
                 } else { // r_a_mapping == -1
-                    ringbuf_push(&ring_buffer, -1);
+                    // ringbuf_push(&ring_buffer, -1);
+                    ringbuf_put(&ring_buffer, -1);
                 }
                 */
             }
@@ -589,13 +587,15 @@ static uint32_t fill_appbuf_from_ringbuf(machine_pdm_pcm_obj_t *self, mp_buffer_
     uint32_t num_bytes_copied_to_appbuf = 0;
     uint8_t *app_p = (uint8_t *)appbuf->buf;
     uint32_t num_bytes_needed_from_ringbuf = appbuf->len;
-    uint8_t data;
+    // uint8_t data;
+    int data;
 
     while (num_bytes_needed_from_ringbuf-- > 0) {
-        while (ringbuf_pop(&ring_buffer, &data) == false) {
+        // while (ringbuf_pop(&ring_buffer, &data) == false) {
+        while ((data = ringbuf_get(&ring_buffer)) == -1) {
             ;
         }
-        app_p[num_bytes_copied_to_appbuf++] = data;
+        app_p[num_bytes_copied_to_appbuf++] = (uint8_t)data;
         // num_bytes_needed_from_ringbuf--;
     }
     return num_bytes_copied_to_appbuf;
