@@ -20,6 +20,6 @@ pdm_pcm.init()
 # while not pdm_pcm.isready():
 #     print(".", end="")
 
-record_audio("audio.raw", 5)
+record_audio("audio.raw", 3)
 
 print("mpy > audio recorded")

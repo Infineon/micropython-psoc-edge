@@ -92,7 +92,7 @@ if __name__ == "__main__":
     # Add a simple option to run only play audio without recording
     # if the audio file already exists
     audio_file = "audio.raw"
-    device = "a1"
+    device = "a0"
 
     args = os.sys.argv[1:]
     if len(args) > 0 and args[0] == "play":
