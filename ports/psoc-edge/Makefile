@@ -190,6 +190,18 @@ clean: mtb_clean mtb_clean_m55
 qdeploy: mtb_program
 deploy: all mtb_program
 
+# Deploy CM33 secure core only
+qdeploy_cm33_s: mtb_program_cm33_s
+deploy_cm33_s: mtb_build_s mtb_program_cm33_s
+
+# Deploy CM33 non-secure core only (MicroPython)
+qdeploy_cm33_ns: mtb_program_cm33_ns
+deploy_cm33_ns: all mtb_program_cm33_ns
+
+# Deploy only CM55 core (Voice Assistant)
+qdeploy_cm55: mtb_program_cm55
+deploy_cm55: mtb_build_m55 mtb_program_cm55
+
 # When multiple types of boards are connected, a devs file needs to be provided.
 # When working locally, if a "local-devs.yml" file is placed in "tools/psoc-edge"
 # it will be used
@@ -227,6 +239,16 @@ port_help:
 	$(info   make rebuild                       Build the project after cleaning previous build.)
 	$(info   make deploy                        Build and deploy the project to the specified board.)
 	$(info   make qdeploy                       Deploy the project to the specified board without rebuilding.)
+	$(info   make deploy_cm33_s                 Build and deploy only CM33 secure core.)
+	$(info   make qdeploy_cm33_s                Deploy only CM33 secure core without rebuilding.)
+	$(info   make deploy_cm33_ns                Build and deploy only CM33 non-secure core (MicroPython).)
+	$(info   make qdeploy_cm33_ns               Deploy only CM33 non-secure core without rebuilding.)
+	$(info   make deploy_cm33                   Build and deploy both CM33 cores.)
+	$(info   make qdeploy_cm33                  Deploy both CM33 cores without rebuilding.)
+	$(info   make deploy_cm55                   Build and deploy only CM55 core (Voice Assistant).)
+	$(info   make qdeploy_cm55                  Deploy only CM55 core without rebuilding.)
+	$(info   make deploy_all                    Build and deploy all cores (CM33 + CM55).)
+	$(info   make qdeploy_all                   Deploy all cores without rebuilding.)
 	$(info   make deploy_multi                  Deploy the project to multiple boards.)
 	$(info   make qdeploy_multi                 Deploy the project to multiple boards without rebuilding.)
 	$(info   make clean                         Clean the build files.)
@@ -234,12 +256,13 @@ port_help:
 	$(info )
 	$(info Options: )
 	$(info   EXT_HEX_FILE                       An external .hex file can be provided to the deploy targets, instead of building from the sources.) 
+	$(info   DEV_SERIAL_NUMBER                  Specify the board serial number for deployment.)
 	$(info )
 
 help: port_help mtb_bsp_help mtb_build_help
 .DEFAULT_GOAL := all
 
-.PHONY: all clean rebuild deploy qdeploy deploy_multi qdeploy_multi help deploy_dual
+.PHONY: all clean rebuild deploy qdeploy deploy_cm33_s qdeploy_cm33_s deploy_cm33_ns qdeploy_cm33_ns deploy_cm33 qdeploy_cm33 deploy_cm55 qdeploy_cm55 deploy_all qdeploy_all deploy_multi qdeploy_multi help deploy_dual
 
 include $(TOP)/py/mkrules.mk
 
