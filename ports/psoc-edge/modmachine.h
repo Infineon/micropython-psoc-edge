@@ -31,6 +31,7 @@
 // micropython includes
 #include "py/obj.h"
 
+typedef struct _machine_pdm_pcm_obj_t machine_pdm_pcm_obj_t;
 extern const mp_obj_type_t machine_pdm_pcm_type;
 
 enum clock_freq_type {
