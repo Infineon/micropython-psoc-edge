@@ -55,56 +55,19 @@
 // Program page size: Fixed by flash chip hardware (minimum writable unit). Matches LittleFS write_size.
 #define EXT_FLASH_PAGE_SIZE         (0x200) /** 512 Bytes */
 
-// I2C Configuration - Unified
-// I2C0: Primary I2C (SCB5, P17.0/P17.1)
-#define MICROPY_HW_I2C0_SCB                     (SCB5)
-#define MICROPY_HW_I2C0_SCL                     (P17_0_NUM)
-#define MICROPY_HW_I2C0_SDA                     (P17_1_NUM)
-#define MICROPY_HW_I2C0_PCLK                    PCLK_SCB5_CLOCK_SCB_EN
-#define MICROPY_HW_I2C0_IRQn                    scb_5_interrupt_IRQn
-// I2C0 GPIO Configuration
-#define MICROPY_HW_I2C0_GPIO_PORT               GPIO_PRT17
-#define MICROPY_HW_I2C0_SCL_PIN_NUM             0U
-#define MICROPY_HW_I2C0_SDA_PIN_NUM             1U
-#define MICROPY_HW_I2C0_SCL_HSIOM               P17_0_SCB5_I2C_SCL
-#define MICROPY_HW_I2C0_SDA_HSIOM               P17_1_SCB5_I2C_SDA
+// I2C Configuration - Simple List Design
+// ==============================================================
+// Board-specific I2C configuration using simple configuration list
 
-// I2C1: Secondary I2C (SCB0, P8.0/P8.1)
-#define MICROPY_HW_I2C1_SCB                     (SCB0)
-#define MICROPY_HW_I2C1_SCL                     (P8_0_NUM)
-#define MICROPY_HW_I2C1_SDA                     (P8_1_NUM)
-#define MICROPY_HW_I2C1_PCLK                    PCLK_SCB0_CLOCK_SCB_EN
-#define MICROPY_HW_I2C1_IRQn                    scb_0_interrupt_IRQn
-// I2C1 GPIO Configuration
-#define MICROPY_HW_I2C1_GPIO_PORT               GPIO_PRT8
-#define MICROPY_HW_I2C1_SCL_PIN_NUM             0U
-#define MICROPY_HW_I2C1_SDA_PIN_NUM             1U
-#define MICROPY_HW_I2C1_SCL_HSIOM               P8_0_SCB0_I2C_SCL
-#define MICROPY_HW_I2C1_SDA_HSIOM               P8_1_SCB0_I2C_SDA
+// I2C instance and target limits
+#define MICROPY_HW_MAX_I2C          (2)     // Board supports 2 I2C instances
+#define MICROPY_HW_MAX_I2C_TARGET   (1)     // Only I2C0 supports target mode
+#define MICROPY_HW_I2C_INTR_PRIORITY (7UL)  // Common interrupt priority
+#define MICROPY_HW_I2C_GPIO_DRIVE_MODE CY_GPIO_DM_OD_DRIVESLOW
 
-// Common I2C Configuration
-#define MICROPY_HW_I2C_GPIO_DRIVE_MODE          CY_GPIO_DM_OD_DRIVESLOW
-#define MICROPY_HW_I2C_INTR_PRIORITY            (7UL)
-
-// Calculate the maximum number of I2C instances
-#if defined(MICROPY_HW_I2C1_SCL)
-#define MICROPY_HW_MAX_I2C (2)
-#elif defined(MICROPY_HW_I2C0_SCL)
-#define MICROPY_HW_MAX_I2C (1)
-#else
-#define MICROPY_HW_MAX_I2C (0)
-#endif
-
-// I2C Target (Slave) Configuration - Uses I2C0 hardware only
-// I2C Target uses I2C0 instance (SCB5, P17.0/P17.1) exclusively
-#define MICROPY_HW_I2C_TARGET_SCB               MICROPY_HW_I2C0_SCB
-#define MICROPY_HW_I2C_TARGET_SCL               MICROPY_HW_I2C0_SCL
-#define MICROPY_HW_I2C_TARGET_SDA               MICROPY_HW_I2C0_SDA
-#define MICROPY_HW_I2C_TARGET_PCLK              MICROPY_HW_I2C0_PCLK
-#define MICROPY_HW_I2C_TARGET_IRQn              MICROPY_HW_I2C0_IRQn
-// I2C Target GPIO Configuration (same as I2C0)
-#define MICROPY_HW_I2C_TARGET_GPIO_PORT         MICROPY_HW_I2C0_GPIO_PORT
-#define MICROPY_HW_I2C_TARGET_SCL_PIN_NUM       MICROPY_HW_I2C0_SCL_PIN_NUM
-#define MICROPY_HW_I2C_TARGET_SDA_PIN_NUM       MICROPY_HW_I2C0_SDA_PIN_NUM
-#define MICROPY_HW_I2C_TARGET_SCL_HSIOM         MICROPY_HW_I2C0_SCL_HSIOM
-#define MICROPY_HW_I2C_TARGET_SDA_HSIOM         MICROPY_HW_I2C0_SDA_HSIOM
+// Board I2C Configuration List - Simple and Extensible!
+// Add new boards or I2C instances by modifying this list only
+// Format: {id, scb, pclk, irq, gpio_port, scl_pin, sda_pin, scl_hsiom, sda_hsiom, supports_target}
+#define MICROPY_HW_I2C_CONFIG_LIST \
+    { 0, SCB5, PCLK_SCB5_CLOCK_SCB_EN, scb_5_interrupt_IRQn, GPIO_PRT17, P17_0_NUM, P17_1_NUM, P17_0_SCB5_I2C_SCL, P17_1_SCB5_I2C_SDA, true  }, \
+    { 1, SCB0, PCLK_SCB0_CLOCK_SCB_EN, scb_0_interrupt_IRQn, GPIO_PRT8,  P8_0_NUM,  P8_1_NUM,  P8_0_SCB0_I2C_SCL,  P8_1_SCB0_I2C_SDA,  false }

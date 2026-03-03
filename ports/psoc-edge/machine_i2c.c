@@ -83,33 +83,24 @@ typedef struct _machine_hw_i2c_obj_t {
     cy_stc_scb_i2c_context_t ctx;  // PDL I2C runtime context
 } machine_hw_i2c_obj_t;
 
-// Hardware configuration structure
+// PSoC Edge I2C hardware configuration structure (matches board config list)
 typedef struct {
-    // Platform-specific hardware configuration
-    CySCB_Type *scb;               // SCB block (PSoC specific)
+    int id;                        // I2C instance ID
+    CySCB_Type *scb;               // SCB block pointer
     en_clk_dst_t pclk;             // Peripheral clock
     IRQn_Type irqn;                // Interrupt number
-} machine_i2c_hw_config_t;
+    GPIO_PRT_Type *gpio_port;      // GPIO port
+    uint32_t scl_pin_num;          // SCL pin number (P17_0_NUM = 0)
+    uint32_t sda_pin_num;          // SDA pin number (P17_1_NUM = 1)
+    uint32_t scl_hsiom;            // SCL HSIOM value
+    uint32_t sda_hsiom;            // SDA HSIOM value
+    bool supports_target;          // Whether this instance supports target mode
+} psoc_edge_i2c_hw_config_t;
 
-// Static hardware configuration array
-static const machine_i2c_hw_config_t i2c_hw_configs[MICROPY_HW_MAX_I2C] = {
-    #if defined(MICROPY_HW_I2C0_SCL)
-    [0] = {
-        // Platform-specific configuration (PSoC)
-        .scb = MICROPY_HW_I2C0_SCB,
-        .pclk = MICROPY_HW_I2C0_PCLK,
-        .irqn = MICROPY_HW_I2C0_IRQn,
-    },
-    #endif
-
-    #if defined(MICROPY_HW_I2C1_SCL)
-    [1] = {
-        // Platform-specific configuration (PSoC)
-        .scb = MICROPY_HW_I2C1_SCB,
-        .pclk = MICROPY_HW_I2C1_PCLK,
-        .irqn = MICROPY_HW_I2C1_IRQn,
-    },
-    #endif
+// PSoC Edge I2C hardware configurations (from mpconfigboard.h)
+// Global visibility for machine_i2c_target.c access
+const psoc_edge_i2c_hw_config_t psoc_edge_i2c_hw_configs[] = {
+    MICROPY_HW_I2C_CONFIG_LIST
 };
 
 machine_hw_i2c_obj_t *machine_hw_i2c_obj[MICROPY_HW_MAX_I2C] = { NULL };
@@ -117,29 +108,19 @@ machine_hw_i2c_obj_t *machine_hw_i2c_obj[MICROPY_HW_MAX_I2C] = { NULL };
 // Forward declarations
 static int machine_hw_i2c_deinit(mp_obj_base_t *self_in);
 
-// I2C instance lookup function
-static int i2c_find_instance_by_id(int i2c_id) {
-    #if defined(MICROPY_HW_I2C0_SCL)
-    if (i2c_id == 0) {
-        return 0;
-    }
-    #endif
-    #if defined(MICROPY_HW_I2C1_SCL)
-    if (i2c_id == 1) {
-        return 1;
-    }
-    #endif
-    return -1; // Not found
-}
-
-// Removed: I2C instance lookup by pins - only ID-based selection supported
-
-// Get hardware configuration for I2C instance - O(1) array access
-static inline const machine_i2c_hw_config_t *i2c_get_hw_config(int instance_id) {
-    if (instance_id >= 0 && instance_id < MICROPY_HW_MAX_I2C) {
-        return &i2c_hw_configs[instance_id];
+// Get PSoC Edge I2C hardware configuration by ID
+static const psoc_edge_i2c_hw_config_t *i2c_get_hw_config(int i2c_id) {
+    for (int i = 0; i < MICROPY_HW_MAX_I2C; i++) {
+        if (psoc_edge_i2c_hw_configs[i].id == i2c_id) {
+            return &psoc_edge_i2c_hw_configs[i];
+        }
     }
     return NULL;
+}
+
+// I2C instance validation function
+static int i2c_find_instance_by_id(int i2c_id) {
+    return (i2c_get_hw_config(i2c_id) != NULL) ? i2c_id : -1;
 }
 
 // I2C interrupt service routine
@@ -186,14 +167,14 @@ static inline void machine_hw_i2c_obj_free(machine_hw_i2c_obj_t *i2c_obj_ptr) {
 static void machine_hw_i2c_init(machine_hw_i2c_obj_t *self, uint32_t freq_hz) {
     cy_rslt_t result;
 
-    // Get hardware configuration for this instance
-    const machine_i2c_hw_config_t *hw_config = i2c_get_hw_config(self->id);
+    // Get PSoC Edge hardware configuration for this I2C ID
+    const psoc_edge_i2c_hw_config_t *hw_config = i2c_get_hw_config(self->id);
 
-    if (hw_config == NULL || hw_config->scb == NULL) {
+    if (hw_config == NULL) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("I2C ID %d not available"), self->id);
     }
 
-    // Store hardware parameters
+    // Store hardware parameters from hw config
     self->scb = hw_config->scb;
     self->pclk = hw_config->pclk;
     self->irqn = hw_config->irqn;
@@ -213,24 +194,11 @@ static void machine_hw_i2c_init(machine_hw_i2c_obj_t *self, uint32_t freq_hz) {
     };
 
     // ====== Platform-Specific GPIO Configuration ======
-    // TODO: Abstract this section using machine.pin
-    //
-    // Direct GPIO configuration based on I2C instance using board-level macros
-    if (self->id == 0) {
-        // I2C0: Use board-level GPIO configuration macros
-        Cy_GPIO_SetHSIOM(MICROPY_HW_I2C0_GPIO_PORT, MICROPY_HW_I2C0_SCL_PIN_NUM, MICROPY_HW_I2C0_SCL_HSIOM);
-        Cy_GPIO_SetHSIOM(MICROPY_HW_I2C0_GPIO_PORT, MICROPY_HW_I2C0_SDA_PIN_NUM, MICROPY_HW_I2C0_SDA_HSIOM);
-        Cy_GPIO_SetDrivemode(MICROPY_HW_I2C0_GPIO_PORT, MICROPY_HW_I2C0_SCL_PIN_NUM, MICROPY_HW_I2C_GPIO_DRIVE_MODE);
-        Cy_GPIO_SetDrivemode(MICROPY_HW_I2C0_GPIO_PORT, MICROPY_HW_I2C0_SDA_PIN_NUM, MICROPY_HW_I2C_GPIO_DRIVE_MODE);
-    } else if (self->id == 1) {
-        // I2C1: Use board-level GPIO configuration macros
-        Cy_GPIO_SetHSIOM(MICROPY_HW_I2C1_GPIO_PORT, MICROPY_HW_I2C1_SCL_PIN_NUM, MICROPY_HW_I2C1_SCL_HSIOM);
-        Cy_GPIO_SetHSIOM(MICROPY_HW_I2C1_GPIO_PORT, MICROPY_HW_I2C1_SDA_PIN_NUM, MICROPY_HW_I2C1_SDA_HSIOM);
-        Cy_GPIO_SetDrivemode(MICROPY_HW_I2C1_GPIO_PORT, MICROPY_HW_I2C1_SCL_PIN_NUM, MICROPY_HW_I2C_GPIO_DRIVE_MODE);
-        Cy_GPIO_SetDrivemode(MICROPY_HW_I2C1_GPIO_PORT, MICROPY_HW_I2C1_SDA_PIN_NUM, MICROPY_HW_I2C_GPIO_DRIVE_MODE);
-    } else {
-        mp_raise_ValueError(MP_ERROR_TEXT("Unsupported I2C instance for direct GPIO config"));
-    }
+    // GPIO configuration using hardware configuration
+    Cy_GPIO_SetHSIOM(hw_config->gpio_port, hw_config->scl_pin_num, hw_config->scl_hsiom);
+    Cy_GPIO_SetHSIOM(hw_config->gpio_port, hw_config->sda_pin_num, hw_config->sda_hsiom);
+    Cy_GPIO_SetDrivemode(hw_config->gpio_port, hw_config->scl_pin_num, MICROPY_HW_I2C_GPIO_DRIVE_MODE);
+    Cy_GPIO_SetDrivemode(hw_config->gpio_port, hw_config->sda_pin_num, MICROPY_HW_I2C_GPIO_DRIVE_MODE);
 
     result = Cy_SCB_I2C_Init(self->scb, &self->cfg, &self->ctx);
     if (result != CY_RSLT_SUCCESS) {

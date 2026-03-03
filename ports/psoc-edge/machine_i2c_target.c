@@ -38,6 +38,20 @@
 // port-specific includes
 #include "mplogger.h"
 
+// PSoC Edge I2C hardware configuration structure (shared with machine_i2c.c)
+typedef struct {
+    int id;                        // I2C instance ID
+    CySCB_Type *scb;               // SCB block pointer
+    en_clk_dst_t pclk;             // Peripheral clock
+    IRQn_Type irqn;                // Interrupt number
+    GPIO_PRT_Type *gpio_port;      // GPIO port
+    uint32_t scl_pin_num;          // SCL pin number (P17_0_NUM = 0)
+    uint32_t sda_pin_num;          // SDA pin number (P17_1_NUM = 1)
+    uint32_t scl_hsiom;            // SCL HSIOM value
+    uint32_t sda_hsiom;            // SDA HSIOM value
+    bool supports_target;          // Whether this instance supports target mode
+} psoc_edge_i2c_hw_config_t;
+
 // PDL event callback for slave operations
 static void i2c_slave_event_callback(uint32_t events);
 
@@ -52,6 +66,25 @@ typedef struct _machine_i2c_target_obj_t {
     size_t rx_index;
 } machine_i2c_target_obj_t;
 
+// Add forward declaration for PSoC Edge I2C hardware config access
+extern const psoc_edge_i2c_hw_config_t psoc_edge_i2c_hw_configs[];
+
+// Cached reference to the target-capable I2C hardware configuration (set during init)
+static const psoc_edge_i2c_hw_config_t *target_i2c_hw_config = NULL;
+
+// Get the first I2C instance that supports target mode
+static const psoc_edge_i2c_hw_config_t *get_target_capable_i2c_hw_config(void) {
+    if (target_i2c_hw_config == NULL) {
+        for (int i = 0; i < MICROPY_HW_MAX_I2C; i++) {
+            if (psoc_edge_i2c_hw_configs[i].supports_target) {
+                target_i2c_hw_config = &psoc_edge_i2c_hw_configs[i];
+                break;
+            }
+        }
+    }
+    return target_i2c_hw_config;
+}
+
 static machine_i2c_target_obj_t machine_i2c_target_obj[MICROPY_HW_MAX_I2C];
 
 /******************************************************************************/
@@ -62,7 +95,10 @@ static void machine_i2c_target_isr(void) {
     for (uint8_t i = 0; i < MICROPY_HW_MAX_I2C; i++) {
         machine_i2c_target_obj_t *self = &machine_i2c_target_obj[i];
         if (self->base.type != NULL) {
-            Cy_SCB_I2C_SlaveInterrupt(MICROPY_HW_I2C_TARGET_SCB, &self->ctx);
+            const psoc_edge_i2c_hw_config_t *hw_config = get_target_capable_i2c_hw_config();
+            if (hw_config != NULL) {
+                Cy_SCB_I2C_SlaveInterrupt(hw_config->scb, &self->ctx);
+            }
         }
     }
 }
@@ -117,14 +153,14 @@ static void i2c_slave_event_callback(uint32_t events) {
     if (events & CY_SCB_I2C_SLAVE_RD_CMPLT_EVENT) {
         if (!(events & CY_SCB_I2C_SLAVE_ERR_EVENT)) {
             mplogger_print("I2C Slave: Read complete, %u bytes sent\n",
-                Cy_SCB_I2C_SlaveGetReadTransferCount(MICROPY_HW_I2C_TARGET_SCB, &self->ctx));
+                Cy_SCB_I2C_SlaveGetReadTransferCount(target_i2c_hw_config->scb, &self->ctx));
         }
 
         if (data->mem_buf != NULL && data->mem_len > 0) {
-            Cy_SCB_I2C_SlaveConfigReadBuf(MICROPY_HW_I2C_TARGET_SCB, data->mem_buf, data->mem_len, &self->ctx);
+            Cy_SCB_I2C_SlaveConfigReadBuf(target_i2c_hw_config->scb, data->mem_buf, data->mem_len, &self->ctx);
         }
 
-        Cy_SCB_I2C_SlaveClearReadStatus(MICROPY_HW_I2C_TARGET_SCB, &self->ctx);
+        Cy_SCB_I2C_SlaveClearReadStatus(target_i2c_hw_config->scb, &self->ctx);
 
         // Reset index for next transaction
         self->tx_index = 0;
@@ -138,7 +174,7 @@ static void i2c_slave_event_callback(uint32_t events) {
 
     if (events & CY_SCB_I2C_SLAVE_WR_CMPLT_EVENT) {
         if (!(events & CY_SCB_I2C_SLAVE_ERR_EVENT)) {
-            uint32_t bytes_received = Cy_SCB_I2C_SlaveGetWriteTransferCount(MICROPY_HW_I2C_TARGET_SCB, &self->ctx);
+            uint32_t bytes_received = Cy_SCB_I2C_SlaveGetWriteTransferCount(target_i2c_hw_config->scb, &self->ctx);
             mplogger_print("I2C Slave: Write complete, %u bytes received\n", bytes_received);
             self->rx_index = 0;
             while (self->rx_index < bytes_received) {
@@ -147,10 +183,10 @@ static void i2c_slave_event_callback(uint32_t events) {
         }
 
         if (data->mem_buf != NULL && data->mem_len > 0) {
-            Cy_SCB_I2C_SlaveConfigWriteBuf(MICROPY_HW_I2C_TARGET_SCB, data->mem_buf, data->mem_len, &self->ctx);
+            Cy_SCB_I2C_SlaveConfigWriteBuf(target_i2c_hw_config->scb, data->mem_buf, data->mem_len, &self->ctx);
         }
 
-        Cy_SCB_I2C_SlaveClearWriteStatus(MICROPY_HW_I2C_TARGET_SCB, &self->ctx);
+        Cy_SCB_I2C_SlaveClearWriteStatus(target_i2c_hw_config->scb, &self->ctx);
 
         // Ensure state is WRITING so extmod reset_helper triggers END_WRITE
         data->state = STATE_WRITING;
@@ -171,7 +207,7 @@ static void i2c_target_init(machine_i2c_target_obj_t *self, machine_i2c_target_d
     cy_rslt_t result;
 
     if (!first_init) {
-        Cy_SCB_I2C_Disable(MICROPY_HW_I2C_TARGET_SCB, &self->ctx);
+        Cy_SCB_I2C_Disable(target_i2c_hw_config->scb, &self->ctx);
     }
 
     self->cfg = (cy_stc_scb_i2c_config_t) {
@@ -191,29 +227,35 @@ static void i2c_target_init(machine_i2c_target_obj_t *self, machine_i2c_target_d
     self->slave_addr = addr;
     self->addrsize = addrsize;
 
-    // Configure pins using I2C Target GPIO macros (I2C0 hardware only)
-    Cy_GPIO_SetHSIOM(MICROPY_HW_I2C_TARGET_GPIO_PORT, MICROPY_HW_I2C_TARGET_SCL_PIN_NUM, MICROPY_HW_I2C_TARGET_SCL_HSIOM);
-    Cy_GPIO_SetHSIOM(MICROPY_HW_I2C_TARGET_GPIO_PORT, MICROPY_HW_I2C_TARGET_SDA_PIN_NUM, MICROPY_HW_I2C_TARGET_SDA_HSIOM);
-    Cy_GPIO_SetDrivemode(MICROPY_HW_I2C_TARGET_GPIO_PORT, MICROPY_HW_I2C_TARGET_SCL_PIN_NUM, MICROPY_HW_I2C_GPIO_DRIVE_MODE);
-    Cy_GPIO_SetDrivemode(MICROPY_HW_I2C_TARGET_GPIO_PORT, MICROPY_HW_I2C_TARGET_SDA_PIN_NUM, MICROPY_HW_I2C_GPIO_DRIVE_MODE);
+    // Get PSoC Edge hardware configuration for target-capable I2C instance
+    const psoc_edge_i2c_hw_config_t *hw_config = get_target_capable_i2c_hw_config();
+    if (hw_config == NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("No I2C instance supports target mode"));
+    }
 
-    result = Cy_SCB_I2C_Init(MICROPY_HW_I2C_TARGET_SCB, &self->cfg, &self->ctx);
+    // Configure pins using hardware configuration
+    Cy_GPIO_SetHSIOM(hw_config->gpio_port, hw_config->scl_pin_num, hw_config->scl_hsiom);
+    Cy_GPIO_SetHSIOM(hw_config->gpio_port, hw_config->sda_pin_num, hw_config->sda_hsiom);
+    Cy_GPIO_SetDrivemode(hw_config->gpio_port, hw_config->scl_pin_num, MICROPY_HW_I2C_GPIO_DRIVE_MODE);
+    Cy_GPIO_SetDrivemode(hw_config->gpio_port, hw_config->sda_pin_num, MICROPY_HW_I2C_GPIO_DRIVE_MODE);
+
+    result = Cy_SCB_I2C_Init(hw_config->scb, &self->cfg, &self->ctx);
     if (result != CY_RSLT_SUCCESS) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("I2C Target init failed: 0x%lx"), result);
     }
 
 
 
-    // Configure clock for I2C slave operation
+    // Configure clock for I2C slave operation using hardware config
     // For 400 khz slave, clk_scb must be 7.82 – 15.38 MHz
     // For 100 khz slave, clk_scb must be 1.55 – 12.8 MHz
     // clk_peri = 100 MHz, divider = 7, clk_scb = 100/8 = 12.5 MHz
-    Cy_SysClk_PeriphAssignDivider(MICROPY_HW_I2C_TARGET_PCLK, CY_SYSCLK_DIV_8_BIT, 2U);
+    Cy_SysClk_PeriphAssignDivider(hw_config->pclk, CY_SYSCLK_DIV_8_BIT, 2U);
     Cy_SysClk_PeriphSetDivider(CY_SYSCLK_DIV_8_BIT, 2U, 7U); // divider = n+1, so 7 means divide by 8
     Cy_SysClk_PeriphEnableDivider(CY_SYSCLK_DIV_8_BIT, 2U);
 
     const cy_stc_sysint_t i2cIntrConfig = {
-        .intrSrc = MICROPY_HW_I2C_TARGET_IRQn,
+        .intrSrc = hw_config->irqn,
         .intrPriority = MICROPY_HW_I2C_INTR_PRIORITY,
     };
 
@@ -221,16 +263,16 @@ static void i2c_target_init(machine_i2c_target_obj_t *self, machine_i2c_target_d
     if (result != CY_RSLT_SUCCESS) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("I2C Target interrupt init failed: 0x%lx"), result);
     }
-    NVIC_EnableIRQ(MICROPY_HW_I2C_TARGET_IRQn);
+    NVIC_EnableIRQ(hw_config->irqn);
 
-    Cy_SCB_I2C_RegisterEventCallback(MICROPY_HW_I2C_TARGET_SCB, i2c_slave_event_callback, &self->ctx);
+    Cy_SCB_I2C_RegisterEventCallback(hw_config->scb, i2c_slave_event_callback, &self->ctx);
 
     if (data->mem_buf != NULL && data->mem_len > 0) {
-        Cy_SCB_I2C_SlaveConfigReadBuf(MICROPY_HW_I2C_TARGET_SCB, data->mem_buf, data->mem_len, &self->ctx);
-        Cy_SCB_I2C_SlaveConfigWriteBuf(MICROPY_HW_I2C_TARGET_SCB, data->mem_buf, data->mem_len, &self->ctx);
+        Cy_SCB_I2C_SlaveConfigReadBuf(hw_config->scb, data->mem_buf, data->mem_len, &self->ctx);
+        Cy_SCB_I2C_SlaveConfigWriteBuf(hw_config->scb, data->mem_buf, data->mem_len, &self->ctx);
     }
 
-    Cy_SCB_I2C_Enable(MICROPY_HW_I2C_TARGET_SCB);
+    Cy_SCB_I2C_Enable(hw_config->scb);
 
     mplogger_print("I2C Target initialized: addr=0x%02X, addrsize=%u-bit (I2C0 hardware only)\n", addr, addrsize);
 }
@@ -255,10 +297,10 @@ static size_t mp_machine_i2c_target_read_bytes(machine_i2c_target_obj_t *self, s
     machine_i2c_target_data_t *data = &machine_i2c_target_data[self->id];
     size_t read_len = 0;
 
-    NVIC_DisableIRQ(MICROPY_HW_I2C_TARGET_IRQn);
+    NVIC_DisableIRQ(target_i2c_hw_config->irqn);
 
     // Read from write buffer (data written by master into slave write buffer)
-    uint32_t available = Cy_SCB_I2C_SlaveGetWriteTransferCount(MICROPY_HW_I2C_TARGET_SCB, &self->ctx);
+    uint32_t available = Cy_SCB_I2C_SlaveGetWriteTransferCount(target_i2c_hw_config->scb, &self->ctx);
     read_len = (len < available) ? len : available;
 
     if (data->mem_buf != NULL) {
@@ -268,7 +310,7 @@ static size_t mp_machine_i2c_target_read_bytes(machine_i2c_target_obj_t *self, s
             }
         }
     }
-    NVIC_EnableIRQ(MICROPY_HW_I2C_TARGET_IRQn);
+    NVIC_EnableIRQ(target_i2c_hw_config->irqn);
 
     return read_len;
 }
@@ -277,7 +319,7 @@ static size_t mp_machine_i2c_target_write_bytes(machine_i2c_target_obj_t *self, 
     machine_i2c_target_data_t *data = &machine_i2c_target_data[self->id];
     size_t write_len = 0;
 
-    NVIC_DisableIRQ(MICROPY_HW_I2C_TARGET_IRQn);
+    NVIC_DisableIRQ(target_i2c_hw_config->irqn);
 
     if (data->mem_buf != NULL) {
         for (size_t i = 0; i < len; i++) {
@@ -288,10 +330,10 @@ static size_t mp_machine_i2c_target_write_bytes(machine_i2c_target_obj_t *self, 
         }
 
         // Update slave read buffer to reflect new data (per PDL documentation)
-        Cy_SCB_I2C_SlaveConfigReadBuf(MICROPY_HW_I2C_TARGET_SCB, data->mem_buf, self->tx_index, &self->ctx);
+        Cy_SCB_I2C_SlaveConfigReadBuf(target_i2c_hw_config->scb, data->mem_buf, self->tx_index, &self->ctx);
     }
 
-    NVIC_EnableIRQ(MICROPY_HW_I2C_TARGET_IRQn);
+    NVIC_EnableIRQ(target_i2c_hw_config->irqn);
 
     return write_len;
 }
@@ -368,8 +410,8 @@ static void mp_machine_i2c_target_print(const mp_print_t *print, mp_obj_t self_i
 }
 
 static void mp_machine_i2c_target_deinit(machine_i2c_target_obj_t *self) {
-    Cy_SCB_I2C_Disable(MICROPY_HW_I2C_TARGET_SCB, &self->ctx);
-    NVIC_DisableIRQ(MICROPY_HW_I2C_TARGET_IRQn);
+    Cy_SCB_I2C_Disable(target_i2c_hw_config->scb, &self->ctx);
+    NVIC_DisableIRQ(target_i2c_hw_config->irqn);
     self->base.type = NULL;
 
     mplogger_print("I2C Target deinitialized\n");
