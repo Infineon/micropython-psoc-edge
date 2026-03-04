@@ -38,6 +38,9 @@
 // port-specific includes
 #include "mplogger.h"
 
+// PDL event callback for slave operations
+static void i2c_slave_event_callback(uint32_t events);
+
 // PSoC Edge I2C hardware configuration structure (shared with machine_i2c.c)
 typedef struct {
     int id;                        // I2C instance ID
@@ -45,15 +48,17 @@ typedef struct {
     en_clk_dst_t pclk;             // Peripheral clock
     IRQn_Type irqn;                // Interrupt number
     GPIO_PRT_Type *gpio_port;      // GPIO port
+
+    // Pin configuration parameters
+    // TODO: Replace after improvements of machine.pin. This can be resolved using machine.Pin
     uint32_t scl_pin_num;          // SCL pin number (P17_0_NUM = 0)
     uint32_t sda_pin_num;          // SDA pin number (P17_1_NUM = 1)
     uint32_t scl_hsiom;            // SCL HSIOM value
     uint32_t sda_hsiom;            // SDA HSIOM value
+
     bool supports_target;          // Whether this instance supports target mode
 } psoc_edge_i2c_hw_config_t;
 
-// PDL event callback for slave operations
-static void i2c_slave_event_callback(uint32_t events);
 
 typedef struct _machine_i2c_target_obj_t {
     mp_obj_base_t base;
@@ -233,7 +238,8 @@ static void i2c_target_init(machine_i2c_target_obj_t *self, machine_i2c_target_d
         mp_raise_ValueError(MP_ERROR_TEXT("No I2C instance supports target mode"));
     }
 
-    // Configure pins using hardware configuration
+    //  TODO: Replaced after machine.pin
+    // GPIO configuration using hardware configuration
     Cy_GPIO_SetHSIOM(hw_config->gpio_port, hw_config->scl_pin_num, hw_config->scl_hsiom);
     Cy_GPIO_SetHSIOM(hw_config->gpio_port, hw_config->sda_pin_num, hw_config->sda_hsiom);
     Cy_GPIO_SetDrivemode(hw_config->gpio_port, hw_config->scl_pin_num, MICROPY_HW_I2C_GPIO_DRIVE_MODE);

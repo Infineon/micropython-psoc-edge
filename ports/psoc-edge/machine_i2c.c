@@ -68,20 +68,6 @@
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT(msg), ret); \
 }
 
-typedef struct _machine_hw_i2c_obj_t {
-    mp_obj_base_t base;
-    int id;                        // I2C instance ID (0, 1, ...)
-    uint32_t freq;
-    uint32_t timeout;
-
-    // Platform-specific hardware interface (can be abstracted further)
-    CySCB_Type *scb;               // SCB Block (PSoC specific)
-    uint32_t pclk;                 // Peripheral clock
-    IRQn_Type irqn;                // Interrupt number
-    cy_stc_scb_i2c_config_t cfg;   // PDL I2C configuration
-    cy_stc_scb_i2c_context_t ctx;  // PDL I2C runtime context
-} machine_hw_i2c_obj_t;
-
 // PSoC Edge I2C hardware configuration structure (matches board config list)
 typedef struct {
     // i2c instance hardware parameters
@@ -99,6 +85,20 @@ typedef struct {
     uint32_t sda_hsiom;            // SDA HSIOM value
     bool supports_target;          // Whether this instance supports target mode
 } psoc_edge_i2c_hw_config_t;
+
+typedef struct _machine_hw_i2c_obj_t {
+    mp_obj_base_t base;
+    int id;                        // I2C instance ID (0, 1, ...)
+    uint32_t freq;
+    uint32_t timeout;
+
+    // Platform-specific hardware interface (can be abstracted further)
+    CySCB_Type *scb;               // SCB Block (PSoC specific)
+    uint32_t pclk;                 // Peripheral clock
+    IRQn_Type irqn;                // Interrupt number
+    cy_stc_scb_i2c_config_t cfg;   // PDL I2C configuration
+    cy_stc_scb_i2c_context_t ctx;  // PDL I2C runtime context
+} machine_hw_i2c_obj_t;
 
 // PSoC Edge I2C hardware configurations (from mpconfigboard.h)
 // Global visibility for machine_i2c_target.c access
