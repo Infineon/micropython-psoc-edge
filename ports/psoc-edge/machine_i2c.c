@@ -54,7 +54,6 @@
  *
  * This driver supports multiple I2C instances using ID-based selection.
  * Pin configuration is board-independent and defined in mpconfigboard.h.
- * Platform-specific implementation details are abstracted for portability.
  *
  * Usage:
  *   i2c0 = I2C(0)  # Use I2C instance 0 (pins from board config)
@@ -85,11 +84,15 @@ typedef struct _machine_hw_i2c_obj_t {
 
 // PSoC Edge I2C hardware configuration structure (matches board config list)
 typedef struct {
+    // i2c instance hardware parameters
     int id;                        // I2C instance ID
     CySCB_Type *scb;               // SCB block pointer
     en_clk_dst_t pclk;             // Peripheral clock
     IRQn_Type irqn;                // Interrupt number
     GPIO_PRT_Type *gpio_port;      // GPIO port
+
+    // Pin configuration parameters
+    // TODO: Replace after improvements of machine.pin. This can be resolved using machine.Pin
     uint32_t scl_pin_num;          // SCL pin number (P17_0_NUM = 0)
     uint32_t sda_pin_num;          // SDA pin number (P17_1_NUM = 1)
     uint32_t scl_hsiom;            // SCL HSIOM value
@@ -105,7 +108,7 @@ const psoc_edge_i2c_hw_config_t psoc_edge_i2c_hw_configs[] = {
 
 machine_hw_i2c_obj_t *machine_hw_i2c_obj[MICROPY_HW_MAX_I2C] = { NULL };
 
-// Forward declarations
+
 static int machine_hw_i2c_deinit(mp_obj_base_t *self_in);
 
 // Get PSoC Edge I2C hardware configuration by ID
@@ -124,12 +127,9 @@ static int i2c_find_instance_by_id(int i2c_id) {
 }
 
 // I2C interrupt service routine
-// Note: Using master-specific interrupt function to reduce flash consumption
 static void machine_i2c_isr(void) {
-    // Find which I2C instance triggered the interrupt
     for (uint8_t i = 0; i < MICROPY_HW_MAX_I2C; i++) {
         if (machine_hw_i2c_obj[i] != NULL) {
-            // Call I2C master interrupt handler for the specific SCB instance
             Cy_SCB_I2C_MasterInterrupt(machine_hw_i2c_obj[i]->scb, &machine_hw_i2c_obj[i]->ctx);
         }
     }
@@ -193,7 +193,7 @@ static void machine_hw_i2c_init(machine_hw_i2c_obj_t *self, uint32_t freq_hz) {
         .highPhaseDutyCycle = 8U,
     };
 
-    // ====== Platform-Specific GPIO Configuration ======
+    //  TODO: Replaced after machine.pin
     // GPIO configuration using hardware configuration
     Cy_GPIO_SetHSIOM(hw_config->gpio_port, hw_config->scl_pin_num, hw_config->scl_hsiom);
     Cy_GPIO_SetHSIOM(hw_config->gpio_port, hw_config->sda_pin_num, hw_config->sda_hsiom);
