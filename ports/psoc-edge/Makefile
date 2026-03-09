@@ -191,6 +191,19 @@ clean: mtb_clean mtb_clean_m55
 qdeploy: mtb_program
 deploy: all mtb_program
 
+# Flash only the CM33 non-secure core (MicroPython app).
+# CM55 is not required: boot_with_extended_boot.json only merges CM33-S and CM33-NS.
+deploy_cm33_ns: mtb_init mpy_build mtb_build_s mtb_deploy_cm33_ns
+qdeploy_cm33_ns: mtb_deploy_cm33_ns
+
+# Flash only the CM33 secure core (same prerequisites as deploy_cm33_ns).
+deploy_cm33_s: mtb_init mpy_build mtb_build_s mtb_deploy_cm33_s
+qdeploy_cm33_s: mtb_deploy_cm33_s
+
+# Flash only the CM55 core. Fully independent of CM33 builds.
+deploy_m55: mtb_build_m55 mtb_deploy_cm55
+qdeploy_m55: mtb_deploy_cm55
+
 # When multiple types of boards are connected, a devs file needs to be provided.
 # When working locally, if a "local-devs.yml" file is placed in "tools/psoc-edge"
 # it will be used
@@ -226,8 +239,16 @@ port_help:
 	$(info   ..                                 The board name needs to be specified only the first time.)
 	$(info   ..                                 Then simply run "make" to build for the same board.)
 	$(info   make rebuild                       Build the project after cleaning previous build.)
-	$(info   make deploy                        Build and deploy the project to the specified board.)
-	$(info   make qdeploy                       Deploy the project to the specified board without rebuilding.)
+	$(info   make deploy                        Build and deploy all cores (CM33-S + CM33-NS) to the specified board.)
+	$(info   make qdeploy                       Deploy all cores (CM33-S + CM33-NS) without rebuilding.)
+	$(info   make deploy_all_cores             Build and deploy all three cores (CM33-S, CM33-NS, CM55).)
+	$(info   make deploy_cm33_ns               Build and deploy only the CM33 non-secure (MicroPython) core.)
+	$(info   ..                                Builds MicroPython + signs/relocates CM33 hexes (CM55 not required).)
+	$(info   make qdeploy_cm33_ns              Flash proj_cm33_ns_shifted.hex without rebuilding.)
+	$(info   make deploy_cm33_s                Build and deploy only the CM33 secure core (same prerequisites as deploy_cm33_ns).)
+	$(info   make qdeploy_cm33_s               Flash proj_cm33_s_signed.hex without rebuilding.)
+	$(info   make deploy_m55                   Build and deploy only the CM55 core (fully independent).)
+	$(info   make qdeploy_m55                  Flash proj_cm55.hex without rebuilding.)
 	$(info   make deploy_multi                  Deploy the project to multiple boards.)
 	$(info   make qdeploy_multi                 Deploy the project to multiple boards without rebuilding.)
 	$(info   make clean                         Clean the build files.)
@@ -240,9 +261,9 @@ port_help:
 help: port_help mtb_bsp_help mtb_build_help
 .DEFAULT_GOAL := all
 
-.PHONY: all clean rebuild deploy qdeploy deploy_multi qdeploy_multi help deploy_dual
+.PHONY: all clean rebuild deploy qdeploy deploy_cm33_ns qdeploy_cm33_ns deploy_cm33_s qdeploy_cm33_s deploy_m55 qdeploy_m55 deploy_multi qdeploy_multi deploy_all_cores help
 
 include $(TOP)/py/mkrules.mk
 
-# ToDo: Dual-core deployment target - flashes both CM33 (MicroPython) and CM55 (C app) currently but see if this can be changed to flash specific core
-deploy_dual: all mtb_program
+# Deploy all cores: CM33-S, CM33-NS (MicroPython), and CM55.
+deploy_all_cores: all mtb_program mtb_program_m55
