@@ -87,6 +87,12 @@ CFLAGS += -Os -DNDEBUG
 CFLAGS += -fdata-sections -ffunction-sections
 endif
 
+# Older GNU ld versions do not support this flag.
+LDFLAG_NO_WARN_RWX_SEGMENTS :=
+ifneq ($(shell $(CROSS_COMPILE)ld --help 2>/dev/null | grep -c -- '--no-warn-rwx-segments'),0)
+LDFLAG_NO_WARN_RWX_SEGMENTS := -Wl,--no-warn-rwx-segments
+endif
+
 # If the nsc_veneer.o is not present, it is 
 # generated without reference.
 NSC_VENEER = nsc_veneer.o
@@ -99,7 +105,7 @@ LDFLAGS = $(MACHINE_FLAGS) \
 	-Wl,--gc-sections \
 	-Wl,--cmse-implib $(IN_IMPLIB_FLAG) -Wl,--out-implib -Wl,$(NSC_VENEER_TEMP) \
 	-Wl,--print-memory-usage \
-	-Wl,--no-warn-rwx-segments \
+	$(LDFLAG_NO_WARN_RWX_SEGMENTS) \
 	-Xlinker -L $(PSE_LIB_DIR)/TARGET_$(BOARD)/COMPONENT_CM33/TOOLCHAIN_GCC_ARM \
 	-Xlinker -L $(BOARD_DIR)/bsp-cfg \
 	-T$(PSE_LIB_DIR)/TARGET_$(BOARD)/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/pse84_s_cm33.ld \
