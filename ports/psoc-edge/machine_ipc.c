@@ -525,16 +525,16 @@ static mp_obj_t machine_ipc_enable_core(size_t n_args, const mp_obj_t *args) {
 
     // Currently only CM55 (CM55) is supported
     if (core_id == CM55) {
-        if (cm55_enabled) {
-            mp_printf(&mp_plat_print, "CM55 already enabled\r\n");
-            return mp_const_true;
+        // Guard with software flag: Cy_SysEnableCM55() resets CM55 if already active,
+        // which would disrupt a running session. The flag is cleared on power-on and
+        // CM33-only debugger resets, ensuring a stale CM55 is always restarted cleanly.
+        if (!cm55_enabled) {
+            Cy_SysEnableCM55(MXCM55, CM55_APP_BOOT_ADDR, CM55_BOOT_WAIT_TIME_USEC);
+            cm55_enabled = true;
+            Cy_SysLib_Delay(CM33_APP_DELAY_MS);
         }
-        Cy_SysEnableCM55(MXCM55, CM55_APP_BOOT_ADDR, CM55_BOOT_WAIT_TIME_USEC);
-        cm55_enabled = true;
-        Cy_SysLib_Delay(CM33_APP_DELAY_MS);
-
+        // Print after the SRF call so UART TX is not disrupted by the secure syscall.
         mp_printf(&mp_plat_print, "Enabling CM55 core at boot address: 0x%08X\r\n", CM55_APP_BOOT_ADDR);
-
         return mp_const_true;
     } else if (core_id == CM33) {
         mp_raise_ValueError(MP_ERROR_TEXT("invalid operation: CM33 core is already active and cannot be re-enabled"));
