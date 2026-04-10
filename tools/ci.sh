@@ -359,7 +359,7 @@ function ci_powerpc_build {
 
 function ci_psoc_edge_setup {
     ci_gcc_arm_setup
-    sudo apt remove python3-packaging python3-jsonschema
+    sudo apt remove python3-packaging python3-jsonschema python3-cryptography
     sudo pip3 install edgeprotecttools
 }
 
