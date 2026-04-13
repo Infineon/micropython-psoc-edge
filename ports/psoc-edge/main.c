@@ -32,6 +32,7 @@
 
 // MTB includes
 #include "cybsp.h"
+#include "cy_scb_spi.h"
 #include "retarget_io_init.h"
 
 // micropython includes
@@ -47,6 +48,176 @@
 
 // port-specific includes
 #include "mplogger.h"
+
+/*******************************************************************************
+ * SPI Test - Configurable GPIO Pin Definitions (Port 9 / SCB1)
+ * Change these macros to reconfigure which pins are used for SPI.
+ ******************************************************************************/
+#define SPI_TEST_HW             SCB10                    /* SCB10 */
+#define SPI_TEST_IRQ            scb_10_interrupt_IRQn    /* SCB10 IRQ */
+
+#define SPI_MOSI_PORT           GPIO_PRT16               /* P16.1 */
+#define SPI_MOSI_PIN_NUM        1U
+#define SPI_MOSI_HSIOM          P16_1_SCB10_SPI_MOSI
+
+#define SPI_MISO_PORT           GPIO_PRT16               /* P16.2 */
+#define SPI_MISO_PIN_NUM        2U
+#define SPI_MISO_HSIOM          P16_2_SCB10_SPI_MISO
+
+#define SPI_CLK_PORT            GPIO_PRT16               /* P16.0 */
+#define SPI_CLK_PIN_NUM         0U
+#define SPI_CLK_HSIOM           P16_0_SCB10_SPI_CLK
+
+#define SPI_CS_PORT             GPIO_PRT16               /* P16.3 */
+#define SPI_CS_PIN_NUM          3U
+#define SPI_CS_HSIOM            P16_3_SCB10_SPI_SELECT0
+
+/* Clock divider for SPI SCB block */
+#define SPI_CLK_DIV_TYPE        CY_SYSCLK_DIV_8_BIT
+#define SPI_CLK_DIV_NUM         4U
+
+/* SPI test data */
+#define SPI_TEST_DATA_SIZE      4U
+static const uint8_t spi_test_tx_data[SPI_TEST_DATA_SIZE] = {0xA5, 0x5A, 0xFF, 0x01};
+
+/* SPI context required by PDL */
+static cy_stc_scb_spi_context_t spi_test_context;
+
+/* SPI master config for SCB10 (Motorola, CPHA0/CPOL0, 8-bit) */
+static const cy_stc_scb_spi_config_t spi_test_config = {
+    .spiMode = CY_SCB_SPI_MASTER,
+    .subMode = CY_SCB_SPI_MOTOROLA,
+    .sclkMode = CY_SCB_SPI_CPHA0_CPOL0,
+    .parity = CY_SCB_SPI_PARITY_NONE,
+    .dropOnParityError = false,
+    .oversample = 4,
+    .rxDataWidth = 8UL,
+    .txDataWidth = 8UL,
+    .enableMsbFirst = true,
+    .enableInputFilter = false,
+    .enableFreeRunSclk = false,
+    .enableMisoLateSample = true,
+    .enableTransferSeparation = false,
+    .ssPolarity = ((CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT0) |
+                   (CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT1) |
+                   (CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT2) |
+                   (CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT3)),
+    .ssSetupDelay = false,
+    .ssHoldDelay = false,
+    .ssInterFrameDelay = false,
+    .enableWakeFromSleep = false,
+    .rxFifoTriggerLevel = 63UL,
+    .rxFifoIntEnableMask = 0UL,
+    .txFifoTriggerLevel = 63UL,
+    .txFifoIntEnableMask = 0UL,
+    .masterSlaveIntEnableMask = 0UL,
+};
+
+/*******************************************************************************
+ * spi_test_init_pins: Configure GPIO pins for SPI function
+ ******************************************************************************/
+static void spi_test_init_pins(void) {
+    /* MOSI - Strong drive, output */
+    Cy_GPIO_Pin_FastInit(SPI_MOSI_PORT, SPI_MOSI_PIN_NUM,
+                         CY_GPIO_DM_STRONG_IN_OFF, 1, SPI_MOSI_HSIOM);
+
+    /* MISO - High-Z, input */
+    Cy_GPIO_Pin_FastInit(SPI_MISO_PORT, SPI_MISO_PIN_NUM,
+                         CY_GPIO_DM_HIGHZ, 0, SPI_MISO_HSIOM);
+
+    /* CLK - Strong drive, output */
+    Cy_GPIO_Pin_FastInit(SPI_CLK_PORT, SPI_CLK_PIN_NUM,
+                         CY_GPIO_DM_STRONG_IN_OFF, 1, SPI_CLK_HSIOM);
+
+    /* CS - Strong drive, output, active low (idle high) */
+    Cy_GPIO_Pin_FastInit(SPI_CS_PORT, SPI_CS_PIN_NUM,
+                         CY_GPIO_DM_STRONG_IN_OFF, 1, SPI_CS_HSIOM);
+}
+
+/*******************************************************************************
+ * spi_test_run: Initialize SPI using PDL and send test bytes
+ * Returns true if the SPI peripheral initialized and transmitted successfully.
+ ******************************************************************************/
+static bool spi_test_run(void) {
+    cy_en_scb_spi_status_t spi_status;
+
+    /* 1. Configure SPI pins */
+    printf("SPI Test: [1] Configuring pins...\r\n");
+    fflush(stdout);
+    spi_test_init_pins();
+
+    /* 2. Power on the SCB10 peripheral group */
+    printf("SPI Test: [2] Enabling SCB10 peripheral group...\r\n");
+    fflush(stdout);
+    Cy_SysClk_PeriGroupSlaveInit(CY_MMIO_SCB10_PERI_NR, CY_MMIO_SCB10_GROUP_NR,
+                                 CY_MMIO_SCB10_SLAVE_NR, CY_MMIO_SCB10_CLK_HF_NR);
+
+    /* 3. Set up the clock divider for SCB10 SPI */
+    printf("SPI Test: [3] Setting up clock divider...\r\n");
+    fflush(stdout);
+    Cy_SysClk_PeriphDisableDivider(SPI_CLK_DIV_TYPE, SPI_CLK_DIV_NUM);
+    Cy_SysClk_PeriphSetDivider(SPI_CLK_DIV_TYPE, SPI_CLK_DIV_NUM, 49U);
+    Cy_SysClk_PeriphEnableDivider(SPI_CLK_DIV_TYPE, SPI_CLK_DIV_NUM);
+    Cy_SysClk_PeriPclkAssignDivider(PCLK_SCB10_CLOCK_SCB_EN, SPI_CLK_DIV_TYPE, SPI_CLK_DIV_NUM);
+    printf("SPI Test: [3] Clock configured\r\n");
+    fflush(stdout);
+
+    /* 4. Initialize SPI (master, Motorola, CPHA0/CPOL0, 8-bit) */
+    printf("SPI Test: [4] Calling Cy_SCB_SPI_Init...\r\n");
+    fflush(stdout);
+    spi_status = Cy_SCB_SPI_Init(SPI_TEST_HW, &spi_test_config, &spi_test_context);
+    if (spi_status != CY_SCB_SPI_SUCCESS) {
+        printf("SPI Test: Init FAILED (status=0x%lx)\r\n", (unsigned long)spi_status);
+        fflush(stdout);
+        return false;
+    }
+
+    /* 5. Enable the SPI block */
+    printf("SPI Test: [5] Enabling SPI...\r\n");
+    fflush(stdout);
+    Cy_SCB_SPI_Enable(SPI_TEST_HW);
+
+    /* 6. Transmit test data byte-by-byte using low-level FIFO access */
+    printf("SPI Test: Sending %u bytes: ", SPI_TEST_DATA_SIZE);
+    for (uint32_t i = 0; i < SPI_TEST_DATA_SIZE; i++) {
+        printf("0x%02X ", spi_test_tx_data[i]);
+        Cy_SCB_SPI_Write(SPI_TEST_HW, spi_test_tx_data[i]);
+    }
+    printf("\r\n");
+
+    /* 6. Wait for transmission to complete */
+    uint32_t timeout = 10000U;
+    while (!Cy_SCB_SPI_IsTxComplete(SPI_TEST_HW) && (timeout > 0U)) {
+        Cy_SysLib_DelayUs(10);
+        timeout--;
+    }
+
+    if (timeout == 0U) {
+        printf("SPI Test: Tx timeout!\r\n");
+    } else {
+        printf("SPI Test: Tx complete.\r\n");
+    }
+
+    /* 7. Read back any received data from the RX FIFO (loopback or slave response) */
+    uint32_t rx_count = Cy_SCB_SPI_GetNumInRxFifo(SPI_TEST_HW);
+    if (rx_count > 0U) {
+        printf("SPI Test: Received %lu bytes: ", (unsigned long)rx_count);
+        while (Cy_SCB_SPI_GetNumInRxFifo(SPI_TEST_HW) > 0U) {
+            uint32_t rx_byte = Cy_SCB_SPI_Read(SPI_TEST_HW);
+            printf("0x%02lX ", (unsigned long)rx_byte);
+        }
+        printf("\r\n");
+    } else {
+        printf("SPI Test: No data received (no slave/loopback connected).\r\n");
+    }
+
+    /* 8. Clean up - disable and de-init */
+    Cy_SCB_SPI_Disable(SPI_TEST_HW, &spi_test_context);
+    Cy_SCB_SPI_DeInit(SPI_TEST_HW);
+
+    printf("SPI Test: PASSED - SPI peripheral operational.\r\n");
+    return true;
+}
 
 typedef enum {
     BOOT_MODE_NORMAL,
@@ -109,6 +280,11 @@ int main(void) {
 
     /* Initialize retarget-io middleware */
     init_retarget_io();
+
+    /* Run SPI test */
+    printf("\r\n=== SPI PDL Test ===\r\n");
+    spi_test_run();
+    printf("=== SPI Test Done ===\r\n\r\n");
 
     // Initialise the MicroPython runtime.
     #if MICROPY_ENABLE_GC

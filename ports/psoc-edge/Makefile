@@ -202,6 +202,7 @@ PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
 	\
 	mtb-dsl-pse8xxgp/hal/source/mtb_hal_clock.c \
 	mtb-dsl-pse8xxgp/hal/source/mtb_hal_gpio.c \
+	mtb-dsl-pse8xxgp/hal/source/mtb_hal_spi.c \
 	mtb-dsl-pse8xxgp/hal/source/mtb_hal_system.c \
 	mtb-dsl-pse8xxgp/hal/source/mtb_hal_timer.c \
 	mtb-dsl-pse8xxgp/hal/source/mtb_hal_uart.c \
@@ -216,6 +217,7 @@ PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_rtc.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_scb_common.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_scb_i2c.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_scb_spi.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_scb_uart.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_smif.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_smif_hb_flash.c \
