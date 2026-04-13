@@ -82,9 +82,9 @@ static const cy_stc_scb_spi_config_t spi_config = {
     .enableMisoLateSample = true,
     .enableTransferSeparation = false,
     .ssPolarity = ((CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT0) |
-                   (CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT1) |
-                   (CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT2) |
-                   (CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT3)),
+        (CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT1) |
+        (CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT2) |
+        (CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT3)),
     .ssSetupDelay = false,
     .ssHoldDelay = false,
     .ssInterFrameDelay = false,
@@ -107,7 +107,7 @@ static void spi_test_run(void) {
 
     // Enable SCB10 peripheral group
     Cy_SysClk_PeriGroupSlaveInit(CY_MMIO_SCB10_PERI_NR, CY_MMIO_SCB10_GROUP_NR,
-                                 CY_MMIO_SCB10_SLAVE_NR, CY_MMIO_SCB10_CLK_HF_NR);
+        CY_MMIO_SCB10_SLAVE_NR, CY_MMIO_SCB10_CLK_HF_NR);
 
     // Clock setup
     Cy_SysClk_PeriphDisableDivider(CY_SYSCLK_DIV_8_BIT, SPI_CLK_DIV_NUM);
