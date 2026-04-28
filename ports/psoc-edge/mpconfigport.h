@@ -57,6 +57,18 @@
 #define MICROPY_PY_SYS_PLATFORM                 "psoc-edge"
 #define MICROPY_PY_SYS_EXC_INFO                 (1)
 
+// Enable errno module for socket error handling
+#define MICROPY_PY_ERRNO                        (1)
+// Use internal errno values (matches lwIP errno numbering used by sockets).
+#define MICROPY_USE_INTERNAL_ERRNO              (1)
+
+// Float and Math support
+#define MICROPY_PY_BUILTINS_FLOAT               (1)
+#define MICROPY_PY_MATH                         (1)
+
+// Enable f-string support (e.g., f"Hello {name}")
+#define MICROPY_PY_FSTRINGS                     (1)
+
 // Extended modules
 #define MICROPY_VFS                             (1)
 #define MICROPY_READER_VFS                      (1)
