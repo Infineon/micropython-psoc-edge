@@ -65,3 +65,15 @@
     script: ports/psoc-edge/board_only_hw/multi/
     device:
       - board: KIT_PSE84_AI
+
+- name: socket-no-internet
+  test:
+    script:
+      - extmod/socket_badconstructor.py
+      - extmod/socket_fileno.py
+      - extmod/socket_tcp_basic.py
+      - extmod/socket_udp_nonblock.py
+      - net_hosted/accept_nonblock.py
+      - net_hosted/accept_timeout.py
+    device:
+      - board: KIT_PSE84_AI
