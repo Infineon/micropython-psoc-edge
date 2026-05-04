@@ -118,20 +118,21 @@ static void machine_spi_scb_isr(mp_obj_t hw_spi_obj) {
 }
 
 static void machine_spi_hw_init(machine_spi_obj_t *self) {
-    // 1. Validate
-    if ((self->polarity > 1U) || (self->phase > 1U)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("polarity/phase must be 0 or 1"));
-    }
-    if (self->bits != 8U) {
-        mp_raise_ValueError(MP_ERROR_TEXT("bits must be 8"));
-    }
-    if ((self->firstbit != MICROPY_PY_MACHINE_SPI_MSB) &&
-        (self->firstbit != MICROPY_PY_MACHINE_SPI_LSB)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("invalid firstbit"));
-    }
-    if (self->is_slave && !self->has_ssel) {
-        mp_raise_ValueError(MP_ERROR_TEXT("slave mode requires ssel pin"));
-    }
+    // Validatition condition
+    // // 1. Validate
+    // if ((self->polarity > 1U) || (self->phase > 1U)) {
+    //     mp_raise_ValueError(MP_ERROR_TEXT("polarity/phase must be 0 or 1"));
+    // }
+    // if (self->bits != 8U) {
+    //     mp_raise_ValueError(MP_ERROR_TEXT("bits must be 8"));
+    // }
+    // if ((self->firstbit != MICROPY_PY_MACHINE_SPI_MSB) &&
+    //     (self->firstbit != MICROPY_PY_MACHINE_SPI_LSB)) {
+    //     mp_raise_ValueError(MP_ERROR_TEXT("invalid firstbit"));
+    // }
+    // if (self->is_slave && !self->has_ssel) {
+    //     mp_raise_ValueError(MP_ERROR_TEXT("slave mode requires ssel pin"));
+    // }
 
     // 2. Pin config → discovers SCB unit
     uint8_t scb_unit = 0;
@@ -283,7 +284,7 @@ static void machine_spi_init(mp_obj_base_t *self,
     size_t n_args,
     const mp_obj_t *pos_args,
     mp_map_t *kw_args) {
-    // hardware-specific init to be implemented by port
+    // hardware-specific init to be implemented
 }
 
 static void machine_spi_deinit(mp_obj_base_t *self_in) {
@@ -294,11 +295,44 @@ static void machine_spi_deinit(mp_obj_base_t *self_in) {
     machine_hw_spi_obj_free(self);
 }
 
-static void machine_spi_transfer(mp_obj_base_t *self,
+static void machine_spi_transfer(mp_obj_base_t *self_in,
     size_t len,
     const uint8_t *src,
     uint8_t *dest) {
-    // hardware-specific transfer to be implemented by port
+    machine_spi_obj_t *self = (machine_spi_obj_t *)self_in;
+    CySCB_Type *base = self->scb_obj->scb;
+
+    if (dest != NULL) {
+        // Full-duplex or read-only (PDL accepts src=NULL, sends default TX byte)
+        Cy_SCB_SPI_Transfer(base, (uint8_t *)src, dest, len, &self->ctx);
+
+        uint32_t start = mp_hal_ticks_ms();
+        while (Cy_SCB_SPI_GetTransferStatus(base, &self->ctx) & CY_SCB_SPI_TRANSFER_ACTIVE) {
+            if ((mp_hal_ticks_ms() - start) > self->timeout) {
+                Cy_SCB_SPI_AbortTransfer(base, &self->ctx);
+                mp_raise_OSError(MP_ETIMEDOUT);
+            }
+            MICROPY_EVENT_POLL_HOOK;
+        }
+    } else {
+        // Write-only: PDL requires a valid RX buffer, use stack chunk
+        uint8_t rx_dummy[64];
+        size_t offset = 0;
+        while (offset < len) {
+            size_t chunk = (len - offset) < 64 ? (len - offset) : 64;
+            Cy_SCB_SPI_Transfer(base, (uint8_t *)&src[offset], rx_dummy, chunk, &self->ctx);
+
+            uint32_t start = mp_hal_ticks_ms();
+            while (Cy_SCB_SPI_GetTransferStatus(base, &self->ctx) & CY_SCB_SPI_TRANSFER_ACTIVE) {
+                if ((mp_hal_ticks_ms() - start) > self->timeout) {
+                    Cy_SCB_SPI_AbortTransfer(base, &self->ctx);
+                    mp_raise_OSError(MP_ETIMEDOUT);
+                }
+                MICROPY_EVENT_POLL_HOOK;
+            }
+            offset += chunk;
+        }
+    }
 }
 
 /* SPI protocol table  */
@@ -309,12 +343,26 @@ static const mp_machine_spi_p_t machine_spi_p = {
     .transfer = machine_spi_transfer,
 };
 
-/* SPI print  */
+/* SPi print */
 
 static void machine_spi_print(const mp_print_t *print,
     mp_obj_t self_in,
     mp_print_kind_t kind) {
-    mp_printf(print, "SPI()");
+    machine_spi_obj_t *self = MP_OBJ_TO_PTR(self_in);
+
+    // print the numeric fields
+    mp_printf(print, "SPI(baudrate=%u, polarity=%u, phase=%u, bits=%u", self->baudrate, self->polarity, self->phase, self->bits);
+    // print the firstbit field as "MSB" or "LSB"
+    mp_printf(print, ", firstbit=%s", (self->firstbit == MICROPY_PY_MACHINE_SPI_MSB) ? "MSB" : "LSB");
+    // print pin names
+    mp_printf(print, ", sck=%s, mosi=%s, miso=%s", mp_hal_pin_name(self->sck), mp_hal_pin_name(self->mosi), mp_hal_pin_name(self->miso));
+
+    // optional ssel pin
+    if (self->has_ssel) {
+        mp_printf(print, ", ssel=%s", mp_hal_pin_name(self->ssel));
+
+        mp_printf(print, ")");
+    }
 }
 
 
