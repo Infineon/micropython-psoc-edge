@@ -107,3 +107,7 @@
 [submodule "lib/psoc-edge/async-transfer"]
 	path = lib/psoc-edge/async-transfer
 	url = https://github.com/Infineon/async-transfer.git
+[submodule "lib/micropython-deepcraft-model-interface"]
+	path = lib/micropython-deepcraft-model-interface
+	url = https://github.com/Infineon/micropython-deepcraft-model-interface
+	branch = dc_va_integration
