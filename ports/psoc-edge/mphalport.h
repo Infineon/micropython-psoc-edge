@@ -49,6 +49,7 @@ mp_uint_t mp_hal_ticks_us(void);
 mp_uint_t mp_hal_ticks_ms(void);
 mp_uint_t mp_hal_ticks_cpu(void);
 
+void mp_hal_stdio_init(void);
 uintptr_t mp_hal_stdio_poll(uintptr_t poll_flags);
 int mp_hal_stdin_rx_chr(void);
 void mp_hal_set_interrupt_char(int c); // -1 to disable
