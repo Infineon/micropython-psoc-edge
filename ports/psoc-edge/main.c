@@ -32,7 +32,6 @@
 
 // MTB includes
 #include "cybsp.h"
-#include "retarget_io_init.h"
 
 #if MICROPY_PY_FREERTOS
 // FreeRTOS header files
@@ -63,6 +62,7 @@
 
 // port-specific includes
 #include "modmachine.h"
+#include "mphalport.h"
 
 #if MICROPY_PY_FREERTOS
 // FreeRTOS task parameters for the MicroPython task
@@ -104,11 +104,6 @@ extern void machine_timer_deinit_all(void);
 extern void machine_wdt_deinit(void);
 extern void machine_deinit(void);
 
-/**
- * TODO: This will later directly handled by
- * the static machine_uart REPL UART instance.
- */
-extern void pclk_div_repl_uart_init(void);
 
 void micropython_task(void *arg);
 #if MICROPY_PY_FREERTOS
@@ -157,12 +152,8 @@ int main(void) {
     /* Enable global interrupts */
     __enable_irq();
 
-    /* Initialize retarget-io middleware */
-    /**
-     * TODO: Enable once not relying on bsp initialization
-     * pclk_div_repl_uart_init();
-     */
-    init_retarget_io();
+    /* Initialize stdio interface */
+    mp_hal_stdio_init();
 
     #if MICROPY_PY_FREERTOS
     xTaskCreate(micropython_task, "MicroPython task", MPY_TASK_STACK_SIZE, NULL, MPY_TASK_PRIORITY, &mpy_task_handle);
