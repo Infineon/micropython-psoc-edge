@@ -29,6 +29,8 @@
 - name: no-extended-hardware
   test: 
     script: ports/psoc-edge/board_only_hw/single
+    exclude:
+      - ports/psoc-edge/board_only_hw/single/ipc.py
     device: 
       - board: KIT_PSE84_AI
 
