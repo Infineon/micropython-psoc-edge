@@ -857,3 +857,63 @@ static mp_irq_obj_t *mp_machine_uart_irq(machine_uart_obj_t *self, bool any_args
     return self->mp_irq_obj;
 }
 #endif
+
+/******************************************************************************/
+// Static REPL UART instance enablement
+
+machine_uart_obj_t repl_uart_obj;
+static uint8_t repl_uart_buf[MICROPYTHON_REPL_RINGBUF_SIZE];
+
+void machine_uart_repl_init() {
+    repl_uart_obj.tx = MICROPYTHON_REPL_UART_TX_PIN;
+    repl_uart_obj.rx = MICROPYTHON_REPL_UART_RX_PIN;
+    mp_hal_pin_af_config_t uart_pins_config[2];
+
+    MP_HAL_PIN_AF_INIT(uart_pins_config[0], repl_uart_obj.tx, CY_GPIO_DM_STRONG_IN_OFF, 1, MACHINE_PIN_AF_SIGNAL_UART_TX);
+    MP_HAL_PIN_AF_INIT(uart_pins_config[1], repl_uart_obj.rx, CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_UART_RX);
+
+    uint8_t scb_unit = uart_pins_config[0].af->unit;
+
+    repl_uart_obj.scb_obj = machine_scb_obj_alloc(scb_unit, &repl_uart_obj, machine_uart_scb_isr);
+    mp_hal_periph_pins_af_config(uart_pins_config, 2);
+
+    repl_uart_obj.baudrate = DEFAULT_UART_BAUDRATE;
+    machine_uart_baudrate_set(&repl_uart_obj);
+
+    repl_uart_obj.bits = DEFAULT_UART_BITS;
+    repl_uart_obj.parity = CY_SCB_UART_PARITY_NONE;
+    repl_uart_obj.stop = CY_SCB_UART_STOP_BITS_1;
+    repl_uart_obj.timeout_ms = 0;
+    repl_uart_obj.timeout_char_ms = 13000 / repl_uart_obj.baudrate + 1;
+
+    repl_uart_obj.rx_ringbuf.buf = repl_uart_buf;
+    repl_uart_obj.rx_ringbuf.size = sizeof(repl_uart_buf);
+
+    #if MICROPY_PY_MACHINE_UART_IRQ
+    repl_uart_obj.mp_irq_obj = NULL;
+    repl_uart_obj.mp_irq_trigger = 0;
+    repl_uart_obj.mp_irq_flags = 0;
+    #endif
+
+    machine_uart_hw_init(&repl_uart_obj);
+}
+
+int machine_uart_repl_readchar(void) {
+    for (;;) {
+        int c = ringbuf_get(&repl_uart_obj.rx_ringbuf);
+        if (c != -1) {
+            return c;
+        }
+        mp_event_handle_nowait();
+    }
+}
+
+void machine_uart_repl_write(const void *buf_in, mp_uint_t size) {
+    int errcode;
+    mp_machine_uart_write(&repl_uart_obj, buf_in, size, &errcode);
+}
+
+uintptr_t machine_uart_repl_ioctl(uintptr_t arg) {
+    int errcode;
+    return mp_machine_uart_ioctl(&repl_uart_obj, MP_STREAM_POLL, arg, &errcode);
+}
