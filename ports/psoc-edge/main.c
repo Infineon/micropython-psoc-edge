@@ -32,7 +32,6 @@
 
 // MTB includes
 #include "cybsp.h"
-#include "retarget_io_init.h"
 
 #if MICROPY_PY_FREERTOS
 // FreeRTOS header files
@@ -149,8 +148,8 @@ int main(void) {
     /* Enable global interrupts */
     __enable_irq();
 
-    /* Initialize retarget-io middleware */
-    init_retarget_io();
+    /* Initialize stdio interface */
+    mp_hal_stdio_init();
 
     #if MICROPY_PY_FREERTOS
     xTaskCreate(micropython_task, "MicroPython task", MPY_TASK_STACK_SIZE, NULL, MPY_TASK_PRIORITY, &mpy_task_handle);
