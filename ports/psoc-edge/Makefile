@@ -60,7 +60,6 @@ GIT_SUBMODULES += $(addprefix lib/psoc-edge/,\
 	mtb-dsl-pse8xxgp \
 	mtb-ipc \
 	mtb-srf \
-	retarget-io \
 	secure-sockets \
 	se-rt-services-utils \
 	serial-memory \
@@ -199,8 +198,6 @@ INC += $(addprefix -I$(PSE_LIB_DIR)/,\
 	mtb-srf/include/COMPONENT_NON_SECURE_DEVICE \
 	mtb-srf/include/COMPONENT_NON_SECURE_DEVICE/COMPONENT_MW_MTB_IPC \
 	\
-	retarget-io/include \
-	\
 	serial-memory/include \
 	\
 	se-rt-services-utils \
@@ -212,7 +209,6 @@ INC += $(addprefix -I$(PSE_LIB_DIR)/,\
 INC += \
     -I$(BOARD_DIR) \
     -I$(BOARD_DIR)/bsp-cfg \
-	-I$(BOARD_DIR)/mtb-prj \
 	-Idualcore/include
 
 ifeq ($(MICROPY_PY_FREERTOS),1)
@@ -297,14 +293,8 @@ PSE_BSP_CFG_C += $(addprefix $(BOARD_DIR)/bsp-cfg/,\
 	cycfg_system.c \
 	)
 
-# TODO: Move this retarget init to the uart driver.
-PSE_BSP_SRC_C += $(addprefix $(BOARD_DIR)/,\
-	mtb-prj/retarget_io_init.c \
-	)
-
 PSE_BSP_SRC_C += \
 	dualcore/source/COMPONENT_CM33/cm33_ipc_communication.c \
-
 
 PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
 	async-transfer/source/mtb_async_transfer.c \
@@ -359,8 +349,6 @@ PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
 	\
 	mtb-srf/source/COMPONENT_NON_SECURE_DEVICE/mtb_srf_pool.c \
 	mtb-srf/source/COMPONENT_NON_SECURE_DEVICE/COMPONENT_MW_MTB_IPC/mtb_srf_ipc.c \
-	\
-	retarget-io/source/cy_retarget_io.c \
 	\
 	serial-memory/source/mtb_serial_memory.c \
 	\
