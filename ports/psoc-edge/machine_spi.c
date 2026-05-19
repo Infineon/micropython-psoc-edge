@@ -36,8 +36,6 @@
 #include "genhdr/pins_af.h"
 #include "mplogger.h"
 #include "machine_scb.h"
-
-// Port-specific include
 #include "modmachine.h"
 
 #define DEFAULT_SPI_BAUDRATE    (115200)
@@ -115,23 +113,23 @@ static void machine_spi_scb_isr(mp_obj_t hw_spi_obj) {
 }
 
 static void machine_spi_hw_init(machine_spi_obj_t *self) {
-    // Validatition condition
-    // Disabled for now [testing purpose] – assumes parameters are already validated
-    // polarity/phase: 0 or 1
-    // bits: must be 8
-    // firstbit: MSB or LSB
-
-
-    // if ((self->polarity > 1U) || (self->phase > 1U)) {
-    //     mp_raise_ValueError(MP_ERROR_TEXT("polarity/phase must be 0 or 1"));
-    // }
-    // if (self->bits != 8U) {
-    //     mp_raise_ValueError(MP_ERROR_TEXT("bits must be 8"));
-    // }
-    // if ((self->firstbit != MICROPY_PY_MACHINE_SPI_MSB) &&
-    //     (self->firstbit != MICROPY_PY_MACHINE_SPI_LSB)) {
-    //     mp_raise_ValueError(MP_ERROR_TEXT("invalid firstbit"));
-    // }
+    // Input validation
+    if (self->baudrate == 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("baudrate must be > 0"));
+    }
+    if ((self->polarity > 1U) || (self->phase > 1U)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("polarity/phase must be 0 or 1"));
+    }
+    if (self->bits != 8U) {
+        mp_raise_ValueError(MP_ERROR_TEXT("bits must be 8"));
+    }
+    if ((self->firstbit != MICROPY_PY_MACHINE_SPI_MSB) &&
+        (self->firstbit != MICROPY_PY_MACHINE_SPI_LSB)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("invalid firstbit"));
+    }
+    if (self->sck == NULL || self->mosi == NULL || self->miso == NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("sck, mosi, and miso pins are required"));
+    }
 
     // Pin config → discovers SCB unit
     // CS/SSEL is managed externally by the user via machine.Pin
@@ -238,34 +236,31 @@ static void machine_spi_hw_init(machine_spi_obj_t *self) {
         .masterSlaveIntEnableMask = 0UL,
     };
 
-    // Init + enable [Initialize SPI hardware]
+    // Initialize SPI hardware
     cy_en_scb_spi_status_t result =
         Cy_SCB_SPI_Init(self->scb_obj->scb, &self->cfg, &self->ctx);
 
     if (result != CY_SCB_SPI_SUCCESS) {
-        // Cleanup on failure
         machine_scb_obj_free(self->scb_obj);
         self->scb_obj = NULL;
         mp_raise_msg_varg(&mp_type_ValueError,
             MP_ERROR_TEXT("SPI init failed: 0x%lx"), (uint32_t)result);
     }
-    // Enable interrupts and start SPI
+
     sys_int_init(&self->scb_obj->irq);
     Cy_SCB_SPI_Enable(self->scb_obj->scb);
 }
 
-// Disables the peripheral, resets registers, frees the interrupt,
 static void machine_spi_hw_deinit(machine_spi_obj_t *self) {
-    Cy_SCB_SPI_Disable(self->scb_obj->scb, &self->ctx);     // Disable SPI operation and stop any ongoing transfers
-    Cy_SCB_SPI_DeInit(self->scb_obj->scb);                  // Reset SPI hardware registers to default state
-    sys_int_deinit(&self->scb_obj->irq);                    // Disable and free the SPI interrupt
-    Cy_SysClk_PeriPclkDisableDivider(self->scb_obj->clk, SPI_CLK_DIV_TYPE, self->div_num);  // Disable the peripheral clock divider assigned to this SPI instance
-    machine_scb_obj_free(self->scb_obj);                    // Release the SCB instance back to the pool
-    self->scb_obj = NULL;                                   // Mark SPI object as deinitialized
+    Cy_SCB_SPI_Disable(self->scb_obj->scb, &self->ctx);
+    Cy_SCB_SPI_DeInit(self->scb_obj->scb);
+    sys_int_deinit(&self->scb_obj->irq);
+    Cy_SysClk_PeriPclkDisableDivider(self->scb_obj->clk, SPI_CLK_DIV_TYPE, self->div_num);
+    machine_scb_obj_free(self->scb_obj);
+    self->scb_obj = NULL;
 }
 
-// Initialize or reconfigure an SPI object based on keyword arguments
-// Shared between the constructor (make_new) and SPI.init() method
+// Shared argument parser used by the constructor (make_new).
 static void machine_spi_init_helper(machine_spi_obj_t *self, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
     enum { ARG_id, ARG_baudrate, ARG_polarity, ARG_phase, ARG_bits,
            ARG_firstbit, ARG_sck, ARG_mosi, ARG_miso };
@@ -388,10 +383,46 @@ static void machine_spi_transfer(mp_obj_base_t *self_in,
     size_t len,
     const uint8_t *src,
     uint8_t *dest) {
-    // TODO: implement hardware-specific SPI transfer
-}
+    machine_spi_obj_t *self = (machine_spi_obj_t *)self_in;
 
-/* SPI protocol table  */
+    if (len == 0) {
+        return;
+    }
+
+    // Prepare TX buffer: if src is NULL (read-only), send 0xFF fill bytes
+    uint8_t tx_fill[len];
+    const uint8_t *tx_buf = src;
+    if (tx_buf == NULL) {
+        memset(tx_fill, 0xFF, len);
+        tx_buf = tx_fill;
+    }
+
+    // Prepare RX buffer: if dest is NULL (write-only), use a dummy buffer
+    uint8_t rx_dummy[len];
+    uint8_t *rx_buf = dest;
+    if (rx_buf == NULL) {
+        rx_buf = rx_dummy;
+    }
+
+    // Start full-duplex transfer (interrupt-driven via ISR)
+    cy_en_scb_spi_status_t status = Cy_SCB_SPI_Transfer(
+        self->scb_obj->scb, (void *)tx_buf, rx_buf, len, &self->ctx);
+
+    if (status != CY_SCB_SPI_SUCCESS) {
+        mp_raise_msg_varg(&mp_type_OSError,
+            MP_ERROR_TEXT("SPI transfer failed: 0x%lx"), (uint32_t)status);
+    }
+
+    // Wait for transfer to complete
+    uint32_t start = mp_hal_ticks_us();
+    while (Cy_SCB_SPI_GetTransferStatus(self->scb_obj->scb, &self->ctx) & CY_SCB_SPI_TRANSFER_ACTIVE) {
+        if (mp_hal_ticks_us() - start > self->timeout) {
+            Cy_SCB_SPI_AbortTransfer(self->scb_obj->scb, &self->ctx);
+            mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("SPI transfer timeout"));
+        }
+        MICROPY_EVENT_POLL_HOOK
+    }
+}
 
 static const mp_machine_spi_p_t machine_spi_p = {
     .init = machine_spi_init,
@@ -399,12 +430,14 @@ static const mp_machine_spi_p_t machine_spi_p = {
     .transfer = machine_spi_transfer,
 };
 
-/* SPi print */
-
 static void machine_spi_print(const mp_print_t *print,
     mp_obj_t self_in,
     mp_print_kind_t kind) {
-    mp_printf(print, "SPI()");
+    machine_spi_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_printf(print, "SPI(baudrate=%u, polarity=%u, phase=%u, bits=%u, firstbit=%s, sck='%q', mosi='%q', miso='%q')",
+        self->baudrate, self->polarity, self->phase, self->bits,
+        self->firstbit == MICROPY_PY_MACHINE_SPI_MSB ? "MSB" : "LSB",
+        self->sck->name, self->mosi->name, self->miso->name);
 }
 
 // Create and initialize a new machine.SPI object from Python
@@ -425,6 +458,9 @@ mp_obj_t mp_machine_spi_make_new(const mp_obj_type_t *type, size_t n_args, size_
     self->firstbit = MICROPY_PY_MACHINE_SPI_MSB;
     self->timeout = DEFAULT_SPI_TIMEOUT;
     self->scb_obj = NULL;
+    self->sck = NULL;
+    self->mosi = NULL;
+    self->miso = NULL;
 
     // Delegate argument parsing and initialization to init_helper
     nlr_buf_t nlr;
@@ -448,3 +484,11 @@ MP_DEFINE_CONST_OBJ_TYPE(
     protocol, &machine_spi_p,
     locals_dict, &mp_machine_spi_locals_dict
     );
+
+void machine_spi_deinit_all(void) {
+    for (uint8_t i = 0; i < MICROPY_PY_MACHINE_SPI_NUM_ENTRIES; i++) {
+        if (machine_hw_spi_obj[i] != NULL) {
+            machine_spi_deinit((mp_obj_base_t *)machine_hw_spi_obj[i]);
+        }
+    }
+}

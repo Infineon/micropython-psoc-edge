@@ -115,6 +115,8 @@
 
 #define MICROPY_PY_MACHINE_SPI                  (1)
 #define MICROPY_PY_MACHINE_SOFTSPI              (0)
+#define MICROPY_PY_MACHINE_SPI_TARGET           (1)
+#define MICROPY_PY_MACHINE_SPI_TARGET_MAX       (4)
 
 #define MICROPY_PY_MACHINE_I2C_TARGET           (1)
 #define MICROPY_PY_MACHINE_I2C_TARGET_MAX       (1)

@@ -43,6 +43,7 @@ typedef struct _machine_pdm_pcm_obj_t machine_pdm_pcm_obj_t;
 
 extern const mp_obj_type_t machine_i2c_type;
 extern const mp_obj_type_t machine_spi_type;
+extern const mp_obj_type_t machine_spi_target_type;
 extern const mp_obj_type_t machine_pdm_pcm_type;
 extern const mp_obj_type_t machine_rtc_type;
 extern const mp_obj_type_t machine_ipc_type;

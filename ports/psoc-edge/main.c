@@ -64,6 +64,8 @@ extern void time_init(void);
 extern void machine_pin_irq_deinit_all(void);
 extern void machine_hw_i2c_deinit_all(void);
 extern void machine_pdm_pcm_deinit_all(void);
+extern void machine_spi_deinit_all(void);
+extern void machine_spi_target_deinit_all(void);
 
 boot_mode_t check_boot_mode(void) {
     boot_mode_t boot_mode;
@@ -168,6 +170,8 @@ soft_reset:
     machine_pin_irq_deinit_all();
     machine_hw_i2c_deinit_all();
     machine_pdm_pcm_deinit_all();
+    machine_spi_deinit_all();
+    machine_spi_target_deinit_all();
 
     #if MICROPY_ENABLE_GC
     gc_sweep_all();
