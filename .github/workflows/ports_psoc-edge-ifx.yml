@@ -78,8 +78,16 @@ jobs:
           pse_test_dir: ../../tests/ports/psoc-edge
         run: |
           cd lib/mpy-test-ext
-          python -u run_test_plan.py --board ${{ matrix.board }} --max-retries 2 --test-plan $pse_test_dir/test-plan.yml --hil-devs $pse_test_dir/${{ runner.name }}-devs.yml
-        
+          python -u run_test_plan.py --board ${{ matrix.board }} --max-retries 2 --test-plan $pse_test_dir/test-plan.yml --hil-devs $pse_test_dir/${{ runner.name }}-devs.yml   
+      - name: Run all tests (PR to psoc-edge-main)
+        if: github.event_name == 'pull_request' && github.base_ref == 'psoc-edge-main'
+        timeout-minutes: 30
+        env:
+          pse_test_dir: tests/ports/psoc-edge
+        run: |
+          target_port=$(etdevs-query address -y $pse_test_dir/${{ runner.name }}-devs.yml -f name=${{ matrix.board }} | head -1)
+          cd tests
+          python -u run-tests.py -t $target_port
       - name: Container teardown 
         if: failure() || success()
         run: |
