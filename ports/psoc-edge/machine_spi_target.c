@@ -42,7 +42,16 @@
 #define DEFAULT_SPI_TARGET_POLARITY    (0)
 #define DEFAULT_SPI_TARGET_PHASE       (0)
 #define DEFAULT_SPI_TARGET_BITS        (8)
-#define DEFAULT_SPI_TARGET_TIMEOUT     (50000)
+#define DEFAULT_SPI_TARGET_TIMEOUT_MS  (5000U)   // ms; must be < timer period (15000 ms)
+
+#define SPI_TARGET_CLK_DIV_TYPE        CY_SYSCLK_DIV_8_BIT
+#define SPI_TARGET_CLK_DIV_BASE        (3U)   // Each SCB lives in its own PERI group with independent dividers
+
+// Returns elapsed milliseconds since start_ms, accounting for the 15s timer wrap.
+static inline uint32_t spi_target_elapsed_ms(uint32_t start_ms) {
+    uint32_t now = mp_hal_ticks_ms();
+    return (now >= start_ms) ? (now - start_ms) : (15000U - start_ms + now);
+}
 
 typedef struct {
     uint32_t peri_nr;
@@ -74,6 +83,7 @@ typedef struct _machine_spi_target_obj_t {
     uint8_t bits;
     uint8_t firstbit;
     uint32_t timeout;
+    uint8_t div_num;  // Clock divider number for PCLK
     machine_scb_obj_t *scb_obj;
     cy_stc_scb_spi_config_t cfg;
     cy_stc_scb_spi_context_t ctx;
@@ -85,6 +95,7 @@ static inline machine_spi_target_obj_t *machine_spi_target_obj_alloc(void) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_SPI_TARGET_MAX; i++) {
         if (machine_spi_target_obj[i] == NULL) {
             machine_spi_target_obj[i] = mp_obj_malloc(machine_spi_target_obj_t, &machine_spi_target_type);
+            machine_spi_target_obj[i]->div_num = SPI_TARGET_CLK_DIV_BASE + i;
             return machine_spi_target_obj[i];
         }
     }
@@ -143,6 +154,17 @@ static void machine_spi_target_hw_init(machine_spi_target_obj_t *self) {
     // Allocate SCB
     self->scb_obj = machine_scb_obj_alloc(scb_unit, self,
         machine_spi_target_scb_isr);
+
+    // Configure SPI PCLK divider (needed for slave's internal clock even though
+    // the bit clock comes from master's SCK)
+    Cy_SysClk_PeriPclkDisableDivider(self->scb_obj->clk,
+        SPI_TARGET_CLK_DIV_TYPE, self->div_num);
+    Cy_SysClk_PeriPclkAssignDivider(self->scb_obj->clk,
+        SPI_TARGET_CLK_DIV_TYPE, self->div_num);
+    Cy_SysClk_PeriPclkSetDivider(self->scb_obj->clk,
+        SPI_TARGET_CLK_DIV_TYPE, self->div_num, 0U);
+    Cy_SysClk_PeriPclkEnableDivider(self->scb_obj->clk,
+        SPI_TARGET_CLK_DIV_TYPE, self->div_num);
 
     // Select SPI clock polarity and phase
     cy_en_scb_spi_sclk_mode_t sclk_mode;
@@ -206,6 +228,7 @@ static void machine_spi_target_hw_deinit(machine_spi_target_obj_t *self) {
     Cy_SCB_SPI_Disable(self->scb_obj->scb, &self->ctx);
     Cy_SCB_SPI_DeInit(self->scb_obj->scb);
     sys_int_deinit(&self->scb_obj->irq);
+    Cy_SysClk_PeriPclkDisableDivider(self->scb_obj->clk, SPI_TARGET_CLK_DIV_TYPE, self->div_num);
     machine_scb_obj_free(self->scb_obj);
     self->scb_obj = NULL;
 }
@@ -252,7 +275,7 @@ static mp_obj_t machine_spi_target_make_new(const mp_obj_type_t *type, size_t n_
     self->phase = args[ARG_phase].u_int;
     self->bits = args[ARG_bits].u_int;
     self->firstbit = args[ARG_firstbit].u_int;
-    self->timeout = DEFAULT_SPI_TARGET_TIMEOUT;
+    self->timeout = DEFAULT_SPI_TARGET_TIMEOUT_MS;
     self->scb_obj = NULL;
 
     nlr_buf_t nlr;
@@ -284,7 +307,7 @@ static mp_obj_t machine_spi_target_read(mp_obj_t self_in, mp_obj_t buf_in) {
 
     Cy_SCB_SPI_ClearRxFifo(self->scb_obj->scb);
 
-    uint32_t start = mp_hal_ticks_us();
+    uint32_t start = mp_hal_ticks_ms();
     size_t received = 0;
     uint8_t *rx_buf = bufinfo.buf;
 
@@ -295,7 +318,7 @@ static mp_obj_t machine_spi_target_read(mp_obj_t self_in, mp_obj_t buf_in) {
             num_available--;
         }
 
-        if (mp_hal_ticks_us() - start > self->timeout) {
+        if (spi_target_elapsed_ms(start) > self->timeout) {
             mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("SPITarget read timeout"));
         }
         MICROPY_EVENT_POLL_HOOK
@@ -323,9 +346,9 @@ static mp_obj_t machine_spi_target_write(mp_obj_t self_in, mp_obj_t buf_in) {
         }
     }
 
-    uint32_t start = mp_hal_ticks_us();
+    uint32_t start = mp_hal_ticks_ms();
     while (!Cy_SCB_SPI_IsTxComplete(self->scb_obj->scb)) {
-        if (mp_hal_ticks_us() - start > self->timeout) {
+        if (spi_target_elapsed_ms(start) > self->timeout) {
             mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("SPITarget write timeout"));
         }
         MICROPY_EVENT_POLL_HOOK
@@ -354,7 +377,7 @@ static mp_obj_t machine_spi_target_write_readinto(mp_obj_t self_in, mp_obj_t tx_
     size_t len = tx_bufinfo.len;
     size_t tx_idx = 0;
     size_t rx_idx = 0;
-    uint32_t start = mp_hal_ticks_us();
+    uint32_t start = mp_hal_ticks_ms();
 
     while (rx_idx < len) {
         // Load TX FIFO
@@ -368,7 +391,7 @@ static mp_obj_t machine_spi_target_write_readinto(mp_obj_t self_in, mp_obj_t tx_
             rx_buf[rx_idx++] = (uint8_t)Cy_SCB_SPI_Read(self->scb_obj->scb);
         }
 
-        if (mp_hal_ticks_us() - start > self->timeout) {
+        if (spi_target_elapsed_ms(start) > self->timeout) {
             mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("SPITarget transfer timeout"));
         }
         MICROPY_EVENT_POLL_HOOK
