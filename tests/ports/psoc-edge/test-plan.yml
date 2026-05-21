@@ -58,3 +58,11 @@
       - board: KIT_PSE84_AI
         features:
           - i2c
+
+- name: pwm
+  test: 
+    script: ports/psoc-edge/board_ext_hw/single/pwm.py
+    device: 
+      - board: KIT_PSE84_AI
+        features:
+          - pwm
