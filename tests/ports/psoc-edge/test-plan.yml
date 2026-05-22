@@ -58,3 +58,12 @@
       - board: KIT_PSE84_AI
         features:
           - i2c
+
+- name: spi
+  type: multi
+  test:
+    script: ports/psoc-edge/board_ext_hw/multi/spi_basic.py
+    device:
+      - board: KIT_PSE84_AI
+        features:
+          - spi

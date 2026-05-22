@@ -3,8 +3,10 @@
   features:
     - pin
     - i2c
+    - spi
 
 - name: KIT_PSE84_AI
   uid: 111B1698012D2400
   features:
     - i2c
+    - spi
