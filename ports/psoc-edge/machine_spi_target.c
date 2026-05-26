@@ -42,15 +42,17 @@
 #define DEFAULT_SPI_TARGET_POLARITY    (0)
 #define DEFAULT_SPI_TARGET_PHASE       (0)
 #define DEFAULT_SPI_TARGET_BITS        (8)
-#define DEFAULT_SPI_TARGET_TIMEOUT_MS  (5000U)   // ms; must be < timer period (15000 ms)
+#define SPI_TARGET_TICKS_WRAP_MS       (15000U) // from mp_hal_ticks_ms source timer period in modtime.c
+#define DEFAULT_SPI_TARGET_TIMEOUT_MS  (5000U)  // must stay below SPI_TARGET_TICKS_WRAP_MS
 
 #define SPI_TARGET_CLK_DIV_TYPE        CY_SYSCLK_DIV_8_BIT
 #define SPI_TARGET_CLK_DIV_BASE        (3U)   // Each SCB lives in its own PERI group with independent dividers
 
-// Returns elapsed milliseconds since start_ms, accounting for the 15s timer wrap.
+// mp_hal_ticks_ms() on this port wraps every SPI_TARGET_TICKS_WRAP_MS.
+// This computes elapsed time across one wrap; caller keeps timeout < wrap period.
 static inline uint32_t spi_target_elapsed_ms(uint32_t start_ms) {
     uint32_t now = mp_hal_ticks_ms();
-    return (now >= start_ms) ? (now - start_ms) : (15000U - start_ms + now);
+    return (now >= start_ms) ? (now - start_ms) : (SPI_TARGET_TICKS_WRAP_MS - start_ms + now);
 }
 
 typedef struct {
@@ -304,8 +306,6 @@ static mp_obj_t machine_spi_target_read(mp_obj_t self_in, mp_obj_t buf_in) {
     machine_spi_target_obj_t *self = MP_OBJ_TO_PTR(self_in);
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(buf_in, &bufinfo, MP_BUFFER_WRITE);
-
-    Cy_SCB_SPI_ClearRxFifo(self->scb_obj->scb);
 
     uint32_t start = mp_hal_ticks_ms();
     size_t received = 0;
