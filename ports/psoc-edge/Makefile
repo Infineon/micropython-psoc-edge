@@ -468,7 +468,18 @@ ifeq ($(MICROPY_PY_NETWORK_IFX_WCM),1)
 CFLAGS += -DMICROPY_PY_NETWORK=1 -DMICROPY_PY_NETWORK_IFX_WCM=1 -Wno-stringop-truncation
 	MOD_SRC_C += network_ifx_wcm.c 
 	MOD_SRC_C += modsocket.c
+# WiFi build: reserve 128 KB (0x20000) of .heap for FreeRTOS (~40 KB) + WiFi/WCM/LwIP (~80 KB).
+# __GcHeapStart and __GcHeapEnd are defined here via --defsym so the BSP linker
+# script (a git submodule) does not need to be modified.
+LDFLAGS += -Wl,--defsym=__GcHeapStart=__HeapBase+0x20000
+else
+# Non-WiFi build: only FreeRTOS task stacks need the C-heap; 32 KB (0x8000) is plenty.
+# The GC receives the remaining ~220 KB of .heap automatically.
+LDFLAGS += -Wl,--defsym=__GcHeapStart=__HeapBase+0x8000
 endif
+# GC heap ends at the top of the .heap zone (just below the MSP stack).
+# __HeapBase and __HeapLimit are defined in the BSP linker script; do not modify that file.
+LDFLAGS += -Wl,--defsym=__GcHeapEnd=__HeapLimit
 
 SRC_C += \
 	help.c \
