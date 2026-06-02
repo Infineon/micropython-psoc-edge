@@ -45,6 +45,7 @@
 #include "shared/readline/readline.h"
 
 // port-specific includes
+#include "mphalport.h"
 
 typedef enum {
     BOOT_MODE_NORMAL,
