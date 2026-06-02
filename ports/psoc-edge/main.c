@@ -61,6 +61,7 @@
 #endif
 
 // port-specific includes
+#include "mphalport.h"
 
 #if MICROPY_PY_FREERTOS
 // FreeRTOS task parameters for the MicroPython task
