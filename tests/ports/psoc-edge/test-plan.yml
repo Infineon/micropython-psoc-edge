@@ -74,3 +74,11 @@
       - board: KIT_PSE84_AI
         features:
           - pwm
+
+- name: timer
+  test:
+    script: ports/psoc-edge/board_only_hw/single/timer.py
+    device:
+      - board: KIT_PSE84_AI
+        features:
+          - timer
