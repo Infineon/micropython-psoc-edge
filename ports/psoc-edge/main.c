@@ -64,7 +64,6 @@ extern void machine_pin_irq_deinit_all(void);
 extern void machine_hw_i2c_deinit_all(void);
 extern void machine_pdm_pcm_deinit_all(void);
 extern void machine_ipc_deinit_all(void);
-extern void machine_timer_init_all(void);
 extern void machine_timer_deinit_all(void);
 
 boot_mode_t check_boot_mode(void) {
@@ -122,7 +121,6 @@ int main(void) {
 
 soft_reset:
     machine_rtc_init_all();
-    machine_timer_init_all();
     mp_init();
 
     readline_init0();
