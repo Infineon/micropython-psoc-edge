@@ -11,8 +11,8 @@ SUPPORTED_AF = {
     "UART": ["TX", "RX", "CTS", "RTS"],
     "SPI": ["CLK", "MOSI", "MISO", "SELECT0", "SELECT1"],
     "PDM": ["CLK", "DATA"],
+    "TDM": ["TX_SCK", "TX_FSYNC", "TX_SD", "TX_MCK", "RX_SCK", "RX_FSYNC", "RX_SD", "RX_MCK"],
     # TODO: Other active functionalities that we need to figure out:
-    # - TDM
     # - TCPWM
     # - SMIF
     # - CANFD
@@ -75,6 +75,33 @@ class PSE84Pin(boardgen.Pin):
         # The last token is the signal signal type for the
         # given function, e.g. SDA, SCL, MOSI
         af_signal = af.split("_")[2]
+
+        af_supported = af_fn in SUPPORTED_AF and af_signal in SUPPORTED_AF[af_fn]
+
+        pin_af = PinAf(af_idx, af_fn, af_unit, af_signal, af_supported, af_name, af_ptr)
+        self._afs.append(pin_af)
+
+    def add_af_tdm(self, af_idx, af_name, af):
+        # TDM alternate functions follow the convention:
+        # TDM_TDM_<TX|RX>_<SIGNAL><unit>
+        # e.g. TDM_TDM_TX_SCK0, TDM_TDM_RX_SD1
+
+        # The peripheral pointer is TDM<unit>, derived from the signal suffix digit.
+        # The function is always "TDM".
+        # af_signal is e.g. "TX_SCK", "RX_SD" (direction + signal name).
+        # af_unit is the instance number (0, 1, ...).
+
+        import re
+
+        # Format: TDM_TDM_<DIR>_<SIG><unit>  e.g. TDM_TDM_TX_SCK0
+        match = re.match(r"^TDM_TDM_((?:TX|RX)_[A-Z]+)([0-9]+)$", af)
+        if not match:
+            return
+
+        af_signal = match.group(1)  # e.g. "TX_SCK"
+        af_unit = match.group(2)  # e.g. "0"
+        af_fn = "TDM"
+        af_ptr = "TDM" + af_unit  # e.g. "TDM0"
 
         af_supported = af_fn in SUPPORTED_AF and af_signal in SUPPORTED_AF[af_fn]
 
@@ -154,6 +181,8 @@ class PSE84Pin(boardgen.Pin):
             self.add_af_scb(af_idx, af_name, af)
         elif af.startswith("PDM"):
             self.add_af_pdm(af_idx, af_name, af)
+        elif af.startswith("TDM"):
+            self.add_af_tdm(af_idx, af_name, af)
         else:
             # TODO: Extend the parsing to other peripherals.
             pass

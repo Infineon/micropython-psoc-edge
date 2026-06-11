@@ -36,6 +36,7 @@ typedef enum {
     MACHINE_PIN_AF_FN_UART,
 
     MACHINE_PIN_AF_FN_PDM,
+    MACHINE_PIN_AF_FN_TDM,
     /* TODO: Add additional functionalities */
 } machine_pin_af_fn_t;
 
@@ -56,6 +57,15 @@ typedef enum {
 
     MACHINE_PIN_AF_SIGNAL_PDM_CLK,
     MACHINE_PIN_AF_SIGNAL_PDM_DATA,
+
+    MACHINE_PIN_AF_SIGNAL_TDM_TX_SCK,
+    MACHINE_PIN_AF_SIGNAL_TDM_TX_FSYNC,
+    MACHINE_PIN_AF_SIGNAL_TDM_TX_SD,
+    MACHINE_PIN_AF_SIGNAL_TDM_TX_MCK,
+    MACHINE_PIN_AF_SIGNAL_TDM_RX_SCK,
+    MACHINE_PIN_AF_SIGNAL_TDM_RX_FSYNC,
+    MACHINE_PIN_AF_SIGNAL_TDM_RX_SD,
+    MACHINE_PIN_AF_SIGNAL_TDM_RX_MCK,
 
     /* TODO: Add additional types */
 } machine_pin_af_signal_t;
