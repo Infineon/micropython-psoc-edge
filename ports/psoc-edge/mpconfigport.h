@@ -97,6 +97,8 @@
 #define MICROPY_PY_MACHINE_I2S                  (1)
 #define MICROPY_PY_MACHINE_I2S_RING_BUF         (1)
 #define MICROPY_PY_MACHINE_I2S_INCLUDEFILE      "ports/psoc-edge/machine_i2s.c"
+#define MICROPY_PY_MACHINE_I2S_CONSTANT_RX      (RX)
+#define MICROPY_PY_MACHINE_I2S_CONSTANT_TX      (TX)
 
 #define MICROPY_PY_MACHINE_PWM                  (1)
 #define MICROPY_PY_MACHINE_PWM_MAX_OBJS         (7)

@@ -29,13 +29,48 @@
 
 #define MICROPY_HW_MAX_I2S (1)
 
+// Size of the chunk (in bytes) copied per non-blocking IRQ invocation.
+#define SIZEOF_NON_BLOCKING_COPY_IN_BYTES (256)
+
+typedef enum {
+    RX,
+    TX
+} i2s_mode_t;
+
 typedef struct _machine_i2s_obj_t {
     mp_obj_base_t base;
+    uint8_t i2s_id;
+    mp_hal_pin_obj_t sck;
+    mp_hal_pin_obj_t ws;
+    mp_hal_pin_obj_t sd;
+    i2s_mode_t mode;
+    int8_t bits;
+    format_t format;
+    int32_t rate;
+    int32_t ibuf;
+    mp_obj_t callback_for_non_blocking;
+    io_mode_t io_mode;
+    ring_buf_t ring_buffer;
+    uint8_t *ring_buffer_storage;
+    non_blocking_descriptor_t non_blocking_descriptor;
 } machine_i2s_obj_t;
 
-static const int8_t i2s_frame_map[NUM_I2S_USER_FORMATS][I2S_RX_FRAME_SIZE_IN_BYTES];
+// Frame map: transforms 8-byte I2S RX frames to the user-requested sample format.
+// Row order: Mono-16, Mono-32, Stereo-16, Stereo-32
+static const int8_t i2s_frame_map[NUM_I2S_USER_FORMATS][I2S_RX_FRAME_SIZE_IN_BYTES] = {
+    {-1, -1,  0,  1, -1, -1, -1, -1 },  // Mono, 16-bits
+    { 0,  1,  2,  3, -1, -1, -1, -1 },  // Mono, 32-bits
+    {-1, -1,  0,  1, -1, -1,  2,  3 },  // Stereo, 16-bits
+    { 0,  1,  2,  3,  4,  5,  6,  7 },  // Stereo, 32-bits
+};
 
-static int8_t get_frame_mapping_index(int8_t bits, format_t format);
+static int8_t get_frame_mapping_index(int8_t bits, format_t format) {
+    if (format == MONO) {
+        return (bits == 16) ? 0 : 1;
+    } else {
+        return (bits == 16) ? 2 : 3;
+    }
+}
 
 static machine_i2s_obj_t *mp_machine_i2s_make_new_instance(mp_int_t i2s_id) {
     // TODO: implement
