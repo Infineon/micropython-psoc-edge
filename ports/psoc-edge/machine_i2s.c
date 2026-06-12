@@ -28,7 +28,10 @@
 // extmod/machine_i2s.c via MICROPY_PY_MACHINE_I2S_INCLUDEFILE.
 
 #include "cy_sysclk.h"
+#include "cy_tdm.h"
 #include "cycfg_peripheral_clocks.h"
+#include "machine_pin_af.h"
+#include "mphalport.h"
 
 #define MICROPY_HW_MAX_I2S (1)
 
@@ -114,6 +117,7 @@ typedef struct _machine_i2s_obj_t {
     ring_buf_t ring_buffer;
     uint8_t *ring_buffer_storage;
     non_blocking_descriptor_t non_blocking_descriptor;
+    TDM_STRUCT_Type *tdm_base;  // NULL when not initialised; acts as init guard
 } machine_i2s_obj_t;
 
 // Frame map: transforms 8-byte I2S RX frames to the user-requested sample format.
@@ -134,24 +138,193 @@ static int8_t get_frame_mapping_index(int8_t bits, format_t format) {
 }
 
 static machine_i2s_obj_t *mp_machine_i2s_make_new_instance(mp_int_t i2s_id) {
-    // TODO: implement
-    (void)i2s_id;
-    return NULL;
+    if ((uint32_t)i2s_id >= MICROPY_HW_MAX_I2S) {
+        mp_raise_msg_varg(&mp_type_ValueError,
+            MP_ERROR_TEXT("I2S(%d) does not exist"), i2s_id);
+    }
+    // Reuse existing instance (deinit first to release hardware).
+    machine_i2s_obj_t *self = MP_STATE_PORT(machine_i2s_obj[i2s_id]);
+    if (self != NULL) {
+        mp_machine_i2s_deinit(self);
+    }
+    self = mp_obj_malloc(machine_i2s_obj_t, &machine_i2s_type);
+    self->i2s_id = (uint8_t)i2s_id;
+    self->tdm_base = NULL;
+    MP_STATE_PORT(machine_i2s_obj[i2s_id]) = self;
+    return self;
 }
 
 static void mp_machine_i2s_init_helper(machine_i2s_obj_t *self, mp_arg_val_t *args) {
-    // TODO: implement
-    (void)self;
-    (void)args;
+    // --- Validate pins ---
+    mp_hal_pin_obj_t sck = mp_hal_get_pin_obj(args[ARG_sck].u_obj);
+    mp_hal_pin_obj_t ws = mp_hal_get_pin_obj(args[ARG_ws].u_obj);
+    mp_hal_pin_obj_t sd = mp_hal_get_pin_obj(args[ARG_sd].u_obj);
+
+    // --- Validate mode ---
+    i2s_mode_t mode = (i2s_mode_t)args[ARG_mode].u_int;
+    if (mode != RX && mode != TX) {
+        mp_raise_ValueError(MP_ERROR_TEXT("invalid mode"));
+    }
+
+    // --- Validate bits ---
+    int8_t bits = (int8_t)args[ARG_bits].u_int;
+    if (bits != 16 && bits != 32) {
+        mp_raise_ValueError(MP_ERROR_TEXT("invalid bits (must be 16 or 32)"));
+    }
+
+    // --- Validate format ---
+    format_t format = (format_t)args[ARG_format].u_int;
+    if (format != MONO && format != STEREO) {
+        mp_raise_ValueError(MP_ERROR_TEXT("invalid format"));
+    }
+
+    // --- Validate rate ---
+    int32_t rate = args[ARG_rate].u_int;
+    if (rate <= 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("invalid rate"));
+    }
+
+    // --- Validate and allocate ring buffer ---
+    int32_t ring_buffer_len = args[ARG_ibuf].u_int;
+    if (ring_buffer_len <= 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("invalid ibuf"));
+    }
+    uint8_t *storage = m_new(uint8_t, ring_buffer_len);
+    ringbuf_init(&self->ring_buffer, storage, ring_buffer_len);
+    self->ring_buffer_storage = storage;
+
+    // --- Store fields ---
+    self->sck = sck;
+    self->ws = ws;
+    self->sd = sd;
+    self->mode = mode;
+    self->bits = bits;
+    self->format = format;
+    self->rate = rate;
+    self->ibuf = ring_buffer_len;
+    self->callback_for_non_blocking = MP_OBJ_NULL;
+    self->non_blocking_descriptor.copy_in_progress = false;
+    self->io_mode = BLOCKING;
+
+    // --- Clock ---
+    // SCK = sample_rate * bits_per_channel * 2
+    // Frequency is set by the 16.5-bit PCLK fractional divider (clkDiv=0 in TDM
+    // hardware so the TDM block passes clk_if_srss[0] directly to SCK).
+    uint32_t div_int, div_frac;
+    if (!i2s_calc_clock_divider((uint32_t)rate, (uint8_t)bits, &div_int, &div_frac)) {
+        mp_raise_ValueError(
+            MP_ERROR_TEXT("cannot achieve I2S clock for requested rate/bits"));
+    }
+    i2s_clock_configure(div_int, div_frac);
+
+    // --- Pin alternate functions ---
+    // PSoC Edge is always I2S master: SCK and WS are outputs regardless of mode.
+    // In TX mode all three pins belong to the TDM TX block.
+    // In RX mode SCK/WS are driven by the TDM RX master, SD is an input.
+    if (mode == TX) {
+        const mp_hal_pin_af_config_t pin_cfg[] = {
+            MP_HAL_PIN_AF_CONF(sck, CY_GPIO_DM_STRONG_IN_OFF, 1,
+                MACHINE_PIN_AF_SIGNAL_TDM_TX_SCK),
+            MP_HAL_PIN_AF_CONF(ws,  CY_GPIO_DM_STRONG_IN_OFF, 1,
+                MACHINE_PIN_AF_SIGNAL_TDM_TX_FSYNC),
+            MP_HAL_PIN_AF_CONF(sd,  CY_GPIO_DM_STRONG_IN_OFF, 0,
+                MACHINE_PIN_AF_SIGNAL_TDM_TX_SD),
+        };
+        mp_hal_periph_pins_af_config(pin_cfg, 3);
+    } else {
+        const mp_hal_pin_af_config_t pin_cfg[] = {
+            MP_HAL_PIN_AF_CONF(sck, CY_GPIO_DM_STRONG_IN_OFF, 1,
+                MACHINE_PIN_AF_SIGNAL_TDM_RX_SCK),
+            MP_HAL_PIN_AF_CONF(ws,  CY_GPIO_DM_STRONG_IN_OFF, 1,
+                MACHINE_PIN_AF_SIGNAL_TDM_RX_FSYNC),
+            MP_HAL_PIN_AF_CONF(sd,  CY_GPIO_DM_HIGHZ, 0,
+                MACHINE_PIN_AF_SIGNAL_TDM_RX_SD),
+        };
+        mp_hal_periph_pins_af_config(pin_cfg, 3);
+    }
+
+    // --- TDM/I2S hardware init ---
+    // Use TDM STRUCT0.  clkDiv=0: SCK comes directly from clk_if_srss[0]
+    // (the PCLK fractional divider has already been set above).
+    // I2S framing: 2 channels, 1-bit FSYNC pulse (CY_TDM_BIT_PERIOD),
+    // data one SCK cycle after FSYNC edge (CY_TDM_LEFT_DELAYED = standard I2S).
+    TDM_STRUCT_Type *tdm_base = TDM0_TDM_STRUCT0;
+    cy_en_tdm_ws_t word_size = (bits == 16) ? CY_TDM_SIZE_16 : CY_TDM_SIZE_32;
+    uint8_t ch_size = (uint8_t)bits;
+
+    cy_stc_tdm_config_tx_t tx_cfg = {
+        .enable = (mode == TX),
+        .masterMode = CY_TDM_DEVICE_MASTER,
+        .wordSize = word_size,
+        .format = CY_TDM_LEFT_DELAYED,
+        .clkDiv = 0U,
+        .clkSel = CY_TDM_SEL_SRSS_CLK0,
+        .sckPolarity = CY_TDM_CLK,
+        .fsyncPolarity = CY_TDM_SIGN,
+        .fsyncFormat = CY_TDM_BIT_PERIOD,
+        .channelNum = 2U,
+        .channelSize = ch_size,
+        .fifoTriggerLevel = 4U,
+        .chEn = 0x3U,
+        .signalInput = 0U,
+        .i2sMode = true,
+    };
+    cy_stc_tdm_config_rx_t rx_cfg = {
+        .enable = (mode == RX),
+        .masterMode = CY_TDM_DEVICE_MASTER,
+        .wordSize = word_size,
+        .signExtend = CY_ZERO_EXTEND,
+        .format = CY_TDM_LEFT_DELAYED,
+        .clkDiv = 0U,
+        .clkSel = CY_TDM_SEL_SRSS_CLK0,
+        .sckPolarity = CY_TDM_CLK,
+        .fsyncPolarity = CY_TDM_SIGN,
+        .lateSample = false,
+        .fsyncFormat = CY_TDM_BIT_PERIOD,
+        .channelNum = 2U,
+        .channelSize = ch_size,
+        .chEn = 0x3U,
+        .fifoTriggerLevel = 4U,
+        .signalInput = 0U,
+        .i2sMode = true,
+    };
+    cy_stc_tdm_config_t tdm_cfg = {
+        .tx_config = &tx_cfg,
+        .rx_config = &rx_cfg,
+    };
+
+    cy_en_tdm_status_t status = Cy_AudioTDM_Init(tdm_base, &tdm_cfg);
+    if (status != CY_TDM_SUCCESS) {
+        mp_raise_msg_varg(&mp_type_ValueError,
+            MP_ERROR_TEXT("TDM init failed: 0x%lx"), (uint32_t)status);
+    }
+
+    if (mode == TX) {
+        Cy_AudioTDM_EnableTx(TDM0_TDM_STRUCT0_TDM_TX_STRUCT);
+    } else {
+        Cy_AudioTDM_EnableRx(TDM0_TDM_STRUCT0_TDM_RX_STRUCT);
+    }
+
+    self->tdm_base = tdm_base;
 }
 
 static void mp_machine_i2s_deinit(machine_i2s_obj_t *self) {
-    // TODO: implement
-    (void)self;
+    if (self->tdm_base == NULL) {
+        return;  // already de-initialised
+    }
+    if (self->mode == TX) {
+        Cy_AudioTDM_DisableTx(TDM0_TDM_STRUCT0_TDM_TX_STRUCT);
+    } else {
+        Cy_AudioTDM_DisableRx(TDM0_TDM_STRUCT0_TDM_RX_STRUCT);
+    }
+    Cy_AudioTDM_DeInit(self->tdm_base);
+    m_free(self->ring_buffer_storage);
+    self->ring_buffer_storage = NULL;
+    self->tdm_base = NULL;
+    MP_STATE_PORT(machine_i2s_obj[self->i2s_id]) = NULL;
 }
 
 static void mp_machine_i2s_irq_update(machine_i2s_obj_t *self) {
-    // TODO: implement
     (void)self;
 }
 
