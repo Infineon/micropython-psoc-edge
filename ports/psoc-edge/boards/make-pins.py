@@ -99,9 +99,12 @@ class PSE84Pin(boardgen.Pin):
             return
 
         af_signal = match.group(1)  # e.g. "TX_SCK"
-        af_unit = match.group(2)  # e.g. "0"
+        af_unit = match.group(2)  # e.g. "0" (TDM_STRUCT instance within TDM0)
         af_fn = "TDM"
-        af_ptr = "TDM" + af_unit  # e.g. "TDM0"
+        # All TDM instances live under the single TDM0 block in PSoC Edge.
+        # The sub-instance (STRUCT0, STRUCT1) is selected by af_unit; the top-level
+        # hardware pointer is always TDM0.
+        af_ptr = "TDM0"
 
         af_supported = af_fn in SUPPORTED_AF and af_signal in SUPPORTED_AF[af_fn]
 
