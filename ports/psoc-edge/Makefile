@@ -459,6 +459,7 @@ MOD_SRC_C += \
 	modpsocedge.c \
 	machine_ipc.c \
 	machine_scb.c \
+	machine_tcpwm.c \
 	machine_timer.c \
 
 ifeq ($(MICROPY_PY_EXT_FLASH),1)
