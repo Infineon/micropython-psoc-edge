@@ -30,10 +30,9 @@
 #include "cy_sysclk.h"
 #include "cy_tdm.h"
 #include "cycfg_peripheral_clocks.h"
+#include "genhdr/pins_af.h"
 #include "machine_pin_af.h"
 #include "mphalport.h"
-
-#define MICROPY_HW_MAX_I2S (1)
 
 // The TDM peripheral on PSoC Edge uses HF1 (400 MHz) as its clock source,
 // fed through a 16.5-bit fractional PCLK divider, then the TDM clkDiv register.
@@ -138,7 +137,7 @@ static int8_t get_frame_mapping_index(int8_t bits, format_t format) {
 }
 
 static machine_i2s_obj_t *mp_machine_i2s_make_new_instance(mp_int_t i2s_id) {
-    if ((uint32_t)i2s_id >= MICROPY_HW_MAX_I2S) {
+    if ((uint32_t)i2s_id >= MICROPY_PY_MACHINE_I2S_NUM_ENTRIES) {
         mp_raise_msg_varg(&mp_type_ValueError,
             MP_ERROR_TEXT("I2S(%d) does not exist"), i2s_id);
     }
@@ -328,4 +327,4 @@ static void mp_machine_i2s_irq_update(machine_i2s_obj_t *self) {
     (void)self;
 }
 
-MP_REGISTER_ROOT_POINTER(struct _machine_i2s_obj_t *machine_i2s_obj[MICROPY_HW_MAX_I2S]);
+MP_REGISTER_ROOT_POINTER(struct _machine_i2s_obj_t *machine_i2s_obj[MICROPY_PY_MACHINE_I2S_NUM_ENTRIES]);

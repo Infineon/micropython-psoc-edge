@@ -231,6 +231,8 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self._unhidden_spi = []
         self._unhidden_uart = []
 
+        self._unhidden_tdm = []
+
     # Collect all unhidden ports from the available
     # pins.
     # This function can be only used after parse_board_csv()
@@ -268,10 +270,16 @@ class PSE84PinGenerator(boardgen.PinGenerator):
                             if af.af_unit not in self._unhidden_uart:
                                 self._unhidden_uart.append(af.af_unit)
 
+                for af in pin._afs:
+                    if af.af_fn == "TDM" and af.af_supported:
+                        if af.af_unit not in self._unhidden_tdm:
+                            self._unhidden_tdm.append(af.af_unit)
+
         self._unhidden_scb.sort(key=int)
         self._unhidden_i2c.sort(key=int)
         self._unhidden_spi.sort(key=int)
         self._unhidden_uart.sort(key=int)
+        self._unhidden_tdm.sort(key=int)
 
     # Override the parse_board_csv to add
     # the unhidden ports after parsing the board CSV.
@@ -344,8 +352,17 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         super().print_header(out_header)
         self.print_port_defines(out_header)
 
+    def print_tdm_defines(self, out_af_header):
+        print(file=out_af_header)
+        print(
+            f"#define MICROPY_PY_MACHINE_I2S_NUM_ENTRIES ({len(self._unhidden_tdm)})",
+            file=out_af_header,
+        )
+        print(file=out_af_header)
+
     def print_af_header(self, out_af_header):
         self.print_scb_defines(out_af_header)
+        self.print_tdm_defines(out_af_header)
 
     # Add additional header file for AF defines and constants
     def extra_args(self, parser):
