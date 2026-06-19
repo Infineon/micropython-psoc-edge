@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2022-2025 Infineon Technologies AG
+ * Copyright (c) 2026 Infineon Technologies AG
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,35 +24,20 @@
  * THE SOFTWARE.
  */
 
-#ifndef MICROPY_INCLUDED_PSOCEDGE_MODMACHINE_H
-#define MICROPY_INCLUDED_PSOCEDGE_MODMACHINE_H
+#ifndef MICROPY_INCLUDED_PSOC_EDGE_MACHINE_ADC_H
+#define MICROPY_INCLUDED_PSOC_EDGE_MACHINE_ADC_H
 
-
-// micropython includes
 #include "py/obj.h"
+#include "machine_adcblock.h"
 
-enum clock_freq_type {
-    AUDIO_SYS_CLOCK_73_728_000_HZ = 73728000UL /* (Ideally 73.728 MHz) For sample rates: 8 KHz / 16 KHz / 48 KHz */,
-    AUDIO_SYS_CLOCK_169_344_000_HZ = 169344000UL /* (Ideally 169.344 MHz) For sample rates: 22.05 KHz / 44.1 KHz */,
-    CM4,
-    CM4_FLL
-};
+typedef struct _machine_adc_obj_t {
+    mp_obj_base_t base;
+    machine_adcblock_obj_t *block;
+    uint32_t pin_addr;
+    uint32_t sample_ns;
+    uint8_t channel_id;
+} machine_adc_obj_t;
 
-extern enum clock_freq_type PLL0_freq;
-typedef struct _machine_pdm_pcm_obj_t machine_pdm_pcm_obj_t;
-
-extern const mp_obj_type_t machine_i2c_type;
 extern const mp_obj_type_t machine_adc_type;
-extern const mp_obj_type_t machine_adcblock_type;
-extern const mp_obj_type_t machine_uart_type;
-extern const mp_obj_type_t machine_pdm_pcm_type;
-extern const mp_obj_type_t machine_rtc_type;
-extern const mp_obj_type_t machine_ipc_type;
-extern const mp_obj_type_t machine_pwm_type;
-extern const mp_obj_type_t machine_timer_type;
 
-#if MICROPY_PY_MACHINE_SPI_TARGET
-extern const mp_obj_type_t machine_spi_target_type;
-#endif
-
-#endif // MICROPY_INCLUDED_PSOCEDGE_MODMACHINE_H
+#endif // MICROPY_INCLUDED_PSOC_EDGE_MACHINE_ADC_H

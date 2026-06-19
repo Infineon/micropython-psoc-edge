@@ -309,6 +309,8 @@ PSE_BSP_SRC_C += \
 PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
 	async-transfer/source/mtb_async_transfer.c \
 	\
+	mtb-dsl-pse8xxgp/hal/source/mtb_hal_adc_sar.c \
+	\
 	mtb-dsl-pse8xxgp/device-utils/syspm/source/mtb_syspm_callbacks_scb_uart.c \
 	\
 	mtb-dsl-pse8xxgp/hal/source/mtb_hal_clock.c \
@@ -330,7 +332,14 @@ PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_pdm_pcm_v2.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_crypto_core_hw.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_crypto_core_trng.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_ac.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_ctb.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_dac.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_ptc.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_sar.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_rtc.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_rram.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_scb_common.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_scb_i2c.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_sd_host.c \
@@ -348,6 +357,7 @@ PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_syspm_ppu.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_syspm_v4.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_systick_v2.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_systrimm.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_tcpwm_counter.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_tcpwm_pwm.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/ppu_v1.c \
@@ -585,6 +595,8 @@ MOD_SRC_C += \
 	machine_pin.c \
 	machine_pin_af.c \
 	machine_pin_irq.c \
+	machine_adc.c \
+	machine_adcblock.c \
 	machine_pdm_pcm_extmod.c\
 	machine_i2c.c\
 	machine_spi.c \
