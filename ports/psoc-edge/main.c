@@ -101,6 +101,7 @@ extern void machine_ipc_deinit_all(void);
 extern void mp_hal_ticks_init(void);
 extern void machine_timer_deinit_all(void);
 extern void machine_wdt_deinit(void);
+extern void machine_adcblock_deinit_all(void);
 
 void micropython_task(void *arg);
 #if MICROPY_PY_FREERTOS
@@ -248,6 +249,7 @@ soft_reset:
     machine_ipc_deinit_all();
     machine_timer_deinit_all();
     machine_wdt_deinit();
+    machine_adcblock_deinit_all();
 
     #if MICROPY_PY_NETWORK
     mod_network_deinit();

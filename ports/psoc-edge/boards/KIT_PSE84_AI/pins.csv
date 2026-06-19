@@ -174,7 +174,7 @@ AMIC2_CTB_REF,P14_7
 
 # J17 expansion connector
 ,P15_0
-,P15_1
+A_I0_P15_1,P15_1
 ,P15_2
 ,P15_3
 ,P15_4
