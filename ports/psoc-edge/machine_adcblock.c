@@ -45,7 +45,25 @@ machine_adcblock_obj_t *adc_block[MAX_BLOCKS] = {NULL};
 static bool adc_autanalog_initialized = false;
 
 const adc_block_channel_pin_map_t adc_block_pin_map[] = {
-    {ADCBLOCK0, 0, (15u << 8) | 1u},
+    // Channel mapping: {ADCBLOCK0, channel, (port << 8) | pin}
+    // P15 analog input pins (A_I0_P15_*)
+    {ADCBLOCK0, 0, (15u << 8) | 0u},    // P15_0 - Channel 0
+    {ADCBLOCK0, 1, (15u << 8) | 1u},    // P15_1 - Channel 1
+    {ADCBLOCK0, 2, (15u << 8) | 2u},    // P15_2 - Channel 2
+    {ADCBLOCK0, 3, (15u << 8) | 3u},    // P15_3 - Channel 3
+    {ADCBLOCK0, 4, (15u << 8) | 4u},    // P15_4 - Channel 4
+    {ADCBLOCK0, 5, (15u << 8) | 5u},    // P15_5 - Channel 5
+    {ADCBLOCK0, 6, (15u << 8) | 6u},    // P15_6 - Channel 6
+    {ADCBLOCK0, 7, (15u << 8) | 7u},    // P15_7 - Channel 7
+    // P13 analog input pins (A_I0_P13_*)
+    {ADCBLOCK0, 8, (13u << 8) | 0u},    // P13_0 - Channel 8
+    {ADCBLOCK0, 9, (13u << 8) | 1u},    // P13_1 - Channel 9
+    {ADCBLOCK0, 10, (13u << 8) | 2u},   // P13_2 - Channel 10
+    {ADCBLOCK0, 11, (13u << 8) | 3u},   // P13_3 - Channel 11
+    {ADCBLOCK0, 12, (13u << 8) | 4u},   // P13_4 - Channel 12
+    {ADCBLOCK0, 13, (13u << 8) | 5u},   // P13_5 - Channel 13
+    {ADCBLOCK0, 14, (13u << 8) | 6u},   // P13_6 - Channel 14
+    {ADCBLOCK0, 15, (13u << 8) | 7u},   // P13_7 - Channel 15
 };
 
 static bool adc_block_map_has_pin(uint32_t pin_addr) {
