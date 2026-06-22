@@ -30,12 +30,12 @@
 #include "py/obj.h"
 
 #define DEFAULT_ADC_BITS        (12)
-#define ADC_BLOCK_CHANNEL_MAX   (6)
+#define ADC_BLOCK_CHANNEL_MAX   (16)
 #define DEFAULT_ADC_ACQ_NS      (1000)
 
 #define ADCBLOCK0               (0)
 #define MAX_BLOCKS              (1)
-#define MAX_CHANNELS            (6)
+#define MAX_CHANNELS            (16)
 
 typedef struct _machine_adc_obj_t machine_adc_obj_t;
 
