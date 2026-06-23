@@ -49,6 +49,7 @@
 #include "mphalport.h"
 #include "machine_scb.h"
 #include "sys_int.h"
+#include "clk.h"
 
 /******************************************************************************/
 // Defaults and constants
@@ -76,6 +77,7 @@ typedef struct _machine_uart_obj_t {
     mp_obj_base_t base;
     int id;                         // id matches the SCB id.
     machine_scb_obj_t *scb_obj;
+    pclk_div_obj_t *pclk_div;
     mp_hal_pin_obj_t tx;
     mp_hal_pin_obj_t rx;
     mp_hal_pin_obj_t rts;
@@ -209,7 +211,9 @@ static void machine_uart_obj_make_or_reuse(machine_uart_obj_t **self_ptr, uint8_
         if (machine_scb_is_free(id)) {
             (*self_ptr) = mp_machine_uart_obj_alloc();
             (*self_ptr)->id = id;
+            (*self_ptr)->pclk_div = NULL;
             (*self_ptr)->scb_obj = machine_scb_obj_alloc(id, *self_ptr, machine_uart_scb_isr);
+            pclk_div_slave_init((*self_ptr)->scb_obj->clk, (*self_ptr)->scb_obj->slave_nr);
         } else {
             mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("SCB %u is already in use by a machine.I2C or machine.SPI instance."), id);
         }
@@ -217,21 +221,7 @@ static void machine_uart_obj_make_or_reuse(machine_uart_obj_t **self_ptr, uint8_
     }
 }
 
-static void machine_uart_baudrate_set(machine_uart_obj_t *self) {
-    /**
-     * TODO: Review clock configuration and formula to calculate the divider value.
-     *       Clock sources, path and proper divider configuration.
-     * Given the clock peripheral = 100 MHz
-     * Oversampling = 12 (fixed for now)
-     * The formula to calculate the divider value is: divider = clock / (baudrate * oversample)
-     */
-    #define CLOCK_PERIPHERAL_FREQ_HZ (100000000UL)
-
-    Cy_SysClk_PeriphAssignDivider(self->scb_obj->clk, CY_SYSCLK_DIV_16_BIT, 0UL);
-    uint32_t divider = CLOCK_PERIPHERAL_FREQ_HZ / (self->baudrate * 12UL);
-    Cy_SysClk_PeriphSetDivider(CY_SYSCLK_DIV_16_BIT, 0UL, divider);
-    Cy_SysClk_PeriphEnableDivider(CY_SYSCLK_DIV_16_BIT, 0UL);
-}
+#define MACHINER_UART_OVERSAMPLING (12UL)
 
 static inline uint8_t machine_uart_break_width(machine_uart_obj_t *self) {
     return 1 +  // Start bit
@@ -239,6 +229,28 @@ static inline uint8_t machine_uart_break_width(machine_uart_obj_t *self) {
            (self->parity != CY_SCB_UART_PARITY_NONE ? 1 : 0) +
            (self->stop == CY_SCB_UART_STOP_BITS_1 ? 1 : 2) +
            1; // Extra bit, make the frame longer
+}
+
+static uint32_t machine_uart_baudrate_get_divider(machine_uart_obj_t *self) {
+    uint32_t clock_freq = pclk_div_get_input_freq(self->scb_obj->clk);
+    if (clock_freq == 0) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to get clock frequency for UART(%u)"), self->id);
+    }
+
+    uint32_t divider = (uint32_t)(clock_freq / (self->baudrate * MACHINER_UART_OVERSAMPLING));
+    /*
+     * No fractional divider should be required:
+     * Experimentally:
+     * - baud rates 2400, 4800, 9600, 19200 bps:
+     *   The error between the actual baud rate
+     *   and the requested is < 1% for 16 bits divider
+     * - baud rates 115200, 230400, 460800 bps:
+     *   The error between the actual baud rate and
+     *   the requested is < 1% for 8 bits divider
+     *
+     */
+
+    return divider;
 }
 
 static void machine_uart_hw_init(machine_uart_obj_t *self) {
@@ -250,7 +262,7 @@ static void machine_uart_hw_init(machine_uart_obj_t *self) {
         .irdaInvertRx = false,
         .irdaEnableLowPowerReceiver = false,
 
-        .oversample = 12UL,
+        .oversample = MACHINER_UART_OVERSAMPLING,
 
         .enableMsbFirst = false,
         .dataWidth = self->bits,
@@ -279,6 +291,12 @@ static void machine_uart_hw_init(machine_uart_obj_t *self) {
         .txFifoIntEnableMask = 0UL,
     };
 
+    uint32_t divider = machine_uart_baudrate_get_divider(self);
+    self->pclk_div = pclk_div_init(self->scb_obj->clk, divider, 0);
+    if (self->pclk_div == NULL) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to initialize clock divider for UART(%u)"), self->id);
+    }
+
     cy_en_scb_uart_status_t rslt = Cy_SCB_UART_Init(self->scb_obj->scb, &config, &self->ctx);
     uart_assert_raise_val("failed to initialize UART hardware, error code: %d", rslt);
 
@@ -291,6 +309,8 @@ static void machine_uart_hw_init(machine_uart_obj_t *self) {
 static void machine_uart_hw_deinit(machine_uart_obj_t *self) {
     Cy_SCB_UART_Disable(self->scb_obj->scb, &self->ctx);
     sys_int_deinit(&self->scb_obj->irq);
+    pclk_div_deinit(self->pclk_div);
+    self->pclk_div = NULL;
 }
 
 static bool machine_uart_rx_wait(machine_uart_obj_t *self, uint32_t timeout_ms) {
@@ -552,7 +572,6 @@ static void machine_uart_init_impl(machine_uart_obj_t **self_ptr, int uart_id, s
     if (nlr_push(&nlr) == 0) {
         ringbuf_alloc(&self->rx_ringbuf, args[ARG_rxbuf].u_int);
         mp_hal_periph_pins_af_init(uart_pins_af_config, pin_num);
-        machine_uart_baudrate_set(self);
         machine_uart_hw_init(self);
         nlr_pop();
     } else {
@@ -596,6 +615,7 @@ static mp_obj_t mp_machine_uart_make_new(const mp_obj_type_t *type, size_t n_arg
 static void mp_machine_uart_deinit(machine_uart_obj_t *self) {
     machine_uart_hw_deinit(self);
     m_del(uint8_t, self->rx_ringbuf.buf, self->rx_ringbuf.size);
+    pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->slave_nr);
     machine_scb_obj_free(self->scb_obj);
     mp_machine_uart_obj_free(self);
 }
