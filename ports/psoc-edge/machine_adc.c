@@ -135,6 +135,9 @@ static MP_DEFINE_CONST_FUN_OBJ_1(machine_adc_read_u16_obj, machine_adc_read_u16)
 static mp_obj_t machine_adc_read_uv(mp_obj_t self_in) {
     machine_adc_obj_t *self = MP_OBJ_TO_PTR(self_in);
     int32_t raw = Cy_AutAnalog_SAR_ReadResult(PSOC_EDGE_SAR_ADC_INDEX, CY_AUTANALOG_SAR_INPUT_GPIO, self->channel_id);
+    if (raw < 0) {
+        raw = 0;
+    }
     int16_t mv = Cy_AutAnalog_SAR_CountsTo_mVolts(
         PSOC_EDGE_SAR_ADC_INDEX,
         false,

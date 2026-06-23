@@ -35,7 +35,6 @@
 
 #define ADCBLOCK0               (0)
 #define MAX_BLOCKS              (1)
-#define MAX_CHANNELS            (16)
 
 typedef struct _machine_adc_obj_t machine_adc_obj_t;
 
