@@ -36,6 +36,11 @@ void init_cycfg_all(void) {
 }
 void cycfg_config_init(void) {
     init_cycfg_clocks();
+    /**
+     * TODO: Comment init_cycfg_peripheral_clocks()
+     * & init_cycfg_peripherals() out once all machine peripherals
+     * are implemented based on `clk` lib.
+     */
     init_cycfg_peripheral_clocks();
     init_cycfg_system();
     init_cycfg_peripherals();
