@@ -594,7 +594,6 @@ MOD_SRC_C += \
 	machine_rtc.c \
 	machine_ipc.c \
 	machine_scb.c \
-	tcpwm.c \
 	machine_timer.c \
 	machine_counter.c \
 	machine_bitstream.c \
@@ -611,11 +610,14 @@ MOD_SRC_C += \
 endif
 
 SRC_C += \
+	clk.c \
 	help.c \
 	main.c \
 	mphalport.c \
 	systick.c \
 	sys_int.c \
+	tcpwm.c \
+
 
 # List of sources for qstr extraction
 SRC_QSTR += $(SRC_C) $(SHARED_SRC_C) $(MOD_SRC_C) $(GEN_PINS_SRC)
