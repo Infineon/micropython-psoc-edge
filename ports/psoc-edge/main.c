@@ -102,6 +102,12 @@ extern void mp_hal_ticks_init(void);
 extern void machine_timer_deinit_all(void);
 extern void machine_wdt_deinit(void);
 
+/**
+ * TODO: This will later directly handled by
+ * the static machine_uart REPL UART instance.
+ */
+extern void pclk_div_repl_uart_init(void);
+
 void micropython_task(void *arg);
 #if MICROPY_PY_FREERTOS
 static TaskHandle_t mpy_task_handle;
@@ -150,6 +156,10 @@ int main(void) {
     __enable_irq();
 
     /* Initialize retarget-io middleware */
+    /**
+     * TODO: Enable once not relying on bsp initialization
+     * pclk_div_repl_uart_init();
+     */
     init_retarget_io();
 
     #if MICROPY_PY_FREERTOS
