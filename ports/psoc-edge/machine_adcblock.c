@@ -46,7 +46,7 @@ static bool adc_autanalog_initialized = false;
 
 const adc_block_channel_pin_map_t adc_block_pin_map[] = {
     // Channel mapping: {ADCBLOCK0, channel, (port << 8) | pin}
-    // P15 analog input pins (A_I0_P15_*)
+    // P15 analog input pins
     {ADCBLOCK0, 0, (15u << 8) | 0u},    // P15_0 - Channel 0
     {ADCBLOCK0, 1, (15u << 8) | 1u},    // P15_1 - Channel 1
     {ADCBLOCK0, 2, (15u << 8) | 2u},    // P15_2 - Channel 2
@@ -55,7 +55,7 @@ const adc_block_channel_pin_map_t adc_block_pin_map[] = {
     {ADCBLOCK0, 5, (15u << 8) | 5u},    // P15_5 - Channel 5
     {ADCBLOCK0, 6, (15u << 8) | 6u},    // P15_6 - Channel 6
     {ADCBLOCK0, 7, (15u << 8) | 7u},    // P15_7 - Channel 7
-    // P13 analog input pins (A_I0_P13_*)
+    // P13 analog input pins
     {ADCBLOCK0, 8, (13u << 8) | 0u},    // P13_0 - Channel 8
     {ADCBLOCK0, 9, (13u << 8) | 1u},    // P13_1 - Channel 9
     {ADCBLOCK0, 10, (13u << 8) | 2u},   // P13_2 - Channel 10
@@ -194,14 +194,13 @@ void adc_block_channel_free(machine_adcblock_obj_t *adc_block_ptr, machine_adc_o
     }
 }
 
-static uint32_t _adc_block_get_any_pin(uint16_t adc_block_id) {
+static bool _adc_block_has_mapped_pins(uint16_t adc_block_id) {
     for (size_t i = 0; i < MP_ARRAY_SIZE(adc_block_pin_map); i++) {
         if (adc_block_pin_map[i].block_id == adc_block_id) {
-            return adc_block_pin_map[i].pin;
+            return true;
         }
     }
-
-    return 0;
+    return false;
 }
 
 static void _adc_block_obj_init(machine_adcblock_obj_t *adc_block_ptr, uint16_t adc_block_id, uint8_t bits) {
@@ -216,7 +215,9 @@ static void _adc_block_obj_init(machine_adcblock_obj_t *adc_block_ptr, uint16_t 
         adc_autanalog_initialized = true;
     }
 
-    (void)_adc_block_get_any_pin(adc_block_id);
+    if (!_adc_block_has_mapped_pins(adc_block_id)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("no pins mapped for ADC block"));
+    }
 
     adc_block_ptr->id = adc_block_id;
     adc_block_ptr->bits = bits;
