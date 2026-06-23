@@ -110,6 +110,12 @@ extern void machine_deinit(void);
  */
 extern void pclk_div_repl_uart_init(void);
 
+/**
+ * TODO: This will later directly handled by
+ * the static machine_uart REPL UART instance.
+ */
+extern void pclk_div_repl_uart_init(void);
+
 void micropython_task(void *arg);
 #if MICROPY_PY_FREERTOS
 static TaskHandle_t mpy_task_handle;
