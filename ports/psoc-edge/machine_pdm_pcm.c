@@ -147,6 +147,27 @@ typedef struct _pdm_pcm_block_obj_t {
 static pdm_pcm_block_obj_t pdm_pcm_block_obj[1] = { { 0, PDM0, false } };
 
 static void pdm_pcm_block_init(pdm_pcm_block_obj_t *block) {
+
+    /**
+     * TODO: Refactor based on pclk_div.
+     * Before doing this we need to ensure pclk_div not only resolve the required divider type, but also
+     * provide any available if the required is not available.
+     * In this case, only the 16.5 bit fractional divider is available for PDM PCM.
+     *
+     * For now this is moved from the BSP cfg, to start init ownership in each machine peripheral, not
+     * as part of the BSP init.
+     * {
+     */
+    #if defined(CY_DEVICE_CONFIGURATOR_IP_ENABLE_FEATURE)
+    Cy_SysClk_PeriGroupSlaveInit(CY_MMIO_PDM0_PERI_NR, CY_MMIO_PDM0_GROUP_NR, CY_MMIO_PDM0_SLAVE_NR, CY_MMIO_PDM0_CLK_HF_NR);
+    #endif /* defined (CY_DEVICE_CONFIGURATOR_IP_ENABLE_FEATURE) */
+
+    Cy_SysClk_PeriPclkAssignDivider(PCLK_PDM0_CLK_IF_SRSS, CY_SYSCLK_DIV_16_5_BIT, 1U);
+    Cy_SysClk_PeriPclkDisableDivider((en_clk_dst_t)CYBSP_PDM_CLK_DIV_GRP_NUM, CY_SYSCLK_DIV_16_5_BIT, 1U);
+    Cy_SysClk_PeriPclkSetFracDivider((en_clk_dst_t)CYBSP_PDM_CLK_DIV_GRP_NUM, CY_SYSCLK_DIV_16_5_BIT, 1U, 3U, 0U);
+    Cy_SysClk_PeriPclkEnableDivider((en_clk_dst_t)CYBSP_PDM_CLK_DIV_GRP_NUM, CY_SYSCLK_DIV_16_5_BIT, 1U);
+    /* } */
+
     cy_stc_pdm_pcm_config_v2_t pdm_pcm_block_conf = {
         .clkDiv = 7,
         .clksel = CY_PDM_PCM_SEL_SRSS_CLOCK,
@@ -167,6 +188,15 @@ static inline bool pdm_pcm_block_is_inited(pdm_pcm_block_obj_t *block) {
 
 static inline void pdm_pcm_block_deinit(pdm_pcm_block_obj_t *block) {
     Cy_PDM_PCM_DeInit(block->periph);
+    /**
+     * TODO: Refactor based on pclk_div.
+     * {
+     */
+    Cy_SysClk_PeriPclkDisableDivider((en_clk_dst_t)CYBSP_PDM_CLK_DIV_GRP_NUM, CY_SYSCLK_DIV_16_5_BIT, 1U);
+    #if defined(CY_DEVICE_CONFIGURATOR_IP_ENABLE_FEATURE)
+    Cy_SysClk_PeriGroupSlaveDeinit(CY_MMIO_PDM0_PERI_NR, CY_MMIO_PDM0_GROUP_NR, CY_MMIO_PDM0_SLAVE_NR);
+    #endif /* defined (CY_DEVICE_CONFIGURATOR_IP_ENABLE_FEATURE) */
+    /* } */
     block->inited = false;
 }
 
