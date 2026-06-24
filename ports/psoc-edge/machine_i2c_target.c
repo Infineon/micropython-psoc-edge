@@ -28,7 +28,7 @@
 #include "cybsp.h"
 #include "cy_scb_i2c.h"
 #include "cy_sysint.h"
-#include "cy_sysclk.h"
+#include "clk.h"
 
 // MicroPython includes
 #include "py/runtime.h"
@@ -53,6 +53,7 @@ typedef struct _machine_i2c_target_obj_t {
     uint32_t slave_addr;
     uint8_t addrsize;
     machine_scb_obj_t *scb_obj;
+    pclk_div_obj_t *pclk_div;
     cy_stc_scb_i2c_config_t cfg;
     cy_stc_scb_i2c_context_t ctx;
     size_t tx_index;
@@ -164,6 +165,7 @@ static void i2c_target_init(machine_i2c_target_obj_t *self, machine_i2c_target_d
 
     if (!first_init) {
         Cy_SCB_I2C_Disable(self->scb_obj->scb, &self->ctx);
+        pclk_div_deinit(self->pclk_div);
     }
 
     self->cfg = (cy_stc_scb_i2c_config_t) {
@@ -200,13 +202,20 @@ static void i2c_target_init(machine_i2c_target_obj_t *self, machine_i2c_target_d
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("I2C target init failed: 0x%lx"), result);
     }
 
-    // Configure clock for I2C slave operation
-    // For 400 khz slave, clk_scb must be 7.82 – 15.38 MHz
-    // For 100 khz slave, clk_scb must be 1.55 – 12.8 MHz
-    // clk_peri = 100 MHz, divider = 7, clk_scb = 100/8 = 12.5 MHz
-    Cy_SysClk_PeriphAssignDivider(self->scb_obj->clk, CY_SYSCLK_DIV_8_BIT, 2U);
-    Cy_SysClk_PeriphSetDivider(CY_SYSCLK_DIV_8_BIT, 2U, 7U); // divider = n+1, so 7 means divide by 8
-    Cy_SysClk_PeriphEnableDivider(CY_SYSCLK_DIV_8_BIT, 2U);
+    // Configure clock for I2C slave operation.
+    // For 400 kHz slave, clk_scb must be 7.82 – 15.38 MHz.
+    // For 100 kHz slave, clk_scb must be 1.55 – 12.8 MHz.
+    // Target: ~12.5 MHz (input_freq / 8).
+    #define I2C_TARGET_SCB_CLK_FREQ_HZ (12500000UL)
+    if (first_init) {
+        pclk_div_slave_init(self->scb_obj->clk, self->scb_obj->slave_nr);
+    }
+    uint32_t input_freq = pclk_div_get_input_freq(self->scb_obj->clk);
+    uint32_t divider = input_freq / I2C_TARGET_SCB_CLK_FREQ_HZ - 1;
+    self->pclk_div = pclk_div_init(self->scb_obj->clk, divider, 0);
+    if (self->pclk_div == NULL) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to initialize clock divider for I2CTarget(%u)"), self->id);
+    }
 
     sys_int_init(&(self->scb_obj->irq));
 
@@ -350,6 +359,8 @@ static void mp_machine_i2c_target_print(const mp_print_t *print, mp_obj_t self_i
 static void mp_machine_i2c_target_deinit(machine_i2c_target_obj_t *self) {
     Cy_SCB_I2C_Disable(self->scb_obj->scb, &self->ctx);
     sys_int_deinit(&(self->scb_obj->irq));
+    pclk_div_deinit(self->pclk_div);
+    pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->slave_nr);
     self->base.type = NULL;
 
     machine_scb_obj_free(self->scb_obj);
