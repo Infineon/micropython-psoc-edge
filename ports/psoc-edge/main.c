@@ -162,10 +162,7 @@ int main(void) {
     __enable_irq();
 
     /* Initialize retarget-io middleware */
-    /**
-     * TODO: Enable once not relying on bsp initialization
-     * pclk_div_repl_uart_init();
-     */
+    pclk_div_repl_uart_init();
     init_retarget_io();
 
     #if MICROPY_PY_FREERTOS
