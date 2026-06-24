@@ -42,6 +42,7 @@
 
 
 // port-specific includes
+#include "clk.h"
 #include "genhdr/pins_af.h"
 #include "modmachine.h"
 #include "machine_scb.h"
@@ -62,6 +63,7 @@ typedef struct _machine_hw_i2c_obj_t {
     uint32_t freq;
     uint32_t timeout;
     machine_scb_obj_t *scb_obj;
+    pclk_div_obj_t *pclk_div;
     cy_stc_scb_i2c_config_t cfg;   // PDL I2C configuration
     cy_stc_scb_i2c_context_t ctx;  // PDL I2C runtime context
 } machine_hw_i2c_obj_t;
@@ -131,14 +133,19 @@ static void machine_hw_i2c_init(machine_hw_i2c_obj_t *self, uint32_t freq_hz) {
     //   - clk_peri = 100 MHz, divider = 42 → clk_scb = 2.38 MHz ✓ (mid-range)
     // For 400kHz: clk_scb range is 7.82 - 10 MHz
     //   - clk_peri = 100 MHz, divider = 11 → clk_scb = 9.09 MHz ✓ (within range)
-    // Note: Cy_SysClk_PeriphSetDivider takes (divider - 1), so divider=11 → value=10
-    /* Connect assigned divider to be a clock source for I2C */
-    Cy_SysClk_PeriphAssignDivider(self->scb_obj->clk, CY_SYSCLK_DIV_8_BIT, 2U);
+    // pclk_div_init() uses the same divider register value semantics as the PDL API.
     uint32_t divider = (freq_hz <= 100000) ? 41U : 10U;
-    Cy_SysClk_PeriphSetDivider(CY_SYSCLK_DIV_8_BIT, 2U, divider);
-    Cy_SysClk_PeriphEnableDivider(CY_SYSCLK_DIV_8_BIT, 2U);
+    pclk_div_slave_init(self->scb_obj->clk, self->scb_obj->slave_nr);
+    self->pclk_div = pclk_div_init(self->scb_obj->clk, divider, 0);
+    if (self->pclk_div == NULL) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to initialize clock divider for I2C(%u)"), self->scb_obj->id);
+    }
 
-    uint32_t clk_scb_freq = Cy_SysClk_PeriphGetFrequency(CY_SYSCLK_DIV_8_BIT, 2U);
+    uint32_t input_freq = pclk_div_get_input_freq(self->scb_obj->clk);
+    if (input_freq == 0U) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to get clock frequency for I2C(%u)"), self->scb_obj->id);
+    }
+    uint32_t clk_scb_freq = input_freq / (divider + 1U);
     DEBUG_printf("DEBUG: clk_scb_freq=%u Hz\n", clk_scb_freq);
 
     uint32_t actual_rate = Cy_SCB_I2C_SetDataRate(self->scb_obj->scb, freq_hz, clk_scb_freq);
@@ -166,7 +173,8 @@ static void machine_hw_i2c_deinit(mp_obj_base_t *self_in) {
 
     Cy_SCB_I2C_Disable(self->scb_obj->scb, &self->ctx);
     sys_int_deinit(&self->scb_obj->irq);
-    Cy_SysClk_PeriphDisableDivider(CY_SYSCLK_DIV_8_BIT, 0U);
+    pclk_div_deinit(self->pclk_div);
+    pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->slave_nr);
 
     machine_scb_obj_free(self->scb_obj);
     machine_hw_i2c_obj_free(self);
