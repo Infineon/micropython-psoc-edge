@@ -26,6 +26,7 @@
 
 #include <stdbool.h>
 
+#include "py/mperrno.h"
 #include "py/runtime.h"
 #include "py/mphal.h"
 
@@ -40,6 +41,28 @@
 #define PSOC_EDGE_SAR_ADC_INDEX      (0u)
 #define PSOC_EDGE_SAR_ADC_SEQUENCER  (0u)
 #define PSOC_EDGE_SAR_ADC_VREF_MV    (1800u)
+#define PSOC_EDGE_SAR_READ_TIMEOUT_US (1000u)
+
+static int32_t machine_adc_read_raw(machine_adc_obj_t *adc) {
+    uint8_t channel_mask = (uint8_t)(1u << adc->channel_id);
+    uint32_t timeout = PSOC_EDGE_SAR_READ_TIMEOUT_US;
+
+    Cy_AutAnalog_SAR_ClearHSchanResultStatus(PSOC_EDGE_SAR_ADC_INDEX, channel_mask);
+    while (((Cy_AutAnalog_SAR_GetHSchanResultStatus(PSOC_EDGE_SAR_ADC_INDEX) & channel_mask) == 0u) && timeout != 0u) {
+        mp_hal_delay_us(1);
+        timeout--;
+    }
+
+    if (timeout == 0u) {
+        mp_raise_OSError(MP_ETIMEDOUT);
+    }
+
+    int32_t raw = Cy_AutAnalog_SAR_ReadResult(PSOC_EDGE_SAR_ADC_INDEX, CY_AUTANALOG_SAR_INPUT_GPIO, adc->channel_id);
+    if (raw < 0) {
+        raw = 0;
+    }
+    return raw;
+}
 
 void adc_obj_init(machine_adc_obj_t *adc, machine_adcblock_obj_t *adc_block, mp_obj_t pin_name, uint32_t sampling_time) {
     uint32_t pin_addr = adc_pin_addr_by_obj(pin_name);
@@ -122,23 +145,17 @@ static MP_DEFINE_CONST_FUN_OBJ_1(machine_adc_block_obj, machine_adc_block);
 
 static mp_obj_t machine_adc_read_u16(mp_obj_t self_in) {
     machine_adc_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    int32_t raw = Cy_AutAnalog_SAR_ReadResult(PSOC_EDGE_SAR_ADC_INDEX, CY_AUTANALOG_SAR_INPUT_GPIO, self->channel_id);
-    if (raw < 0) {
-        raw = 0;
-    }
+    int32_t raw = machine_adc_read_raw(self);
     mp_int_t bits = (mp_int_t)adc_get_resolution(self);
     mp_uint_t u16 = ((mp_uint_t)raw) << (16 - bits);
-    return MP_OBJ_NEW_SMALL_INT(u16);
+    return mp_obj_new_int_from_uint(u16);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_adc_read_u16_obj, machine_adc_read_u16);
 
 static mp_obj_t machine_adc_read_uv(mp_obj_t self_in) {
     machine_adc_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    int32_t raw = Cy_AutAnalog_SAR_ReadResult(PSOC_EDGE_SAR_ADC_INDEX, CY_AUTANALOG_SAR_INPUT_GPIO, self->channel_id);
-    if (raw < 0) {
-        raw = 0;
-    }
-    int16_t mv = Cy_AutAnalog_SAR_CountsTo_mVolts(
+    int32_t raw = machine_adc_read_raw(self);
+    int32_t uv = Cy_AutAnalog_SAR_CountsTo_uVolts(
         PSOC_EDGE_SAR_ADC_INDEX,
         false,
         PSOC_EDGE_SAR_ADC_SEQUENCER,
@@ -147,8 +164,10 @@ static mp_obj_t machine_adc_read_uv(mp_obj_t self_in) {
         PSOC_EDGE_SAR_ADC_VREF_MV,
         raw
         );
-    uint32_t uv = (uint32_t)mv * 1000u;
-    return MP_OBJ_NEW_SMALL_INT(uv);
+    if (uv < 0) {
+        uv = 0;
+    }
+    return mp_obj_new_int_from_uint((mp_uint_t)uv);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_adc_read_uv_obj, machine_adc_read_uv);
 

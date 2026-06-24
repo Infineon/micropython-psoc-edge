@@ -36,6 +36,7 @@
 
 #include "cybsp.h"
 #include "cy_autanalog.h"
+#include "cy_autanalog_sar.h"
 #include "cycfg_peripherals.h"
 
 extern void adc_obj_init(machine_adc_obj_t *adc, machine_adcblock_obj_t *adc_block, mp_obj_t pin_name, uint32_t sampling_time);
@@ -45,6 +46,19 @@ machine_adcblock_obj_t *adc_block[MAX_BLOCKS] = {NULL};
 static bool adc_autanalog_initialized = false;
 
 #define ADC_PIN(block, ch, port, pin)  {(block), (ch), ((uint32_t)(port) << 8) | (pin)}
+#define ADC_GPIO_CHANNEL_COUNT         (8u)
+#define ADC_GPIO_CHANNEL_MASK          ((uint8_t)0xffu)
+
+static cy_stc_autanalog_sar_hs_chan_t adc_gpio_ch_cfg[ADC_GPIO_CHANNEL_COUNT] = {
+    { .posPin = CY_AUTANALOG_SAR_PIN_GPIO0, .hsDiffEn = false, .sign = false, .posCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .negPin = CY_AUTANALOG_SAR_PIN_GPIO0, .accShift = false, .negCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .hsLimit = CY_AUTANALOG_SAR_LIMIT_STATUS_DISABLED, .fifoSel = CY_AUTANALOG_FIFO_DISABLED },
+    { .posPin = CY_AUTANALOG_SAR_PIN_GPIO1, .hsDiffEn = false, .sign = false, .posCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .negPin = CY_AUTANALOG_SAR_PIN_GPIO0, .accShift = false, .negCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .hsLimit = CY_AUTANALOG_SAR_LIMIT_STATUS_DISABLED, .fifoSel = CY_AUTANALOG_FIFO_DISABLED },
+    { .posPin = CY_AUTANALOG_SAR_PIN_GPIO2, .hsDiffEn = false, .sign = false, .posCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .negPin = CY_AUTANALOG_SAR_PIN_GPIO0, .accShift = false, .negCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .hsLimit = CY_AUTANALOG_SAR_LIMIT_STATUS_DISABLED, .fifoSel = CY_AUTANALOG_FIFO_DISABLED },
+    { .posPin = CY_AUTANALOG_SAR_PIN_GPIO3, .hsDiffEn = false, .sign = false, .posCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .negPin = CY_AUTANALOG_SAR_PIN_GPIO0, .accShift = false, .negCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .hsLimit = CY_AUTANALOG_SAR_LIMIT_STATUS_DISABLED, .fifoSel = CY_AUTANALOG_FIFO_DISABLED },
+    { .posPin = CY_AUTANALOG_SAR_PIN_GPIO4, .hsDiffEn = false, .sign = false, .posCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .negPin = CY_AUTANALOG_SAR_PIN_GPIO0, .accShift = false, .negCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .hsLimit = CY_AUTANALOG_SAR_LIMIT_STATUS_DISABLED, .fifoSel = CY_AUTANALOG_FIFO_DISABLED },
+    { .posPin = CY_AUTANALOG_SAR_PIN_GPIO5, .hsDiffEn = false, .sign = false, .posCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .negPin = CY_AUTANALOG_SAR_PIN_GPIO0, .accShift = false, .negCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .hsLimit = CY_AUTANALOG_SAR_LIMIT_STATUS_DISABLED, .fifoSel = CY_AUTANALOG_FIFO_DISABLED },
+    { .posPin = CY_AUTANALOG_SAR_PIN_GPIO6, .hsDiffEn = false, .sign = false, .posCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .negPin = CY_AUTANALOG_SAR_PIN_GPIO0, .accShift = false, .negCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .hsLimit = CY_AUTANALOG_SAR_LIMIT_STATUS_DISABLED, .fifoSel = CY_AUTANALOG_FIFO_DISABLED },
+    { .posPin = CY_AUTANALOG_SAR_PIN_GPIO7, .hsDiffEn = false, .sign = false, .posCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .negPin = CY_AUTANALOG_SAR_PIN_GPIO0, .accShift = false, .negCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED, .hsLimit = CY_AUTANALOG_SAR_LIMIT_STATUS_DISABLED, .fifoSel = CY_AUTANALOG_FIFO_DISABLED },
+};
 
 const adc_block_channel_pin_map_t adc_block_pin_map[] = {
     // P15 analog input pins (channels 0-7)
@@ -56,16 +70,17 @@ const adc_block_channel_pin_map_t adc_block_pin_map[] = {
     ADC_PIN(ADCBLOCK0,  5, 15u, 5u),
     ADC_PIN(ADCBLOCK0,  6, 15u, 6u),
     ADC_PIN(ADCBLOCK0,  7, 15u, 7u),
-    // P13 analog input pins (channels 8-15)
-    ADC_PIN(ADCBLOCK0,  8, 13u, 0u),
-    ADC_PIN(ADCBLOCK0,  9, 13u, 1u),
-    ADC_PIN(ADCBLOCK0, 10, 13u, 2u),
-    ADC_PIN(ADCBLOCK0, 11, 13u, 3u),
-    ADC_PIN(ADCBLOCK0, 12, 13u, 4u),
-    ADC_PIN(ADCBLOCK0, 13, 13u, 5u),
-    ADC_PIN(ADCBLOCK0, 14, 13u, 6u),
-    ADC_PIN(ADCBLOCK0, 15, 13u, 7u),
 };
+
+static void adc_hw_configure_supported_gpio_channels(void) {
+    for (size_t i = 0; i < ADC_GPIO_CHANNEL_COUNT; i++) {
+        CYBSP_SAR_ADC_sta_hs_cfg.hsGpioChan[i] = &adc_gpio_ch_cfg[i];
+    }
+    CYBSP_SAR_ADC_sta_hs_cfg.hsGpioResultMask = ADC_GPIO_CHANNEL_MASK;
+    CYBSP_SAR_ADC_sta_cfg.muxResultMask = CY_AUTANALOG_SAR_CHAN_MASK_MUX_DISABLED;
+    CYBSP_SAR_ADC_seq_hs_cfg[0].chanEn = ADC_GPIO_CHANNEL_MASK;
+    CYBSP_SAR_ADC_seq_hs_cfg[0].muxMode = CY_AUTANALOG_SAR_CHAN_CFG_MUX_DISABLED;
+}
 
 static bool adc_block_map_has_pin(uint32_t pin_addr) {
     for (size_t i = 0; i < MP_ARRAY_SIZE(adc_block_pin_map); i++) {
@@ -206,6 +221,7 @@ static bool _adc_block_has_mapped_pins(uint16_t adc_block_id) {
 
 static void _adc_block_obj_init(machine_adcblock_obj_t *adc_block_ptr, uint16_t adc_block_id, uint8_t bits) {
     if (!adc_autanalog_initialized) {
+        adc_hw_configure_supported_gpio_channels();
         uint32_t status = Cy_AutAnalog_Init(&autonomous_analog_init);
         if (status != CY_AUTANALOG_SUCCESS) {
             mp_raise_TypeError(MP_ERROR_TEXT("ADC initialization failed"));
