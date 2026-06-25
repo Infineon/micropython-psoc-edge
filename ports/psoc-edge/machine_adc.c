@@ -43,6 +43,33 @@
 #define PSOC_EDGE_SAR_ADC_VREF_MV    (1800u)
 #define PSOC_EDGE_SAR_READ_TIMEOUT_US (1000u)
 
+static uint32_t adc_max_count_for_bits(uint8_t bits) {
+    return ((uint32_t)1u << bits) - 1u;
+}
+
+static uint32_t adc_normalize_raw_count(machine_adc_obj_t *adc, int32_t raw) {
+    if (raw <= 0) {
+        return 0;
+    }
+
+    uint32_t normalized = (uint32_t)raw;
+    uint32_t hw_max = adc_max_count_for_bits(ADC_HW_NATIVE_BITS);
+    if (normalized > hw_max) {
+        normalized = hw_max;
+    }
+
+    if (adc->block->bits < ADC_HW_NATIVE_BITS) {
+        normalized >>= (ADC_HW_NATIVE_BITS - adc->block->bits);
+    }
+
+    uint32_t configured_max = adc_max_count_for_bits(adc->block->bits);
+    if (normalized > configured_max) {
+        normalized = configured_max;
+    }
+
+    return normalized;
+}
+
 static int32_t machine_adc_read_raw(machine_adc_obj_t *adc) {
     uint8_t channel_mask = (uint8_t)(1u << adc->channel_id);
     uint32_t timeout = PSOC_EDGE_SAR_READ_TIMEOUT_US;
@@ -58,9 +85,6 @@ static int32_t machine_adc_read_raw(machine_adc_obj_t *adc) {
     }
 
     int32_t raw = Cy_AutAnalog_SAR_ReadResult(PSOC_EDGE_SAR_ADC_INDEX, CY_AUTANALOG_SAR_INPUT_GPIO, adc->channel_id);
-    if (raw < 0) {
-        raw = 0;
-    }
     return raw;
 }
 
@@ -145,9 +169,14 @@ static MP_DEFINE_CONST_FUN_OBJ_1(machine_adc_block_obj, machine_adc_block);
 
 static mp_obj_t machine_adc_read_u16(mp_obj_t self_in) {
     machine_adc_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    int32_t raw = machine_adc_read_raw(self);
+    uint32_t raw = adc_normalize_raw_count(self, machine_adc_read_raw(self));
     mp_int_t bits = (mp_int_t)adc_get_resolution(self);
-    mp_uint_t u16 = ((mp_uint_t)raw) << (16 - bits);
+    uint32_t max_count = adc_max_count_for_bits((uint8_t)bits);
+    mp_uint_t u16 = 0;
+    if (max_count != 0u) {
+        // Map raw full-scale exactly to 65535 with integer rounding.
+        u16 = (mp_uint_t)(((uint64_t)raw * 65535u + (max_count / 2u)) / max_count);
+    }
     return mp_obj_new_int_from_uint(u16);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_adc_read_u16_obj, machine_adc_read_u16);
@@ -155,6 +184,13 @@ static MP_DEFINE_CONST_FUN_OBJ_1(machine_adc_read_u16_obj, machine_adc_read_u16)
 static mp_obj_t machine_adc_read_uv(mp_obj_t self_in) {
     machine_adc_obj_t *self = MP_OBJ_TO_PTR(self_in);
     int32_t raw = machine_adc_read_raw(self);
+    if (raw < 0) {
+        raw = 0;
+    }
+    int32_t hw_max = (int32_t)adc_max_count_for_bits(ADC_HW_NATIVE_BITS);
+    if (raw > hw_max) {
+        raw = hw_max;
+    }
     int32_t uv = Cy_AutAnalog_SAR_CountsTo_uVolts(
         PSOC_EDGE_SAR_ADC_INDEX,
         false,

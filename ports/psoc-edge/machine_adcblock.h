@@ -29,7 +29,10 @@
 
 #include "py/obj.h"
 
-#define DEFAULT_ADC_BITS        (12)
+#define ADC_HW_NATIVE_BITS      (12)
+#define DEFAULT_ADC_BITS        ADC_HW_NATIVE_BITS
+#define ADC_MIN_BITS            (8)
+#define ADC_MAX_BITS            ADC_HW_NATIVE_BITS
 #define ADC_BLOCK_CHANNEL_MAX   (16)
 #define DEFAULT_ADC_ACQ_NS      (1000)
 
