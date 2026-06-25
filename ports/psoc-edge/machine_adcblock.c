@@ -219,6 +219,10 @@ static bool _adc_block_has_mapped_pins(uint16_t adc_block_id) {
     return false;
 }
 
+static bool _adc_bits_supported(uint8_t bits) {
+    return (bits >= ADC_MIN_BITS) && (bits <= ADC_MAX_BITS);
+}
+
 static void _adc_block_obj_init(machine_adcblock_obj_t *adc_block_ptr, uint16_t adc_block_id, uint8_t bits) {
     if (!adc_autanalog_initialized) {
         adc_hw_configure_supported_gpio_channels();
@@ -255,12 +259,18 @@ static void _adc_block_obj_deinit(machine_adcblock_obj_t *adc_block_ptr) {
 static machine_adcblock_obj_t *machine_adcblock_make_init(uint8_t adc_id, uint8_t bits) {
     machine_adcblock_obj_t *adc_block_ptr = _adc_block_obj_find(adc_id);
 
+    if (!_adc_bits_supported(bits)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("unsupported ADC resolution"));
+    }
+
     if (adc_block_ptr == NULL) {
         adc_block_ptr = _adc_block_obj_alloc();
         if (adc_block_ptr == NULL) {
             mp_raise_TypeError(MP_ERROR_TEXT("ADC blocks are fully allocated"));
         }
         _adc_block_obj_init(adc_block_ptr, adc_id, bits);
+    } else if (adc_block_ptr->bits != bits) {
+        mp_raise_ValueError(MP_ERROR_TEXT("ADC block already initialized with different resolution"));
     }
 
     return adc_block_ptr;
@@ -313,8 +323,8 @@ static mp_obj_t machine_adcblock_make_new(const mp_obj_type_t *type, size_t n_po
     mp_arg_parse_all(n_pos_args - 1, all_args + 1, &kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
 
     uint8_t bits = args[ARG_bits].u_int;
-    if (bits != DEFAULT_ADC_BITS) {
-        mp_raise_ValueError(MP_ERROR_TEXT("only 12-bit ADC is currently supported"));
+    if (!_adc_bits_supported(bits)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("bits must be in range 8..12"));
     }
 
     return MP_OBJ_FROM_PTR(machine_adcblock_make_init(adc_id, bits));
