@@ -71,10 +71,7 @@ MICROPY_PY_MACHINE_FOR_ALL_SCB(DEFINE_SCB_IRQ_HANDLER)
             SCB##scb##_IRQ_Handler \
         }, \
         PCLK_SCB##scb##_CLOCK_SCB_EN, \
-        CY_MMIO_SCB##scb##_PERI_NR, \
-        CY_MMIO_SCB##scb##_GROUP_NR, \
         CY_MMIO_SCB##scb##_SLAVE_NR, \
-        CY_MMIO_SCB##scb##_CLK_HF_NR, \
         NULL, \
         NULL, \
     },
@@ -107,7 +104,6 @@ void machine_scb_obj_free(machine_scb_obj_t *scb) {
 
 bool machine_scb_is_free(uint8_t scb) {
     return machine_scb_obj[scb].parent == NULL;
-
 }
 
 #endif // MICROPY_PY_MACHINE_I2C || MICROPY_PY_MACHINE_I2C_TARGET || MICROPY_PY_MACHINE_SPI || MICROPY_PY_MACHINE_SPI_TARGET || MICROPY_PY_MACHINE_UART
