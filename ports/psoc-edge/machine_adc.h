@@ -38,6 +38,8 @@ typedef struct _machine_adc_obj_t {
     uint8_t channel_id;
 } machine_adc_obj_t;
 
+void adc_obj_init_helper(machine_adc_obj_t *adc, size_t n_pos_args, const mp_obj_t *pos_args, mp_map_t *kw_args);
+
 extern const mp_obj_type_t machine_adc_type;
 
 #endif // MICROPY_INCLUDED_PSOC_EDGE_MACHINE_ADC_H
