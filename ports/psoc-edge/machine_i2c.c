@@ -135,7 +135,7 @@ static void machine_hw_i2c_init(machine_hw_i2c_obj_t *self, uint32_t freq_hz) {
     //   - clk_peri = 100 MHz, divider = 11 → clk_scb = 9.09 MHz ✓ (within range)
     // pclk_div_init() uses the same divider register value semantics as the PDL API.
     uint32_t divider = (freq_hz <= 100000) ? 41U : 10U;
-    pclk_div_slave_init(self->scb_obj->clk, self->scb_obj->slave_nr);
+    pclk_div_slave_init(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
     self->pclk_div = pclk_div_init(self->scb_obj->clk, divider, 0);
     if (self->pclk_div == NULL) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to initialize clock divider for I2C(%u)"), self->scb_obj->id);
@@ -174,7 +174,7 @@ static void machine_hw_i2c_deinit(mp_obj_base_t *self_in) {
     Cy_SCB_I2C_Disable(self->scb_obj->scb, &self->ctx);
     sys_int_deinit(&self->scb_obj->irq);
     pclk_div_deinit(self->pclk_div);
-    pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->slave_nr);
+    pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
 
     machine_scb_obj_free(self->scb_obj);
     machine_hw_i2c_obj_free(self);
