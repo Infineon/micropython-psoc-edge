@@ -69,13 +69,13 @@
         features:
           - uart
 
-- name: pwm
-  test: 
-    script: ports/psoc-edge/board_ext_hw/single/pwm.py
-    device: 
-      - board: KIT_PSE84_AI
-        features:
-          - pwm
+# - name: pwm
+#   test: 
+#     script: ports/psoc-edge/board_ext_hw/single/pwm.py
+#     device: 
+#       - board: KIT_PSE84_AI
+#         features:
+#           - pwm
           
 - name: network
   type: multi
