@@ -141,9 +141,6 @@ static void machine_spi_target_hw_init(machine_spi_target_obj_t *self) {
     uint8_t scb_unit = machine_spi_target_pins_config_and_get_scb_unit(
         self->sck, self->mosi, self->miso, self->ssel);
 
-    // Power on the peripheral group that contains this SCB.
-    machine_scb_enable_group(scb_unit);
-
     // Allocate SCB
     self->scb_obj = machine_scb_obj_alloc(scb_unit, self,
         machine_spi_target_scb_isr);
