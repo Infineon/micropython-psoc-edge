@@ -34,12 +34,10 @@
 #include "shared/runtime/mpirq.h"
 #include "sys_int.h"
 
+#include "clk.h"
+
 #include "cy_tcpwm_counter.h"
 #include "cy_tcpwm.h"
-#include "cy_sysclk.h"
-#include "cycfg_peripheral_clocks.h"
-#include "cycfg_peripherals.h"
-#include "mtb_hal.h"
 #include "tcpwm.h"
 #include "genhdr/pins_af.h"
 
@@ -72,6 +70,8 @@ typedef struct _machine_timer_obj_t {
     mp_obj_t callback;
     bool ishard;
     bool active;
+    bool irq_inited;
+    pclk_div_obj_t *pclk_div;
     sys_int_cfg_t irq_cfg;
 } machine_timer_obj_t;
 
@@ -111,24 +111,58 @@ static IRQn_Type machine_timer_counter_irq(uint32_t counter_num) {
 // ---------------------------------------------------------------------------
 
 static machine_timer_obj_t *timer_obj[MACHINE_TIMER_NUM_INSTANCES] = { NULL };
+static uint32_t machine_timer_clock_user_count = 0;
 
-static bool machine_timer_clock_configured = false;
+static void machine_timer_release_clock(machine_timer_obj_t *self) {
+    if (self->pclk_div != NULL) {
+        pclk_div_deinit(self->pclk_div);
+        self->pclk_div = NULL;
+        if (machine_timer_clock_user_count > 0) {
+            machine_timer_clock_user_count--;
+            if (machine_timer_clock_user_count == 0) {
+                pclk_div_slave_deinit(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+            }
+        }
+    }
+}
 
-static void machine_timer_configure_clock(void) {
-    if (machine_timer_clock_configured) {
+static void machine_timer_ensure_clock(machine_timer_obj_t *self) {
+    if (self->pclk_div != NULL) {
         return;
     }
 
-    // Keep timer periods stable even when other modules stop configuring this divider.
-    cy_rslt_t rslt = mtb_hal_clock_set_peri_clock_freq(&CYBSP_GENERAL_PURPOSE_TIMER_clock_ref,
-        TIMER_CLK_HZ, 1000);
-    if (rslt != CY_RSLT_SUCCESS) {
-        mp_raise_msg_varg(&mp_type_ValueError,
-            MP_ERROR_TEXT("Timer clock setup failed (0x%lx)"),
-            (unsigned long)rslt);
+    bool slave_initialized = false;
+    if (machine_timer_clock_user_count == 0) {
+        pclk_div_slave_init(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+        slave_initialized = true;
     }
 
-    machine_timer_clock_configured = true;
+    uint32_t input_freq = pclk_div_get_input_freq(self->pclk_dst);
+    if (input_freq == 0U) {
+        if (slave_initialized) {
+            pclk_div_slave_deinit(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+        }
+        mp_raise_ValueError(MP_ERROR_TEXT("failed to get timer input clock"));
+    }
+
+    uint32_t divider = input_freq / TIMER_CLK_HZ;
+    if (divider == 0U) {
+        if (slave_initialized) {
+            pclk_div_slave_deinit(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+        }
+        mp_raise_ValueError(MP_ERROR_TEXT("timer input clock is below target frequency"));
+    }
+    divider -= 1U;
+
+    self->pclk_div = pclk_div_init(self->pclk_dst, divider, 0);
+    if (self->pclk_div == NULL) {
+        if (slave_initialized) {
+            pclk_div_slave_deinit(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+        }
+        mp_raise_ValueError(MP_ERROR_TEXT("Timer clock divider allocation failed"));
+    }
+
+    machine_timer_clock_user_count++;
 }
 
 // ---------------------------------------------------------------------------
@@ -174,18 +208,15 @@ static const cy_israddress machine_timer_irq_handlers[MACHINE_TIMER_NUM_INSTANCE
 // ---------------------------------------------------------------------------
 
 static void machine_timer_start(machine_timer_obj_t *self, uint32_t period_ticks) {
-    machine_timer_configure_clock();
+    machine_timer_ensure_clock(self);
 
     // Stop counter and unregister any existing IRQ before reconfiguring.
     Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
-    if (self->active) {
+    if (self->irq_inited) {
         sys_int_deinit(&self->irq_cfg);
-        self->active = false;
+        self->irq_inited = false;
     }
-
-    // Connect the shared 1 MHz PCLK divider to this counter's clock input.
-    Cy_SysClk_PeriPclkAssignDivider(self->pclk_dst,
-        CY_SYSCLK_DIV_16_BIT, CYBSP_GENERAL_PURPOSE_TIMER_CLK_DIV_NUM);
+    self->active = false;
 
     // The counter counts 0 → period_reg (inclusive) then fires TC.
     // So period_reg = period_ticks - 1.
@@ -232,6 +263,10 @@ static void machine_timer_start(machine_timer_obj_t *self, uint32_t period_ticks
     self->irq_cfg.priority = SYS_INT_IRQ_LOWEST_PRIORITY;
     self->irq_cfg.handler = machine_timer_irq_handlers[self->id];
     sys_int_init(&self->irq_cfg);
+    self->irq_inited = true;
+
+    // Clear any stale TC status from previous use to avoid an immediate callback.
+    Cy_TCPWM_ClearInterrupt(TCPWM0, self->counter_num, CY_TCPWM_INT_ON_TC);
 
     self->active = true;
     Cy_TCPWM_Counter_Enable(TCPWM0, self->counter_num);
@@ -353,6 +388,8 @@ static mp_obj_t machine_timer_make_new(const mp_obj_type_t *type,
     self->callback = mp_const_none;
     self->ishard = false;
     self->active = false;
+    self->irq_inited = false;
+    self->pclk_div = NULL;
     self->irq_cfg.irq_num = machine_timer_counter_irq(self->counter_num);
 
     nlr_buf_t nl;
@@ -365,6 +402,7 @@ static mp_obj_t machine_timer_make_new(const mp_obj_type_t *type,
         }
         nlr_pop();
     } else {
+        machine_timer_release_clock(self);
         machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
         timer_obj[id] = NULL;
         nlr_jump(nl.ret_val);
@@ -390,13 +428,19 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(machine_timer_init_obj, 1, machine_timer_init)
 
 static mp_obj_t machine_timer_deinit(mp_obj_t self_in) {
     machine_timer_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
-    if (self->active) {
+    // If the timer was never started (e.g. Timer(id) without init args), no
+    // clock/divider ownership exists yet. Avoid touching gated TCPWM registers.
+    if (self->pclk_div != NULL) {
+        Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
+    }
+    if (self->irq_inited) {
         sys_int_deinit(&self->irq_cfg);
+        self->irq_inited = false;
     }
     self->callback = mp_const_none;
     self->ishard = false;
     self->active = false;
+    machine_timer_release_clock(self);
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
     timer_obj[self->id] = NULL;
     return mp_const_none;
