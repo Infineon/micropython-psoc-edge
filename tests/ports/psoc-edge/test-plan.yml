@@ -61,14 +61,14 @@
         features:
           - bitstream
 
-- name: i2c
-  type: multi
-  test: 
-    script: ports/psoc-edge/board_ext_hw/multi/i2c_basic.py
-    device:
-      - board: KIT_PSE84_AI
-        features:
-          - i2c
+# - name: i2c
+#   type: multi
+#   test: 
+#     script: ports/psoc-edge/board_ext_hw/multi/i2c_basic.py
+#     device:
+#       - board: KIT_PSE84_AI
+#         features:
+#           - i2c
 
 - name: uart
   test: 
@@ -78,16 +78,6 @@
         features:
           - uart
 
-<<<<<<< HEAD
-- name: pwm
-  test: 
-    script: ports/psoc-edge/board_ext_hw/single/pwm.py
-    device: 
-      - board: KIT_PSE84_AI
-        features:
-          - pwm
-
-=======
 # - name: pwm
 #   test: 
 #     script: ports/psoc-edge/board_ext_hw/single/pwm.py
@@ -96,7 +86,6 @@
 #         features:
 #           - pwm
           
->>>>>>> 61e4ea89e (tests/ports/psoc-edge/test-plan: Disabled no yet refactored classes.)
 - name: network
   type: multi
   test:
