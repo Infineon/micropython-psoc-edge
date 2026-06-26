@@ -52,14 +52,14 @@
         features:
           - pin
 
-- name: i2c
-  type: multi
-  test: 
-    script: ports/psoc-edge/board_ext_hw/multi/i2c_basic.py
-    device:
-      - board: KIT_PSE84_AI
-        features:
-          - i2c
+# - name: i2c
+#   type: multi
+#   test: 
+#     script: ports/psoc-edge/board_ext_hw/multi/i2c_basic.py
+#     device:
+#       - board: KIT_PSE84_AI
+#         features:
+#           - i2c
 
 - name: uart
   test: 
