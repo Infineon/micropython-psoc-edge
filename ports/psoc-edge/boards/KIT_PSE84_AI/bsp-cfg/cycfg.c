@@ -40,10 +40,12 @@ void cycfg_config_init(void) {
      * Handled in runtime during machine
      * object creation and initialization
      * via `clk` module.
-     *
-     * init_cycfg_peripheral_clocks();
-     * init_cycfg_peripherals();
      */
+    #if defined(COMPONENT_SECURE_DEVICE)
+    /* Secure boot initializes minimal periph initialization */
+    init_cycfg_peripheral_clocks_s_minimal();
+    init_cycfg_peripheral_s_minimal();
+    #endif /* defined(COMPONENT_SECURE_DEVICE) */
     init_cycfg_system();
     init_cycfg_routing();
     init_cycfg_pins();
