@@ -58,7 +58,7 @@ typedef struct _pclk_div_obj_t {
     uint8_t owner_count;
 } pclk_div_obj_t;
 
-pclk_div_obj_t *pclk_div_obj[PERI_PCLK_DIVIDER_MAX_NUM] = {NULL};
+static pclk_div_obj_t *pclk_div_obj[PERI_PCLK_DIVIDER_MAX_NUM] = {NULL};
 
 static pclk_div_obj_t *pclk_div_obj_alloc(void) {
     pclk_div_obj_t *clk = NULL;
