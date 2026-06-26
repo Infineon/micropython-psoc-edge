@@ -27,11 +27,11 @@
 #include "py/runtime.h"
 #include "py/mphal.h"
 #include "modmachine.h"
+#include "clk.h"
 #include "cy_gpio.h"
 #include "cy_sysclk.h"
 #include "cy_tcpwm_pwm.h"
 #include "cycfg_peripherals.h"
-#include "cycfg_peripheral_clocks.h"
 #include "mphalport.h"
 #include "machine_pin.h"
 #include "tcpwm.h"
@@ -55,6 +55,7 @@ typedef struct _machine_pwm_obj_t {
     duty_type_t duty_type;                  /**< Indicates whether duty is set as DUTY_U16 or DUTY_NS */
     mp_int_t duty;                          /**< Duty cycle value: 0-65535 if DUTY_U16, nanoseconds if DUTY_NS */
     bool invert;                            /**< If true, inverts the PWM output signal polarity */
+    pclk_div_obj_t *pclk_div;              /**< Shared PCLK divider object for this PWM counter */
 } machine_pwm_obj_t;
 
 // Sentinel value meaning "no trigger"; masked with 0x3U when assigned to 2-bit inputMode fields.
@@ -83,7 +84,7 @@ typedef struct _machine_pwm_obj_t {
  #define pwm_duty_cycle_u16_to_compare(duty_u16, period) ((int)(((float)(duty_u16 + 1) / (float)65536) * (float)period))
 
 static machine_pwm_obj_t *pwm_obj[MICROPY_PY_MACHINE_PWM_MAX_OBJS] = { NULL };
-static bool pwm_clk_configured = false; // true after the shared divider is programmed to PWM_TCPWM_CLK_HZ
+static uint32_t pwm_clk_user_count = 0;
 
 static const machine_pin_af_obj_t *pwm_pin_af_find_and_alloc(machine_pwm_obj_t *self) {
     bool has_pwm_af = false;
@@ -245,23 +246,22 @@ static void mp_machine_pwm_init_helper(machine_pwm_obj_t *self, size_t n_args, c
     /* Route the TCPWM output to the configured GPIO pin */
     pwm_pin_config(self);
 
-    /* Program the shared 16-bit divider to PWM_TCPWM_CLK_HZ on the first PWM init, then
-     * connect it to this counter's PCLK input. All channels share divider CYBSP_PWM_LED_CTRL_CLK_DIV_NUM
-     * so the reprogramming only needs to happen once. */
-    if (!pwm_clk_configured) {
-        Cy_SysClk_PeriPclkDisableDivider((en_clk_dst_t)CYBSP_PWM_LED_CTRL_CLK_DIV_GRP_NUM,
-            CY_SYSCLK_DIV_16_BIT, CYBSP_PWM_LED_CTRL_CLK_DIV_NUM);
-        Cy_SysClk_PeriPclkSetDivider((en_clk_dst_t)CYBSP_PWM_LED_CTRL_CLK_DIV_GRP_NUM,
-            CY_SYSCLK_DIV_16_BIT, CYBSP_PWM_LED_CTRL_CLK_DIV_NUM, PWM_TCPWM_CLK_DIV_VAL);
-        Cy_SysClk_PeriPclkEnableDivider((en_clk_dst_t)CYBSP_PWM_LED_CTRL_CLK_DIV_GRP_NUM,
-            CY_SYSCLK_DIV_16_BIT, CYBSP_PWM_LED_CTRL_CLK_DIV_NUM);
-        pwm_clk_configured = true;
+    if (pwm_clk_user_count == 0) {
+        pclk_div_slave_init(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
     }
-    Cy_SysClk_PeriPclkAssignDivider(self->pclk_dst, CY_SYSCLK_DIV_16_BIT, CYBSP_PWM_LED_CTRL_CLK_DIV_NUM);
+
+    self->pclk_div = pclk_div_init(self->pclk_dst, PWM_TCPWM_CLK_DIV_VAL, 0);
+    if (self->pclk_div == NULL) {
+        mp_raise_msg_varg(&mp_type_ValueError,
+            MP_ERROR_TEXT("failed to initialize clock divider for PWM counter %lu"),
+            (unsigned long)self->counter_num);
+    }
 
     cy_en_tcpwm_status_t result = Cy_TCPWM_PWM_Init(TCPWM0,
         self->counter_num, &self->pwm_obj);
     pwm_assert_raise_val("PWM init failed with return code %lx !", result);
+
+    pwm_clk_user_count++;
 
     /* Enable the TCPWM block */
     Cy_TCPWM_PWM_Enable(TCPWM0, self->counter_num);
@@ -302,6 +302,7 @@ static mp_obj_t mp_machine_pwm_make_new(const mp_obj_type_t *type, size_t n_args
 
     self->pin = pin;
     self->counter_num = UINT32_MAX;
+    self->pclk_div = NULL;
     nlr_buf_t nl_af;
     if (nlr_push(&nl_af) == 0) {
         self->pin_af = pwm_pin_af_find_and_alloc(self);
@@ -380,6 +381,14 @@ static mp_obj_t mp_machine_pwm_make_new(const mp_obj_type_t *type, size_t n_args
 // Disable the TCPWM counter, restore the GPIO pin to Hi-Z, and free the instance slot.
 static void mp_machine_pwm_deinit(machine_pwm_obj_t *self) {
     Cy_TCPWM_PWM_Disable(TCPWM0, self->counter_num);
+    pclk_div_deinit(self->pclk_div);
+    self->pclk_div = NULL;
+    if (pwm_clk_user_count > 0) {
+        pwm_clk_user_count--;
+        if (pwm_clk_user_count == 0) {
+            pclk_div_slave_deinit(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+        }
+    }
     pwm_pin_restore(self->pin);
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
     pwm_obj_free(self);
