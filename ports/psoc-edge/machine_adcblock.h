@@ -37,7 +37,12 @@
 #define DEFAULT_ADC_ACQ_NS      (1000)
 
 #define ADCBLOCK0               (0)
-#define MAX_BLOCKS              (1)
+
+#ifndef MICROPY_HW_ADC_MAX_BLOCKS
+#define MICROPY_HW_ADC_MAX_BLOCKS (1)
+#endif
+
+#define MAX_BLOCKS              MICROPY_HW_ADC_MAX_BLOCKS
 
 typedef struct _machine_adc_obj_t machine_adc_obj_t;
 
@@ -54,11 +59,17 @@ typedef struct {
     uint32_t pin;
 } adc_block_channel_pin_map_t;
 
+typedef struct {
+    uint16_t block_id;
+    uint16_t channel_count;
+} adc_block_capability_t;
+
 machine_adcblock_obj_t *adc_block_obj_find(mp_obj_t pin);
 machine_adcblock_obj_t *adc_block_obj_init(mp_obj_t pin);
 machine_adc_obj_t *adc_block_channel_find(machine_adcblock_obj_t *adc_block, mp_obj_t pin);
 machine_adc_obj_t *adc_block_channel_alloc(machine_adcblock_obj_t *adc_block, mp_obj_t pin);
 void adc_block_channel_free(machine_adcblock_obj_t *adc_block, machine_adc_obj_t *adc);
+void adc_block_apply_runtime_config(machine_adcblock_obj_t *adc_block, uint32_t sample_ns);
 int16_t adc_get_channel_number_for_pin(uint32_t pin);
 
 uint32_t adc_pin_addr_by_obj(mp_obj_t pin_obj);

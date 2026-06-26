@@ -71,6 +71,8 @@ static uint32_t adc_normalize_raw_count(machine_adc_obj_t *adc, int32_t raw) {
 }
 
 static int32_t machine_adc_read_raw(machine_adc_obj_t *adc) {
+    adc_block_apply_runtime_config(adc->block, adc->sample_ns);
+
     uint8_t channel_mask = (uint8_t)(1u << adc->channel_id);
     uint32_t timeout = PSOC_EDGE_SAR_READ_TIMEOUT_US;
 
@@ -99,10 +101,26 @@ void adc_obj_init(machine_adc_obj_t *adc, machine_adcblock_obj_t *adc_block, mp_
     adc->block = adc_block;
     adc->sample_ns = sampling_time;
     adc->channel_id = (uint8_t)adc_channel_no;
+    adc_block_apply_runtime_config(adc_block, sampling_time);
 }
 
 void adc_obj_deinit(machine_adc_obj_t *adc) {
     (void)adc;
+}
+
+void adc_obj_init_helper(machine_adc_obj_t *adc, size_t n_pos_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_sample_ns };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_sample_ns, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = UINT32_MAX} },
+    };
+
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_pos_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    if (args[ARG_sample_ns].u_int != UINT32_MAX) {
+        adc->sample_ns = args[ARG_sample_ns].u_int;
+        adc_block_apply_runtime_config(adc->block, adc->sample_ns);
+    }
 }
 
 static machine_adc_obj_t *machine_adc_make_init(uint32_t sampling_time, mp_obj_t pin_name) {
@@ -115,6 +133,7 @@ static machine_adc_obj_t *machine_adc_make_init(uint32_t sampling_time, mp_obj_t
         adc = adc_block_channel_find(adc_block, pin_name);
         if (adc != NULL) {
             adc->sample_ns = sampling_time;
+            adc_block_apply_runtime_config(adc->block, adc->sample_ns);
             return adc;
         }
     }
@@ -160,6 +179,13 @@ static mp_obj_t machine_adc_deinit(mp_obj_t self_in) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_adc_deinit_obj, machine_adc_deinit);
+
+static mp_obj_t machine_adc_init(size_t n_pos_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    machine_adc_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
+    adc_obj_init_helper(self, n_pos_args - 1, pos_args + 1, kw_args);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(machine_adc_init_obj, 1, machine_adc_init);
 
 static mp_obj_t machine_adc_block(mp_obj_t self_in) {
     const machine_adc_obj_t *self = MP_OBJ_TO_PTR(self_in);
@@ -208,6 +234,7 @@ static mp_obj_t machine_adc_read_uv(mp_obj_t self_in) {
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_adc_read_uv_obj, machine_adc_read_uv);
 
 static const mp_rom_map_elem_t machine_adc_locals_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&machine_adc_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&machine_adc_deinit_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_u16), MP_ROM_PTR(&machine_adc_read_u16_obj) },
     { MP_ROM_QSTR(MP_QSTR_read_uv), MP_ROM_PTR(&machine_adc_read_uv_obj) },
