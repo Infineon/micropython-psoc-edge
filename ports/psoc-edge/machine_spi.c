@@ -142,11 +142,11 @@ static void machine_spi_hw_init(machine_spi_obj_t *self) {
     self->scb_obj = machine_scb_obj_alloc(scb_unit, self,
         machine_spi_scb_isr);
 
-    pclk_div_slave_init(self->scb_obj->clk, self->scb_obj->slave_nr);
+    pclk_div_slave_init(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
 
     uint32_t clk_hf_freq = pclk_div_get_input_freq(self->scb_obj->clk);
     if (clk_hf_freq == 0U) {
-        pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->slave_nr);
+        pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
         machine_scb_obj_free(self->scb_obj);
         self->scb_obj = NULL;
         mp_raise_ValueError(MP_ERROR_TEXT("failed to get SPI input clock"));
@@ -164,7 +164,7 @@ static void machine_spi_hw_init(machine_spi_obj_t *self) {
 
     self->pclk_div = pclk_div_init(self->scb_obj->clk, div_val, 0);
     if (self->pclk_div == NULL) {
-        pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->slave_nr);
+        pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
         machine_scb_obj_free(self->scb_obj);
         self->scb_obj = NULL;
         mp_raise_ValueError(MP_ERROR_TEXT("SPI clock dividers exhausted"));
@@ -220,7 +220,7 @@ static void machine_spi_hw_init(machine_spi_obj_t *self) {
     if (result != CY_SCB_SPI_SUCCESS) {
         pclk_div_deinit(self->pclk_div);
         self->pclk_div = NULL;
-        pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->slave_nr);
+        pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
         machine_scb_obj_free(self->scb_obj);
         self->scb_obj = NULL;
         mp_raise_msg_varg(&mp_type_ValueError,
@@ -237,7 +237,7 @@ static void machine_spi_hw_deinit(machine_spi_obj_t *self) {
     sys_int_deinit(&self->scb_obj->irq);
     pclk_div_deinit(self->pclk_div);
     self->pclk_div = NULL;
-    pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->slave_nr);
+    pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
     machine_scb_obj_free(self->scb_obj);
     self->scb_obj = NULL;
 }

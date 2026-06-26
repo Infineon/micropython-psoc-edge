@@ -213,7 +213,7 @@ static void machine_uart_obj_make_or_reuse(machine_uart_obj_t **self_ptr, uint8_
             (*self_ptr)->id = id;
             (*self_ptr)->pclk_div = NULL;
             (*self_ptr)->scb_obj = machine_scb_obj_alloc(id, *self_ptr, machine_uart_scb_isr);
-            pclk_div_slave_init((*self_ptr)->scb_obj->clk, (*self_ptr)->scb_obj->slave_nr);
+            pclk_div_slave_init((*self_ptr)->scb_obj->clk, (*self_ptr)->scb_obj->mmio_slave_nr);
         } else {
             mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("SCB %u is already in use by a machine.I2C or machine.SPI instance."), id);
         }
@@ -617,7 +617,7 @@ static mp_obj_t mp_machine_uart_make_new(const mp_obj_type_t *type, size_t n_arg
 static void mp_machine_uart_deinit(machine_uart_obj_t *self) {
     machine_uart_hw_deinit(self);
     m_del(uint8_t, self->rx_ringbuf.buf, self->rx_ringbuf.size);
-    pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->slave_nr);
+    pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
     machine_scb_obj_free(self->scb_obj);
     mp_machine_uart_obj_free(self);
 }

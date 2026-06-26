@@ -208,7 +208,7 @@ static void i2c_target_init(machine_i2c_target_obj_t *self, machine_i2c_target_d
     // Target: ~12.5 MHz (input_freq / 8).
     #define I2C_TARGET_SCB_CLK_FREQ_HZ (12500000UL)
     if (first_init) {
-        pclk_div_slave_init(self->scb_obj->clk, self->scb_obj->slave_nr);
+        pclk_div_slave_init(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
     }
     uint32_t input_freq = pclk_div_get_input_freq(self->scb_obj->clk);
     uint32_t divider = input_freq / I2C_TARGET_SCB_CLK_FREQ_HZ - 1;
@@ -360,7 +360,7 @@ static void mp_machine_i2c_target_deinit(machine_i2c_target_obj_t *self) {
     Cy_SCB_I2C_Disable(self->scb_obj->scb, &self->ctx);
     sys_int_deinit(&(self->scb_obj->irq));
     pclk_div_deinit(self->pclk_div);
-    pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->slave_nr);
+    pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
     self->base.type = NULL;
 
     machine_scb_obj_free(self->scb_obj);
