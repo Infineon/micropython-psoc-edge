@@ -221,7 +221,7 @@ static void machine_uart_obj_make_or_reuse(machine_uart_obj_t **self_ptr, uint8_
     }
 }
 
-#define MACHINER_UART_OVERSAMPLING (12UL)
+#define MACHINE_UART_OVERSAMPLING (12UL)
 
 static inline uint8_t machine_uart_break_width(machine_uart_obj_t *self) {
     return 1 +  // Start bit
@@ -237,7 +237,7 @@ static uint32_t machine_uart_baudrate_get_divider(machine_uart_obj_t *self) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to get clock frequency for UART(%u)"), self->id);
     }
 
-    uint32_t divider = (uint32_t)(clock_freq / (self->baudrate * MACHINER_UART_OVERSAMPLING));
+    uint32_t divider = (uint32_t)(clock_freq / (self->baudrate * MACHINE_UART_OVERSAMPLING));
     /*
      * No fractional divider should be required:
      * Experimentally:
@@ -262,7 +262,7 @@ static void machine_uart_hw_init(machine_uart_obj_t *self) {
         .irdaInvertRx = false,
         .irdaEnableLowPowerReceiver = false,
 
-        .oversample = MACHINER_UART_OVERSAMPLING,
+        .oversample = MACHINE_UART_OVERSAMPLING,
 
         .enableMsbFirst = false,
         .dataWidth = self->bits,
@@ -343,12 +343,14 @@ static bool machine_uart_tx_wait(machine_uart_obj_t *self, uint32_t timeout_ms) 
 
 static void mp_machine_uart_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     machine_uart_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    mp_printf(print, "UART(tx="MP_HAL_PIN_FMT ", "
+    mp_printf(print, "UART(id=%u, "
+        "tx="MP_HAL_PIN_FMT ", "
         "rx="MP_HAL_PIN_FMT ", "
         "baudrate=%ld, "
         "bits=%u, "
         "parity=%u, "
         "stop=%u, ",
+        self->id,
         mp_hal_pin_name(self->tx),
         mp_hal_pin_name(self->rx),
         self->baudrate,
