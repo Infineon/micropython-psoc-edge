@@ -251,6 +251,10 @@ machine_adc_obj_t *adc_block_channel_alloc(machine_adcblock_obj_t *adc_block_ptr
         mp_raise_ValueError(MP_ERROR_TEXT("invalid ADC channel"));
     }
 
+    if (adc_block_ptr->channel[adc_channel_no] != NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("ADC channel already in use"));
+    }
+
     adc_block_ptr->channel[adc_channel_no] = mp_obj_malloc(machine_adc_obj_t, &machine_adc_type);
     return adc_block_ptr->channel[adc_channel_no];
 }
@@ -549,10 +553,12 @@ static mp_obj_t machine_adcblock_connect(size_t n_pos_args, const mp_obj_t *pos_
     }
 
     machine_adc_obj_t *adc = adc_block_channel_find(self, pin_name);
-    if (adc == NULL) {
-        adc = adc_block_channel_alloc(self, pin_name);
-        adc_obj_init(adc, self, pin_name, DEFAULT_ADC_ACQ_NS);
+    if (adc != NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("ADC channel already in use"));
     }
+
+    adc = adc_block_channel_alloc(self, pin_name);
+    adc_obj_init(adc, self, pin_name, DEFAULT_ADC_ACQ_NS);
 
     // Match the generic ADCBlock contract by forwarding extra kwargs to ADC.init().
     adc_obj_init_helper(adc, 0, NULL, kw_args);
