@@ -50,6 +50,7 @@ typedef struct _machine_adcblock_obj_t {
     mp_obj_base_t base;
     uint8_t id;
     uint8_t bits;
+    uint8_t active;
     machine_adc_obj_t *channel[ADC_BLOCK_CHANNEL_MAX];
 } machine_adcblock_obj_t;
 
