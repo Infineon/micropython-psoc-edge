@@ -195,6 +195,7 @@ static mp_obj_t machine_adc_deinit(mp_obj_t self_in) {
     adc_obj_deinit(self);
     if (block != NULL) {
         adc_block_channel_free(block, self);
+        adc_block_maybe_release(block);
     }
     return mp_const_none;
 }
