@@ -51,6 +51,7 @@ typedef struct _machine_adcblock_obj_t {
     uint8_t id;
     uint8_t bits;
     uint8_t active;
+    uint8_t auto_deinit;
     machine_adc_obj_t *channel[ADC_BLOCK_CHANNEL_MAX];
 } machine_adcblock_obj_t;
 
@@ -70,6 +71,7 @@ machine_adcblock_obj_t *adc_block_obj_init(mp_obj_t pin);
 machine_adc_obj_t *adc_block_channel_find(machine_adcblock_obj_t *adc_block, mp_obj_t pin);
 machine_adc_obj_t *adc_block_channel_alloc(machine_adcblock_obj_t *adc_block, mp_obj_t pin);
 void adc_block_channel_free(machine_adcblock_obj_t *adc_block, machine_adc_obj_t *adc);
+void adc_block_maybe_release(machine_adcblock_obj_t *adc_block);
 void adc_block_apply_runtime_config(machine_adcblock_obj_t *adc_block, uint32_t sample_ns);
 int16_t adc_get_channel_number_for_pin(uint32_t pin);
 

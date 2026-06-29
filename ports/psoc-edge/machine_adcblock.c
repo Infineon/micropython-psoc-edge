@@ -46,6 +46,7 @@ machine_adcblock_obj_t *adc_block[MAX_BLOCKS] = {NULL};
 static bool adc_autanalog_initialized = false;
 static uint16_t adc_hw_sample_setting = UINT16_MAX;
 static bool _adc_block_channel_is_valid(const machine_adcblock_obj_t *adc_block_ptr, uint16_t channel);
+static void _adc_block_obj_deinit(machine_adcblock_obj_t *adc_block_ptr);
 
 #define ADC_PIN(block, ch, port, pin)  {(block), (ch), ((uint32_t)(port) << 8) | (pin)},
 #define ADC_CAP(block, ch_count)       {(block), (ch_count)},
@@ -234,6 +235,16 @@ static void _adc_block_obj_free(machine_adcblock_obj_t *adc_block_ptr) {
     }
 }
 
+static bool _adc_block_has_active_channels(const machine_adcblock_obj_t *adc_block_ptr) {
+    for (uint8_t i = 0; i < ADC_BLOCK_CHANNEL_MAX; i++) {
+        if (adc_block_ptr->channel[i] != NULL) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 machine_adc_obj_t *adc_block_channel_alloc(machine_adcblock_obj_t *adc_block_ptr, mp_obj_t pin) {
     int16_t adc_channel_no = adc_get_channel_number_for_pin(adc_pin_addr_by_obj(pin));
     if (adc_channel_no < 0 || !_adc_block_channel_is_valid(adc_block_ptr, (uint16_t)adc_channel_no)) {
@@ -251,6 +262,19 @@ void adc_block_channel_free(machine_adcblock_obj_t *adc_block_ptr, machine_adc_o
             return;
         }
     }
+}
+
+void adc_block_maybe_release(machine_adcblock_obj_t *adc_block_ptr) {
+    if (adc_block_ptr == NULL || !adc_block_ptr->active || !adc_block_ptr->auto_deinit) {
+        return;
+    }
+
+    if (_adc_block_has_active_channels(adc_block_ptr)) {
+        return;
+    }
+
+    _adc_block_obj_deinit(adc_block_ptr);
+    _adc_block_obj_free(adc_block_ptr);
 }
 
 static bool _adc_block_has_mapped_pins(uint16_t adc_block_id) {
@@ -323,7 +347,7 @@ static void adc_block_set_bits(machine_adcblock_obj_t *adc_block_ptr, int bits) 
     adc_block_ptr->bits = (uint8_t)bits;
 }
 
-static void _adc_block_obj_init(machine_adcblock_obj_t *adc_block_ptr, uint16_t adc_block_id, uint8_t bits) {
+static void _adc_block_obj_init(machine_adcblock_obj_t *adc_block_ptr, uint16_t adc_block_id, uint8_t bits, bool auto_deinit) {
     if (!adc_autanalog_initialized) {
         adc_hw_configure_supported_gpio_channels();
         uint32_t status = Cy_AutAnalog_Init(&autonomous_analog_init);
@@ -343,6 +367,7 @@ static void _adc_block_obj_init(machine_adcblock_obj_t *adc_block_ptr, uint16_t 
     adc_block_ptr->id = adc_block_id;
     adc_block_ptr->bits = bits;
     adc_block_ptr->active = true;
+    adc_block_ptr->auto_deinit = auto_deinit;
     for (uint8_t i = 0; i < ADC_BLOCK_CHANNEL_MAX; i++) {
         adc_block_ptr->channel[i] = NULL;
     }
@@ -381,7 +406,7 @@ static void _adc_block_obj_deinit(machine_adcblock_obj_t *adc_block_ptr) {
     }
 }
 
-static machine_adcblock_obj_t *machine_adcblock_make_init(uint8_t adc_id, uint8_t bits) {
+static machine_adcblock_obj_t *machine_adcblock_make_init(uint8_t adc_id, uint8_t bits, bool auto_deinit) {
     machine_adcblock_obj_t *adc_block_ptr = _adc_block_obj_find(adc_id);
 
     if (!_adc_bits_supported(bits)) {
@@ -393,9 +418,11 @@ static machine_adcblock_obj_t *machine_adcblock_make_init(uint8_t adc_id, uint8_
         if (adc_block_ptr == NULL) {
             mp_raise_TypeError(MP_ERROR_TEXT("ADC blocks are fully allocated"));
         }
-        _adc_block_obj_init(adc_block_ptr, adc_id, bits);
+        _adc_block_obj_init(adc_block_ptr, adc_id, bits, auto_deinit);
     } else if (adc_block_ptr->bits != bits) {
         mp_raise_ValueError(MP_ERROR_TEXT("ADC block already initialized with different resolution"));
+    } else if (!auto_deinit) {
+        adc_block_ptr->auto_deinit = false;
     }
 
     return adc_block_ptr;
@@ -416,7 +443,7 @@ machine_adcblock_obj_t *adc_block_obj_init(mp_obj_t pin) {
         mp_raise_ValueError(MP_ERROR_TEXT("no ADC block associated with pin"));
     }
 
-    return machine_adcblock_make_init(adc_block_id, DEFAULT_ADC_BITS);
+    return machine_adcblock_make_init(adc_block_id, DEFAULT_ADC_BITS, true);
 }
 
 machine_adc_obj_t *adc_block_channel_find(machine_adcblock_obj_t *adc_block_ptr, mp_obj_t pin) {
@@ -461,7 +488,7 @@ static mp_obj_t machine_adcblock_make_new(const mp_obj_type_t *type, size_t n_po
         mp_raise_ValueError(MP_ERROR_TEXT("bits must be in range 8..12"));
     }
 
-    return MP_OBJ_FROM_PTR(machine_adcblock_make_init(adc_id, bits));
+    return MP_OBJ_FROM_PTR(machine_adcblock_make_init(adc_id, bits, false));
 }
 
 static mp_obj_t machine_adcblock_deinit(mp_obj_t self_in) {
