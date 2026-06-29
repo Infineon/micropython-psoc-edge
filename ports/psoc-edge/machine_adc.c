@@ -70,7 +70,14 @@ static uint32_t adc_normalize_raw_count(machine_adc_obj_t *adc, int32_t raw) {
     return normalized;
 }
 
+static void adc_ensure_active(machine_adc_obj_t *adc) {
+    if (!adc->active || adc->block == NULL || !adc->block->active) {
+        mp_raise_ValueError(MP_ERROR_TEXT("ADC is deinitialized"));
+    }
+}
+
 static int32_t machine_adc_read_raw(machine_adc_obj_t *adc) {
+    adc_ensure_active(adc);
     adc_block_apply_runtime_config(adc->block, adc->sample_ns);
 
     uint8_t channel_mask = (uint8_t)(1u << adc->channel_id);
@@ -101,14 +108,18 @@ void adc_obj_init(machine_adc_obj_t *adc, machine_adcblock_obj_t *adc_block, mp_
     adc->block = adc_block;
     adc->sample_ns = sampling_time;
     adc->channel_id = (uint8_t)adc_channel_no;
+    adc->active = true;
     adc_block_apply_runtime_config(adc_block, sampling_time);
 }
 
 void adc_obj_deinit(machine_adc_obj_t *adc) {
-    (void)adc;
+    adc->active = false;
+    adc->block = NULL;
 }
 
 void adc_obj_init_helper(machine_adc_obj_t *adc, size_t n_pos_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    adc_ensure_active(adc);
+
     enum { ARG_sample_ns };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_sample_ns, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = UINT32_MAX} },
@@ -145,11 +156,17 @@ static machine_adc_obj_t *machine_adc_make_init(uint32_t sampling_time, mp_obj_t
 }
 
 static uint8_t adc_get_resolution(machine_adc_obj_t *adc) {
+    adc_ensure_active(adc);
     return adc->block->bits;
 }
 
 static void machine_adc_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     machine_adc_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (!self->active || self->block == NULL || !self->block->active) {
+        mp_printf(print, "<ADC deinitialized>");
+        return;
+    }
+
     mp_printf(print, "<ADC Pin=%u, ADCBlock_id=%u, sampling_time_ns=%lu>", self->pin_addr, self->block->id, self->sample_ns);
 }
 
@@ -174,8 +191,11 @@ static mp_obj_t machine_adc_make_new(const mp_obj_type_t *type, size_t n_args, s
 
 static mp_obj_t machine_adc_deinit(mp_obj_t self_in) {
     machine_adc_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    machine_adcblock_obj_t *block = self->block;
     adc_obj_deinit(self);
-    adc_block_channel_free(self->block, self);
+    if (block != NULL) {
+        adc_block_channel_free(block, self);
+    }
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_adc_deinit_obj, machine_adc_deinit);
@@ -189,12 +209,14 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(machine_adc_init_obj, 1, machine_adc_init);
 
 static mp_obj_t machine_adc_block(mp_obj_t self_in) {
     const machine_adc_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    adc_ensure_active((machine_adc_obj_t *)self);
     return MP_OBJ_FROM_PTR(self->block);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_adc_block_obj, machine_adc_block);
 
 static mp_obj_t machine_adc_read_u16(mp_obj_t self_in) {
     machine_adc_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    adc_ensure_active(self);
     uint32_t raw = adc_normalize_raw_count(self, machine_adc_read_raw(self));
     mp_int_t bits = (mp_int_t)adc_get_resolution(self);
     uint32_t max_count = adc_max_count_for_bits((uint8_t)bits);
@@ -209,6 +231,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(machine_adc_read_u16_obj, machine_adc_read_u16)
 
 static mp_obj_t machine_adc_read_uv(mp_obj_t self_in) {
     machine_adc_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    adc_ensure_active(self);
     int32_t raw = machine_adc_read_raw(self);
     if (raw < 0) {
         raw = 0;

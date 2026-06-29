@@ -36,6 +36,7 @@ typedef struct _machine_adc_obj_t {
     uint32_t pin_addr;
     uint32_t sample_ns;
     uint8_t channel_id;
+    uint8_t active;
 } machine_adc_obj_t;
 
 void adc_obj_init_helper(machine_adc_obj_t *adc, size_t n_pos_args, const mp_obj_t *pos_args, mp_map_t *kw_args);

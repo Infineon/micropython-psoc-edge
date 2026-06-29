@@ -282,7 +282,15 @@ static uint16_t adc_sample_setting_from_ns(uint32_t sample_ns) {
     return (uint16_t)(cycles - 1u);
 }
 
+static void adc_block_ensure_active(machine_adcblock_obj_t *adc_block_ptr) {
+    if (adc_block_ptr == NULL || !adc_block_ptr->active) {
+        mp_raise_ValueError(MP_ERROR_TEXT("ADC block is deinitialized"));
+    }
+}
+
 void adc_block_apply_runtime_config(machine_adcblock_obj_t *adc_block_ptr, uint32_t sample_ns) {
+    adc_block_ensure_active(adc_block_ptr);
+
     if (adc_block_ptr == NULL || adc_block_ptr->id != ADCBLOCK0) {
         return;
     }
@@ -302,6 +310,8 @@ void adc_block_apply_runtime_config(machine_adcblock_obj_t *adc_block_ptr, uint3
 }
 
 static void adc_block_set_bits(machine_adcblock_obj_t *adc_block_ptr, int bits) {
+    adc_block_ensure_active(adc_block_ptr);
+
     if (bits < 0) {
         return;
     }
@@ -332,6 +342,7 @@ static void _adc_block_obj_init(machine_adcblock_obj_t *adc_block_ptr, uint16_t 
 
     adc_block_ptr->id = adc_block_id;
     adc_block_ptr->bits = bits;
+    adc_block_ptr->active = true;
     for (uint8_t i = 0; i < ADC_BLOCK_CHANNEL_MAX; i++) {
         adc_block_ptr->channel[i] = NULL;
     }
@@ -339,6 +350,12 @@ static void _adc_block_obj_init(machine_adcblock_obj_t *adc_block_ptr, uint16_t 
 }
 
 static void _adc_block_obj_deinit(machine_adcblock_obj_t *adc_block_ptr) {
+    if (adc_block_ptr == NULL || !adc_block_ptr->active) {
+        return;
+    }
+
+    adc_block_ptr->active = false;
+
     for (uint8_t i = 0; i < ADC_BLOCK_CHANNEL_MAX; i++) {
         if (adc_block_ptr->channel[i] != NULL) {
             adc_obj_deinit(adc_block_ptr->channel[i]);
@@ -403,6 +420,10 @@ machine_adcblock_obj_t *adc_block_obj_init(mp_obj_t pin) {
 }
 
 machine_adc_obj_t *adc_block_channel_find(machine_adcblock_obj_t *adc_block_ptr, mp_obj_t pin) {
+    if (adc_block_ptr == NULL || !adc_block_ptr->active) {
+        return NULL;
+    }
+
     int16_t adc_channel_no = adc_get_channel_number_for_pin(adc_pin_addr_by_obj(pin));
     if (adc_channel_no < 0 || !_adc_block_channel_is_valid(adc_block_ptr, (uint16_t)adc_channel_no)) {
         return NULL;
@@ -412,6 +433,11 @@ machine_adc_obj_t *adc_block_channel_find(machine_adcblock_obj_t *adc_block_ptr,
 
 static void machine_adcblock_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     machine_adcblock_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (!self->active) {
+        mp_printf(print, "ADCBlock(deinitialized)");
+        return;
+    }
+
     mp_printf(print, "ADCBlock(%u, bits=%u)", self->id, self->bits);
 }
 
@@ -448,6 +474,7 @@ static MP_DEFINE_CONST_FUN_OBJ_1(machine_adcblock_deinit_obj, machine_adcblock_d
 
 static mp_obj_t machine_adcblock_init(size_t n_pos_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     machine_adcblock_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
+    adc_block_ensure_active(self);
 
     enum { ARG_bits };
     static const mp_arg_t allowed_args[] = {
@@ -464,6 +491,7 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(machine_adcblock_init_obj, 1, machine_adcblock
 
 static mp_obj_t machine_adcblock_connect(size_t n_pos_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     machine_adcblock_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
+    adc_block_ensure_active(self);
     uint8_t channel = 0xff;
     mp_obj_t pin_name = MP_OBJ_NULL;
 
