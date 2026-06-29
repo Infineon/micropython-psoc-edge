@@ -143,9 +143,7 @@ static machine_adc_obj_t *machine_adc_make_init(uint32_t sampling_time, mp_obj_t
     } else {
         adc = adc_block_channel_find(adc_block, pin_name);
         if (adc != NULL) {
-            adc->sample_ns = sampling_time;
-            adc_block_apply_runtime_config(adc->block, adc->sample_ns);
-            return adc;
+            mp_raise_ValueError(MP_ERROR_TEXT("ADC channel already in use"));
         }
     }
 
