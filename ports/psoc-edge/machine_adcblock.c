@@ -159,15 +159,15 @@ uint32_t adc_pin_addr_by_obj(mp_obj_t pin_obj) {
 }
 
 mp_obj_t adc_pin_obj_by_addr(uint32_t pin_addr) {
-#if MICROPY_HW_ADC_PIN_LOOKUP_POLICY_BOARD_THEN_CPU
+    #if MICROPY_HW_ADC_PIN_LOOKUP_POLICY_BOARD_THEN_CPU
     mp_obj_t pin_obj = adc_pin_obj_find_in_dict(&machine_pin_board_pins_locals_dict.map, pin_addr);
     if (pin_obj != MP_OBJ_NULL) {
         return pin_obj;
     }
     return adc_pin_obj_find_in_dict(&machine_pin_cpu_pins_locals_dict.map, pin_addr);
-#else
+    #else
     return adc_pin_obj_find_in_dict(&machine_pin_cpu_pins_locals_dict.map, pin_addr);
-#endif
+    #endif
 }
 
 int16_t adc_get_channel_number_for_pin(uint32_t pin) {
