@@ -178,6 +178,74 @@ Use :func:`machine.bitstream` directly for timing-sensitive one-wire protocols::
     - Each timing value must be at least 300 ns; smaller values raise ``ValueError``.
     - If the runtime core clock is invalid (0 Hz), transmission raises ``ValueError``.
 
+Analog to Digital Converter (ADC)
+---------------------------------
+
+See :ref:`machine.ADC <machine.ADC>` and :ref:`machine.ADCBlock <machine.ADCBlock>`.
+
+This port supports one ADC block (``id=0``) with GPIO channels mapped on the
+P15 bank.
+
+Quick start
+^^^^^^^^^^^
+
+Use ``ADC`` directly for a pin, or use ``ADCBlock`` and connect channels::
+
+    from machine import ADC, ADCBlock
+
+    # Direct ADC from pin.
+    adc = ADC("P15_1", sample_ns=1000)
+    print(adc.read_u16())
+    print(adc.read_uv())
+    adc.deinit()
+
+    # ADCBlock usage.
+    block = ADCBlock(0, bits=12)
+    adc0 = block.connect(0)              # by channel
+    adc1 = block.connect("P15_1")        # by pin
+    adc2 = block.connect(2, "P15_2")     # by channel + pin validation
+
+    print(adc0.read_u16(), adc1.read_uv(), adc2.read_u16())
+
+    adc0.deinit()
+    adc1.deinit()
+    adc2.deinit()
+    block.deinit()
+
+Port-specific behavior
+^^^^^^^^^^^^^^^^^^^^^^
+
+- ``ADC(pin, *, sample_ns=...)``:
+  - ``pin`` must be ADC-capable in this port mapping.
+  - ``sample_ns`` is keyword-only.
+
+- ``ADCBlock(id, *, bits=12)``:
+  - Only ``id=0`` is supported.
+  - ``bits`` range is ``8`` to ``12``.
+
+- ``ADCBlock.connect()`` accepts:
+  - ``connect(channel)``
+  - ``connect(pin)``
+  - ``connect(channel, pin)`` (validated pair)
+  - Extra keyword arguments are forwarded to ``ADC.init()``.
+
+- ``sample_ns`` constraints:
+  - Must be in valid hardware range for this port.
+  - All active ADC objects in the same block must use the same ``sample_ns``.
+  - A mismatch raises ``ValueError``.
+
+- Channel ownership:
+  - Opening the same ADC channel twice raises ``ValueError``.
+  - Deinitialized ADC objects cannot be used for reads or reconfiguration.
+
+- Read methods:
+  - ``read_u16()`` returns a 16-bit scaled value (0..65535).
+  - ``read_uv()`` returns the measured input in microvolts.
+
+.. note::
+    Current default ADC pin map for this port is P15_0 through P15_7 (channels
+    0 through 7).
+
 Real time clock (RTC)
 ---------------------
 
