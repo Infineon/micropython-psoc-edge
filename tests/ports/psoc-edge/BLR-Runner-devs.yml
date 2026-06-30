@@ -27,3 +27,8 @@
   features:
     - spi
     - bitstream
+
+- name: KIT_PSE84_AI
+  uid: 1D1B1398012D2400
+  features:
+    - adc
