@@ -26,6 +26,7 @@
 
 #include <stdbool.h>
 
+#include "py/nlr.h"
 #include "py/runtime.h"
 #include "py/mphal.h"
 
@@ -50,7 +51,7 @@ static void _adc_block_obj_deinit(machine_adcblock_obj_t *adc_block_ptr);
 
 #define ADC_PIN(block, ch, port, pin)  {(block), (ch), ((uint32_t)(port) << 8) | (pin)},
 #define ADC_CAP(block, ch_count)       {(block), (ch_count)},
-#define ADC_GPIO_CHANNEL_COUNT         (8u)
+#define ADC_GPIO_CHANNEL_COUNT         (ADC_BLOCK_CHANNEL_MAX)
 #define ADC_GPIO_CHANNEL_MASK          ((uint8_t)0xffu)
 #define ADC_HS_CLOCK_HZ                (80000000u)
 #define ADC_HS_SAMPLE_TIME_MIN_CYCLES  (1u)
@@ -70,11 +71,7 @@ static cy_stc_autanalog_sar_hs_chan_t adc_gpio_ch_cfg[ADC_GPIO_CHANNEL_COUNT] = 
 
 #ifndef MICROPY_HW_ADC_BLOCK_CAPS
 #define MICROPY_HW_ADC_BLOCK_CAPS(ENTRY) \
-    ENTRY(ADCBLOCK0, 8)
-#endif
-
-#ifndef MICROPY_HW_ADC_MAX_CHANNELS_PER_BLOCK
-#define MICROPY_HW_ADC_MAX_CHANNELS_PER_BLOCK (8)
+    ENTRY(ADCBLOCK0, ADC_BLOCK_CHANNEL_MAX)
 #endif
 
 #ifndef MICROPY_HW_ADC_PIN_LOOKUP_POLICY_BOARD_THEN_CPU
@@ -105,8 +102,8 @@ _Static_assert(MP_ARRAY_SIZE(adc_block_caps) <= MAX_BLOCKS,
     "ADC block capability descriptors exceed MAX_BLOCKS");
 _Static_assert(MP_ARRAY_SIZE(adc_block_pin_map) <= ADC_BLOCK_CHANNEL_MAX,
     "ADC pin map exceeds ADC_BLOCK_CHANNEL_MAX");
-_Static_assert(MICROPY_HW_ADC_MAX_CHANNELS_PER_BLOCK <= ADC_BLOCK_CHANNEL_MAX,
-    "ADC max channel count exceeds ADC_BLOCK_CHANNEL_MAX");
+_Static_assert(ADC_GPIO_CHANNEL_COUNT <= 8,
+    "ADC GPIO channel count exceeds hardware support");
 
 static void adc_hw_configure_supported_gpio_channels(void) {
     for (size_t i = 0; i < ADC_GPIO_CHANNEL_COUNT; i++) {
@@ -301,11 +298,8 @@ static bool _adc_bits_supported(uint8_t bits) {
 
 static uint16_t adc_sample_setting_from_ns(uint32_t sample_ns) {
     uint64_t cycles = ((uint64_t)sample_ns * ADC_HS_CLOCK_HZ + 999999999u) / 1000000000u;
-    if (cycles < ADC_HS_SAMPLE_TIME_MIN_CYCLES) {
-        cycles = ADC_HS_SAMPLE_TIME_MIN_CYCLES;
-    }
-    if (cycles > ADC_HS_SAMPLE_TIME_MAX_CYCLES) {
-        cycles = ADC_HS_SAMPLE_TIME_MAX_CYCLES;
+    if (cycles < ADC_HS_SAMPLE_TIME_MIN_CYCLES || cycles > ADC_HS_SAMPLE_TIME_MAX_CYCLES) {
+        mp_raise_ValueError(MP_ERROR_TEXT("sample_ns out of range"));
     }
     return (uint16_t)(cycles - 1u);
 }
@@ -316,14 +310,32 @@ static void adc_block_ensure_active(machine_adcblock_obj_t *adc_block_ptr) {
     }
 }
 
+uint16_t adc_block_validate_sample_ns(machine_adcblock_obj_t *adc_block_ptr, machine_adc_obj_t *current_adc, uint32_t sample_ns) {
+    adc_block_ensure_active(adc_block_ptr);
+
+    uint16_t sample_setting = adc_sample_setting_from_ns(sample_ns);
+
+    for (uint8_t i = 0; i < ADC_BLOCK_CHANNEL_MAX; i++) {
+        machine_adc_obj_t *other_adc = adc_block_ptr->channel[i];
+        if (other_adc == NULL || other_adc == current_adc || !other_adc->active) {
+            continue;
+        }
+        if (other_adc->sample_ns != sample_ns) {
+            mp_raise_ValueError(MP_ERROR_TEXT("sample_ns must match active ADC channels"));
+        }
+    }
+
+    return sample_setting;
+}
+
 void adc_block_apply_runtime_config(machine_adcblock_obj_t *adc_block_ptr, uint32_t sample_ns) {
     adc_block_ensure_active(adc_block_ptr);
 
-    if (adc_block_ptr == NULL || adc_block_ptr->id != ADCBLOCK0) {
+    if (adc_block_ptr->id != ADCBLOCK0) {
         return;
     }
 
-    uint16_t sample_setting = adc_sample_setting_from_ns(sample_ns);
+    uint16_t sample_setting = adc_block_validate_sample_ns(adc_block_ptr, NULL, sample_ns);
     if (adc_hw_sample_setting == sample_setting) {
         return;
     }
@@ -524,11 +536,16 @@ static mp_obj_t machine_adcblock_connect(size_t n_pos_args, const mp_obj_t *pos_
     machine_adcblock_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
     adc_block_ensure_active(self);
     uint8_t channel = 0xff;
+    int channel_int = -1;
     mp_obj_t pin_name = MP_OBJ_NULL;
 
     if (n_pos_args == 2) {
         if (mp_obj_is_int(pos_args[1])) {
-            channel = mp_obj_get_int(pos_args[1]);
+            channel_int = mp_obj_get_int(pos_args[1]);
+            if (channel_int < 0 || channel_int >= ADC_BLOCK_CHANNEL_MAX) {
+                mp_raise_ValueError(MP_ERROR_TEXT("invalid ADC channel"));
+            }
+            channel = (uint8_t)channel_int;
             int32_t pin_addr = _get_adc_pin_number_for_channel(self->id, channel);
             if (pin_addr < 0) {
                 mp_raise_ValueError(MP_ERROR_TEXT("invalid ADC channel"));
@@ -541,7 +558,11 @@ static mp_obj_t machine_adcblock_connect(size_t n_pos_args, const mp_obj_t *pos_
             pin_name = pos_args[1];
         }
     } else if (n_pos_args == 3) {
-        channel = mp_obj_get_int(pos_args[1]);
+        channel_int = mp_obj_get_int(pos_args[1]);
+        if (channel_int < 0 || channel_int >= ADC_BLOCK_CHANNEL_MAX) {
+            mp_raise_ValueError(MP_ERROR_TEXT("invalid ADC channel"));
+        }
+        channel = (uint8_t)channel_int;
         int32_t exp_pin = _get_adc_pin_number_for_channel(self->id, channel);
         uint32_t actual_pin = adc_pin_addr_by_obj(pos_args[2]);
         if (exp_pin < 0 || (uint32_t)exp_pin != actual_pin) {
@@ -558,10 +579,18 @@ static mp_obj_t machine_adcblock_connect(size_t n_pos_args, const mp_obj_t *pos_
     }
 
     adc = adc_block_channel_alloc(self, pin_name);
-    adc_obj_init(adc, self, pin_name, DEFAULT_ADC_ACQ_NS);
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        adc_obj_init(adc, self, pin_name, DEFAULT_ADC_ACQ_NS);
 
-    // Match the generic ADCBlock contract by forwarding extra kwargs to ADC.init().
-    adc_obj_init_helper(adc, 0, NULL, kw_args);
+        // Match the generic ADCBlock contract by forwarding extra kwargs to ADC.init().
+        adc_obj_init_helper(adc, 0, NULL, kw_args);
+        nlr_pop();
+    } else {
+        adc_obj_deinit(adc);
+        adc_block_channel_free(self, adc);
+        nlr_raise(MP_OBJ_FROM_PTR(nlr.ret_val));
+    }
 
     return MP_OBJ_FROM_PTR(adc);
 }
