@@ -1,0 +1,13 @@
+invalid ADC pin:  True
+sample_ns validation:  True
+ADCBlock.connect(channel):  True
+ADCBlock.connect(pin):  True
+invalid ADC channel:  True
+duplicate channel open:  True
+conflicting sample_ns:  True
+ADC read_uv gnd:  True
+ADC read_u16 gnd:  True
+ADC read_uv mid:  True
+ADC read_u16 mid:  True
+ADC read_uv max:  True
+ADC read_u16 max:  True

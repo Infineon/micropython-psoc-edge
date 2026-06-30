@@ -33,14 +33,18 @@
 #define DEFAULT_ADC_BITS        ADC_HW_NATIVE_BITS
 #define ADC_MIN_BITS            (8)
 #define ADC_MAX_BITS            ADC_HW_NATIVE_BITS
-#define ADC_BLOCK_CHANNEL_MAX   (16)
-#define DEFAULT_ADC_ACQ_NS      (1000)
-
-#define ADCBLOCK0               (0)
-
 #ifndef MICROPY_HW_ADC_MAX_BLOCKS
 #define MICROPY_HW_ADC_MAX_BLOCKS (1)
 #endif
+
+#ifndef MICROPY_HW_ADC_MAX_CHANNELS_PER_BLOCK
+#define MICROPY_HW_ADC_MAX_CHANNELS_PER_BLOCK (8)
+#endif
+
+#define ADC_BLOCK_CHANNEL_MAX   MICROPY_HW_ADC_MAX_CHANNELS_PER_BLOCK
+#define DEFAULT_ADC_ACQ_NS      (1000)
+
+#define ADCBLOCK0               (0)
 
 #define MAX_BLOCKS              MICROPY_HW_ADC_MAX_BLOCKS
 
@@ -72,6 +76,7 @@ machine_adc_obj_t *adc_block_channel_find(machine_adcblock_obj_t *adc_block, mp_
 machine_adc_obj_t *adc_block_channel_alloc(machine_adcblock_obj_t *adc_block, mp_obj_t pin);
 void adc_block_channel_free(machine_adcblock_obj_t *adc_block, machine_adc_obj_t *adc);
 void adc_block_maybe_release(machine_adcblock_obj_t *adc_block);
+uint16_t adc_block_validate_sample_ns(machine_adcblock_obj_t *adc_block, machine_adc_obj_t *current_adc, uint32_t sample_ns);
 void adc_block_apply_runtime_config(machine_adcblock_obj_t *adc_block, uint32_t sample_ns);
 int16_t adc_get_channel_number_for_pin(uint32_t pin);
 

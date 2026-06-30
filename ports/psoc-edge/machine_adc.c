@@ -27,6 +27,7 @@
 #include <stdbool.h>
 
 #include "py/mperrno.h"
+#include "py/nlr.h"
 #include "py/runtime.h"
 #include "py/mphal.h"
 
@@ -35,12 +36,12 @@
 #include "machine_adcblock.h"
 
 #include "cybsp.h"
+#include "cycfg_system.h"
 #include "cy_autanalog.h"
 #include "cy_autanalog_sar.h"
 
 #define PSOC_EDGE_SAR_ADC_INDEX      (0u)
 #define PSOC_EDGE_SAR_ADC_SEQUENCER  (0u)
-#define PSOC_EDGE_SAR_ADC_VREF_MV    (1800u)
 #define PSOC_EDGE_SAR_READ_TIMEOUT_US (1000u)
 
 static uint32_t adc_max_count_for_bits(uint8_t bits) {
@@ -106,10 +107,12 @@ void adc_obj_init(machine_adc_obj_t *adc, machine_adcblock_obj_t *adc_block, mp_
 
     adc->pin_addr = pin_addr;
     adc->block = adc_block;
-    adc->sample_ns = sampling_time;
+    adc->sample_ns = DEFAULT_ADC_ACQ_NS;
     adc->channel_id = (uint8_t)adc_channel_no;
     adc->active = true;
+    adc_block_validate_sample_ns(adc_block, adc, sampling_time);
     adc_block_apply_runtime_config(adc_block, sampling_time);
+    adc->sample_ns = sampling_time;
 }
 
 void adc_obj_deinit(machine_adc_obj_t *adc) {
@@ -129,17 +132,21 @@ void adc_obj_init_helper(machine_adc_obj_t *adc, size_t n_pos_args, const mp_obj
     mp_arg_parse_all(n_pos_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
 
     if (args[ARG_sample_ns].u_int != UINT32_MAX) {
-        adc->sample_ns = args[ARG_sample_ns].u_int;
-        adc_block_apply_runtime_config(adc->block, adc->sample_ns);
+        uint32_t sample_ns = args[ARG_sample_ns].u_int;
+        adc_block_validate_sample_ns(adc->block, adc, sample_ns);
+        adc_block_apply_runtime_config(adc->block, sample_ns);
+        adc->sample_ns = sample_ns;
     }
 }
 
 static machine_adc_obj_t *machine_adc_make_init(uint32_t sampling_time, mp_obj_t pin_name) {
     machine_adc_obj_t *adc;
+    bool implicit_block = false;
 
     machine_adcblock_obj_t *adc_block = adc_block_obj_find(pin_name);
     if (adc_block == NULL) {
         adc_block = adc_block_obj_init(pin_name);
+        implicit_block = true;
     } else {
         adc = adc_block_channel_find(adc_block, pin_name);
         if (adc != NULL) {
@@ -148,7 +155,18 @@ static machine_adc_obj_t *machine_adc_make_init(uint32_t sampling_time, mp_obj_t
     }
 
     adc = adc_block_channel_alloc(adc_block, pin_name);
-    adc_obj_init(adc, adc_block, pin_name, sampling_time);
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        adc_obj_init(adc, adc_block, pin_name, sampling_time);
+        nlr_pop();
+    } else {
+        adc_obj_deinit(adc);
+        adc_block_channel_free(adc_block, adc);
+        if (implicit_block) {
+            adc_block_maybe_release(adc_block);
+        }
+        nlr_raise(MP_OBJ_FROM_PTR(nlr.ret_val));
+    }
 
     return adc;
 }
@@ -169,7 +187,7 @@ static void machine_adc_print(const mp_print_t *print, mp_obj_t self_in, mp_prin
 }
 
 static mp_obj_t machine_adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
-    mp_arg_check_num(n_args, n_kw, 1, 6, true);
+    mp_arg_check_num(n_args, n_kw, 1, 1, true);
 
     enum { ARG_sample_ns };
     static const mp_arg_t allowed_args[] = {
@@ -245,7 +263,7 @@ static mp_obj_t machine_adc_read_uv(mp_obj_t self_in) {
         PSOC_EDGE_SAR_ADC_SEQUENCER,
         CY_AUTANALOG_SAR_INPUT_GPIO,
         self->channel_id,
-        PSOC_EDGE_SAR_ADC_VREF_MV,
+        CY_CFG_PWR_VDDA_MV,
         raw
         );
     if (uv < 0) {
