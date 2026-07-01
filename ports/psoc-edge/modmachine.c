@@ -67,6 +67,17 @@ static uint32_t reset_cause;
 // machine.reset_cause() returns machine.SOFT_RESET.
 void machine_deinit(void) {
     reset_cause = MACHINE_SOFT_RESET;
+    machine_pin_irq_deinit_all();
+    machine_uart_deinit_all();
+    machine_hw_i2c_deinit_all();
+    machine_spi_deinit_all();
+    #if MICROPY_PY_MACHINE_SPI_TARGET
+    machine_spi_target_deinit_all();
+    #endif
+    machine_pdm_pcm_deinit_all();
+    machine_ipc_deinit_all();
+    machine_timer_deinit_all();
+    machine_wdt_deinit();
 }
 
 // machine.idle()
@@ -137,6 +148,6 @@ static void mp_machine_set_freq(size_t n_args, const mp_obj_t *args) {
     { MP_ROM_QSTR(MP_QSTR_HARD_RESET),          MP_ROM_INT(MACHINE_HARD_RESET) }, \
     { MP_ROM_QSTR(MP_QSTR_WDT_RESET),           MP_ROM_INT(MACHINE_WDT_RESET) }, \
     { MP_ROM_QSTR(MP_QSTR_DEEPSLEEP_RESET),     MP_ROM_INT(MACHINE_DEEPSLEEP_RESET) }, \
-    { MP_ROM_QSTR(MP_QSTR_SOFT_RESET),          MP_ROM_INT(MACHINE_SOFT_RESET) },
+    { MP_ROM_QSTR(MP_QSTR_SOFT_RESET),          MP_ROM_INT(MACHINE_SOFT_RESET) }
 
 #endif // MICROPY_PY_MACHINE
