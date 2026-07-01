@@ -551,6 +551,10 @@ LDFLAGS += -Wl,--defsym=__GcHeapStart=__HeapBase+$(MICROPY_C_HEAP_SIZE)
 LDFLAGS += -Wl,--defsym=__GcHeapEnd=__HeapLimit
 endif
 
+# Increase the default stack size from (4 KB) to (16 KB).
+APP_MSP_STACK_SIZE ?= 0x4000
+LDFLAGS +=-Wl,--defsym=APP_MSP_STACK_SIZE=$(APP_MSP_STACK_SIZE) \
+
 LIBS += -lm
 
 # PSOC Edge uses Cortex-M33 and Cortex-M55 (ARMv8-M architecture)
