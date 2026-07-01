@@ -50,6 +50,7 @@
 #include "shared/runtime/gchelper.h"
 #include "shared/runtime/pyexec.h"
 #include "shared/readline/readline.h"
+#include "machine_adcblock.h"
 
 #if MICROPY_PY_LWIP
 #include "lwip/init.h"
@@ -248,6 +249,7 @@ soft_reset:
     machine_ipc_deinit_all();
     machine_timer_deinit_all();
     machine_wdt_deinit();
+    machine_adcblock_deinit_all();
 
     #if MICROPY_PY_NETWORK
     mod_network_deinit();
