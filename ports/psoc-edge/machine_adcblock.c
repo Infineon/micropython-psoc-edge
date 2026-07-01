@@ -34,6 +34,7 @@
 #include "machine_adcblock.h"
 #include "machine_adc.h"
 #include "machine_pin.h"
+#include "genhdr/pins_af.h"
 
 #include "cybsp.h"
 #include "cy_autanalog.h"

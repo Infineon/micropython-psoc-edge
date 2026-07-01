@@ -222,6 +222,32 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self._tcpwm_counter_max = 0  # highest counter number seen across all LINE AFs
         self._tcpwm_counters = []  # sorted unique TCPWM counter IDs seen in LINE AFs
 
+        # ADC board-name derived mapping tracking
+        # Each entry is (block_id, channel_id, port, pin).
+        self._adc_pin_entries = []
+        # Dict block_id -> channel_count (max channel + 1)
+        self._adc_block_caps = {}
+
+    @staticmethod
+    def _parse_adc_board_name(board_pin_name):
+        # Supported labels in boards/<board>/pins.csv:
+        #  - ADC<n>            -> block 0, channel n
+        #  - ADC<b>_<c>        -> block b, channel c
+        #  - ADCBLOCK<b>_CH<c> -> block b, channel c
+        match = re.match(r"^ADC(\d+)$", board_pin_name)
+        if match:
+            return (0, int(match.group(1)))
+
+        match = re.match(r"^ADC(\d+)_(\d+)$", board_pin_name)
+        if match:
+            return (int(match.group(1)), int(match.group(2)))
+
+        match = re.match(r"^ADCBLOCK(\d+)_CH(\d+)$", board_pin_name)
+        if match:
+            return (int(match.group(1)), int(match.group(2)))
+
+        return None
+
     # Collect all unhidden ports from the available
     # pins.
     # This function can be only used after parse_board_csv()
@@ -280,6 +306,40 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self._tcpwm_counters = sorted(seen_counters)
         self._pwm_pin_count = len(seen_counters)
 
+    def add_adc(self):
+        adc_pin_entries = {}
+        adc_block_caps = {}
+
+        for pin in self.available_pins():
+            for board_pin_name, _board_hidden in pin.board_pin_names():
+                adc_loc = self._parse_adc_board_name(board_pin_name)
+                if adc_loc is None:
+                    continue
+
+                block_id, channel_id = adc_loc
+                key = (block_id, channel_id)
+                pin_loc = (pin._port, pin._pin)
+
+                if key in adc_pin_entries and adc_pin_entries[key] != pin_loc:
+                    raise boardgen.PinGeneratorError(
+                        "ADC mapping conflict for block {} channel {}: {} vs {}".format(
+                            block_id, channel_id, adc_pin_entries[key], pin_loc
+                        )
+                    )
+
+                adc_pin_entries[key] = pin_loc
+
+                ch_count = channel_id + 1
+                prev = adc_block_caps.get(block_id, 0)
+                if ch_count > prev:
+                    adc_block_caps[block_id] = ch_count
+
+        self._adc_pin_entries = [
+            (block_id, channel_id, adc_pin_entries[(block_id, channel_id)][0], adc_pin_entries[(block_id, channel_id)][1])
+            for (block_id, channel_id) in sorted(adc_pin_entries)
+        ]
+        self._adc_block_caps = dict(sorted(adc_block_caps.items()))
+
     # Override the parse_board_csv to add
     # the unhidden ports after parsing the board CSV.
     def parse_board_csv(self, filename):
@@ -287,6 +347,7 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self.add_ports()
         self.add_scbs()
         self.add_tcpwm()
+        self.add_adc()
 
     # Override the default implementation just to change the default arguments
     # (extra header row, skip first column).
@@ -440,6 +501,36 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self.print_scb_defines(out_af_header)
         self.print_tcpwm_defines(out_af_header)
         self.print_tcpwm_hw_map(out_af_header)
+        self.print_adc_defines(out_af_header)
+
+    def print_adc_defines(self, out_header):
+        if not self._adc_pin_entries:
+            return
+
+        print(file=out_header)
+        print("// ADC mapping generated from board pins.csv ADC labels.", file=out_header)
+        print("// Supported labels: ADC<n>, ADC<b>_<c>, ADCBLOCK<b>_CH<c>.", file=out_header)
+
+        print("#ifndef MICROPY_HW_ADC_BLOCK_CAPS", file=out_header)
+        print("#define MICROPY_HW_ADC_BLOCK_CAPS(ENTRY) \\", file=out_header)
+        for idx, (block_id, channel_count) in enumerate(self._adc_block_caps.items()):
+            suffix = ' \\' if idx < len(self._adc_block_caps) - 1 else ''
+            print(
+                "    ENTRY({:d}, {:d}){}".format(block_id, channel_count, suffix),
+                file=out_header,
+            )
+        print("#endif", file=out_header)
+
+        print(file=out_header)
+        print("#ifndef MICROPY_HW_ADC_PIN_MAP", file=out_header)
+        print("#define MICROPY_HW_ADC_PIN_MAP(ENTRY) \\", file=out_header)
+        for idx, (block_id, channel_id, port, pin) in enumerate(self._adc_pin_entries):
+            suffix = ' \\' if idx < len(self._adc_pin_entries) - 1 else ''
+            print(
+                "    ENTRY({:d}, {:d}, {:d}u, {:d}u){}".format(block_id, channel_id, port, pin, suffix),
+                file=out_header,
+            )
+        print("#endif", file=out_header)
 
     # Add additional header file for AF defines and constants
     def extra_args(self, parser):
