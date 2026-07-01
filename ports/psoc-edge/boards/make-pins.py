@@ -296,7 +296,9 @@ class PSE84PinGenerator(boardgen.PinGenerator):
                     prev = self._adc_by_cpu_pin.get(cpu_pin_name)
                     if prev is not None and prev != adc_loc:
                         raise boardgen.PinGeneratorError(
-                            "Conflicting ADC mapping for pin '{}': {} vs {}".format(cpu_pin_name, prev, adc_loc)
+                            "Conflicting ADC mapping for pin '{}': {} vs {}".format(
+                                cpu_pin_name, prev, adc_loc
+                            )
                         )
 
                     self._adc_by_cpu_pin[cpu_pin_name] = adc_loc
