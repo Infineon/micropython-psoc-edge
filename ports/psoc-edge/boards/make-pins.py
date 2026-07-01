@@ -1,4 +1,5 @@
 from operator import add
+import csv
 import os
 import re
 import sys
@@ -222,31 +223,86 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self._tcpwm_counter_max = 0  # highest counter number seen across all LINE AFs
         self._tcpwm_counters = []  # sorted unique TCPWM counter IDs seen in LINE AFs
 
-        # ADC board-name derived mapping tracking
+        # ADC AF-column derived mapping tracking
         # Each entry is (block_id, channel_id, port, pin).
         self._adc_pin_entries = []
         # Dict block_id -> channel_count (max channel + 1)
         self._adc_block_caps = {}
+        # Dict cpu_pin_name -> (block_id, channel_id), parsed from AF CSV ADC column.
+        self._adc_by_cpu_pin = {}
 
     @staticmethod
-    def _parse_adc_board_name(board_pin_name):
-        # Supported labels in boards/<board>/pins.csv:
+    def _parse_adc_location(adc_name):
+        # Supported ADC labels in AF CSV ADC column:
         #  - ADC<n>            -> block 0, channel n
         #  - ADC<b>_<c>        -> block b, channel c
         #  - ADCBLOCK<b>_CH<c> -> block b, channel c
-        match = re.match(r"^ADC(\d+)$", board_pin_name)
+        match = re.match(r"^ADC(\d+)$", adc_name)
         if match:
             return (0, int(match.group(1)))
 
-        match = re.match(r"^ADC(\d+)_(\d+)$", board_pin_name)
+        match = re.match(r"^ADC(\d+)_(\d+)$", adc_name)
         if match:
             return (int(match.group(1)), int(match.group(2)))
 
-        match = re.match(r"^ADCBLOCK(\d+)_CH(\d+)$", board_pin_name)
+        match = re.match(r"^ADCBLOCK(\d+)_CH(\d+)$", adc_name)
         if match:
             return (int(match.group(1)), int(match.group(2)))
 
         return None
+
+    def parse_adc_map_from_af_csv(self, filename):
+        self._adc_by_cpu_pin = {}
+
+        with open(filename, "r") as csvfile:
+            rows = csv.reader(csvfile)
+            headings = None
+            pin_col = None
+            adc_col = None
+
+            for linenum, row in enumerate(rows):
+                try:
+                    # Skip empty lines, and lines starting with "#".
+                    if len(row) == 0 or row[0].startswith("#"):
+                        continue
+
+                    if headings is None:
+                        headings = [h.strip() for h in row]
+                        try:
+                            pin_col = headings.index("Pin")
+                            adc_col = headings.index("ADC")
+                        except ValueError:
+                            # ADC column is optional for backward compatibility.
+                            return
+                        continue
+
+                    if len(row) <= pin_col:
+                        continue
+
+                    cpu_pin_name = row[pin_col].strip()
+                    if cpu_pin_name == "-":
+                        continue
+
+                    adc_name = row[adc_col].strip() if len(row) > adc_col else ""
+                    if not adc_name:
+                        continue
+
+                    adc_loc = self._parse_adc_location(adc_name)
+                    if adc_loc is None:
+                        raise boardgen.PinGeneratorError(
+                            "Invalid ADC mapping '{}' for pin '{}'".format(adc_name, cpu_pin_name)
+                        )
+
+                    prev = self._adc_by_cpu_pin.get(cpu_pin_name)
+                    if prev is not None and prev != adc_loc:
+                        raise boardgen.PinGeneratorError(
+                            "Conflicting ADC mapping for pin '{}': {} vs {}".format(cpu_pin_name, prev, adc_loc)
+                        )
+
+                    self._adc_by_cpu_pin[cpu_pin_name] = adc_loc
+
+                except boardgen.PinGeneratorError as er:
+                    raise boardgen.PinGeneratorError("{}:{}: {}".format(filename, linenum, er))
 
     # Collect all unhidden ports from the available
     # pins.
@@ -311,28 +367,27 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         adc_block_caps = {}
 
         for pin in self.available_pins():
-            for board_pin_name, _board_hidden in pin.board_pin_names():
-                adc_loc = self._parse_adc_board_name(board_pin_name)
-                if adc_loc is None:
-                    continue
+            adc_loc = self._adc_by_cpu_pin.get(pin._cpu_pin_name)
+            if adc_loc is None:
+                continue
 
-                block_id, channel_id = adc_loc
-                key = (block_id, channel_id)
-                pin_loc = (pin._port, pin._pin)
+            block_id, channel_id = adc_loc
+            key = (block_id, channel_id)
+            pin_loc = (pin._port, pin._pin)
 
-                if key in adc_pin_entries and adc_pin_entries[key] != pin_loc:
-                    raise boardgen.PinGeneratorError(
-                        "ADC mapping conflict for block {} channel {}: {} vs {}".format(
-                            block_id, channel_id, adc_pin_entries[key], pin_loc
-                        )
+            if key in adc_pin_entries and adc_pin_entries[key] != pin_loc:
+                raise boardgen.PinGeneratorError(
+                    "ADC mapping conflict for block {} channel {}: {} vs {}".format(
+                        block_id, channel_id, adc_pin_entries[key], pin_loc
                     )
+                )
 
-                adc_pin_entries[key] = pin_loc
+            adc_pin_entries[key] = pin_loc
 
-                ch_count = channel_id + 1
-                prev = adc_block_caps.get(block_id, 0)
-                if ch_count > prev:
-                    adc_block_caps[block_id] = ch_count
+            ch_count = channel_id + 1
+            prev = adc_block_caps.get(block_id, 0)
+            if ch_count > prev:
+                adc_block_caps[block_id] = ch_count
 
         self._adc_pin_entries = [
             (
@@ -357,7 +412,8 @@ class PSE84PinGenerator(boardgen.PinGenerator):
     # Override the default implementation just to change the default arguments
     # (extra header row, skip first column).
     def parse_af_csv(self, filename):
-        return super().parse_af_csv(filename, header_rows=1, pin_col=1, af_col=2)
+        super().parse_af_csv(filename, header_rows=1, pin_col=1, af_col=2)
+        self.parse_adc_map_from_af_csv(filename)
 
     def print_port_defines(self, out_header):
         print(file=out_header)
@@ -513,7 +569,7 @@ class PSE84PinGenerator(boardgen.PinGenerator):
             return
 
         print(file=out_header)
-        print("// ADC mapping generated from board pins.csv ADC labels.", file=out_header)
+        print("// ADC mapping generated from the AF CSV ADC column.", file=out_header)
         print("// Supported labels: ADC<n>, ADC<b>_<c>, ADCBLOCK<b>_CH<c>.", file=out_header)
 
         print("#ifndef MICROPY_HW_ADC_BLOCK_CAPS", file=out_header)
