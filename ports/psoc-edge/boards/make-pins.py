@@ -335,7 +335,12 @@ class PSE84PinGenerator(boardgen.PinGenerator):
                     adc_block_caps[block_id] = ch_count
 
         self._adc_pin_entries = [
-            (block_id, channel_id, adc_pin_entries[(block_id, channel_id)][0], adc_pin_entries[(block_id, channel_id)][1])
+            (
+                block_id,
+                channel_id,
+                adc_pin_entries[(block_id, channel_id)][0],
+                adc_pin_entries[(block_id, channel_id)][1],
+            )
             for (block_id, channel_id) in sorted(adc_pin_entries)
         ]
         self._adc_block_caps = dict(sorted(adc_block_caps.items()))
@@ -514,7 +519,7 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         print("#ifndef MICROPY_HW_ADC_BLOCK_CAPS", file=out_header)
         print("#define MICROPY_HW_ADC_BLOCK_CAPS(ENTRY) \\", file=out_header)
         for idx, (block_id, channel_count) in enumerate(self._adc_block_caps.items()):
-            suffix = ' \\' if idx < len(self._adc_block_caps) - 1 else ''
+            suffix = " \\" if idx < len(self._adc_block_caps) - 1 else ""
             print(
                 "    ENTRY({:d}, {:d}){}".format(block_id, channel_count, suffix),
                 file=out_header,
@@ -525,9 +530,11 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         print("#ifndef MICROPY_HW_ADC_PIN_MAP", file=out_header)
         print("#define MICROPY_HW_ADC_PIN_MAP(ENTRY) \\", file=out_header)
         for idx, (block_id, channel_id, port, pin) in enumerate(self._adc_pin_entries):
-            suffix = ' \\' if idx < len(self._adc_pin_entries) - 1 else ''
+            suffix = " \\" if idx < len(self._adc_pin_entries) - 1 else ""
             print(
-                "    ENTRY({:d}, {:d}, {:d}u, {:d}u){}".format(block_id, channel_id, port, pin, suffix),
+                "    ENTRY({:d}, {:d}, {:d}u, {:d}u){}".format(
+                    block_id, channel_id, port, pin, suffix
+                ),
                 file=out_header,
             )
         print("#endif", file=out_header)
