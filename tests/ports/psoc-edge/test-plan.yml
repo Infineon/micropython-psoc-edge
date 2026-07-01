@@ -25,13 +25,13 @@
       - basic
     device: 
       - board: KIT_PSE84_AI
-      
+
 - name: no-extended-hardware
   test: 
     script: ports/psoc-edge/board_only_hw/single
     device: 
       - board: KIT_PSE84_AI
-            
+
 - name: pin-signal
   test: 
     script: 
@@ -42,6 +42,15 @@
       - board: KIT_PSE84_AI
         features:
           - pin
+
+- name: bitstream
+  type: multi
+  test:
+    script: ports/psoc-edge/board_ext_hw/multi/bitstream.py
+    device:
+      - board: KIT_PSE84_AI
+        features:
+          - bitstream
 
 - name: i2c
   type: multi
@@ -67,7 +76,7 @@
       - board: KIT_PSE84_AI
         features:
           - pwm
-          
+
 - name: network
   type: multi
   test:
