@@ -65,6 +65,7 @@ extern const mp_obj_type_t machine_rtc_type;
 extern const mp_obj_type_t machine_ipc_type;
 extern const mp_obj_type_t machine_pwm_type;
 extern const mp_obj_type_t machine_timer_type;
+extern const mp_obj_type_t machine_counter_type;
 extern const mp_obj_type_t machine_wdt_type;
 
 #if MICROPY_PY_MACHINE_SPI_TARGET
