@@ -426,14 +426,19 @@ class PSE84PinGenerator(boardgen.PinGenerator):
 
         print(file=out_header)
         print(
-            "// Unified TCPWM hardware map: timer_id, counter_num, IRQ, PCLK destination.",
+            "// Unified TCPWM map: timer_id, counter_num, IRQ, PCLK destination, and one-to-one trigger input route.",
             file=out_header,
         )
-        print("// Each row: X(timer_id, tcpwm_counter_num, irq, pclk_dst)", file=out_header)
-        print("#define MICROPY_PY_MACHINE_TCPWM_HW_MAP(X) \\", file=out_header)
+        print(
+            "// Each row: X(timer_id, tcpwm_counter_num, irq, pclk_dst, trig_out_enum)",
+            file=out_header,
+        )
+        print("#define MICROPY_PY_MACHINE_TCPWM_MAP(X) \\", file=out_header)
         for i, (tid, counter, irq, pclk) in enumerate(hw_entries):
+            counter_token = counter[:-1] if counter.endswith("U") else counter
+            trig = f"PERI_0_TRIG_OUT_MUX_3_TCPWM0_ONE_CNT_TR_IN{counter_token}"
             suffix = " \\" if i < len(hw_entries) - 1 else ""
-            print(f"    X({tid:2d}, {counter}, {irq}, {pclk}){suffix}", file=out_header)
+            print(f"    X({tid:2d}, {counter}, {irq}, {pclk}, {trig}){suffix}", file=out_header)
         print(file=out_header)
 
     def print_af_header(self, out_af_header):
