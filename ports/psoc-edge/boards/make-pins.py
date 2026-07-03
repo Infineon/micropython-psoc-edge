@@ -1,5 +1,4 @@
 from operator import add
-import csv
 import os
 import re
 import sys
@@ -130,6 +129,12 @@ class PSE84Pin(boardgen.Pin):
         self._afs.append(pin_af)
 
     def add_af(self, af_idx, af_name, af):
+        # ADC is an optional non-AF column in af.csv. Route it through the
+        # same boardgen parse_af_csv() flow to avoid a second CSV parser pass.
+        if af_name == "ADC":
+            self._generator.add_adc_location(self._cpu_pin_name, af)
+            return
+
         # The AF index matches the column index for the ACTx functions 0-15
         # while for DSx functions the columns 16-19 are mapped to DS2-DS5 respectively.
         af_act_max_idx = 15
@@ -251,60 +256,26 @@ class PSE84PinGenerator(boardgen.PinGenerator):
 
         return None
 
-    def parse_adc_map_from_af_csv(self, filename):
-        self._adc_by_cpu_pin = {}
+    def add_adc_location(self, cpu_pin_name, adc_name):
+        adc_name = adc_name.strip()
+        if not adc_name:
+            return
 
-        with open(filename, "r") as csvfile:
-            rows = csv.reader(csvfile)
-            headings = None
-            pin_col = None
-            adc_col = None
+        adc_loc = self._parse_adc_location(adc_name)
+        if adc_loc is None:
+            raise boardgen.PinGeneratorError(
+                "Invalid ADC mapping '{}' for pin '{}'".format(adc_name, cpu_pin_name)
+            )
 
-            for linenum, row in enumerate(rows):
-                try:
-                    # Skip empty lines, and lines starting with "#".
-                    if len(row) == 0 or row[0].startswith("#"):
-                        continue
+        prev = self._adc_by_cpu_pin.get(cpu_pin_name)
+        if prev is not None and prev != adc_loc:
+            raise boardgen.PinGeneratorError(
+                "Conflicting ADC mapping for pin '{}': {} vs {}".format(
+                    cpu_pin_name, prev, adc_loc
+                )
+            )
 
-                    if headings is None:
-                        headings = [h.strip() for h in row]
-                        try:
-                            pin_col = headings.index("Pin")
-                            adc_col = headings.index("ADC")
-                        except ValueError:
-                            # ADC column is optional for backward compatibility.
-                            return
-                        continue
-
-                    if len(row) <= pin_col:
-                        continue
-
-                    cpu_pin_name = row[pin_col].strip()
-                    if cpu_pin_name == "-":
-                        continue
-
-                    adc_name = row[adc_col].strip() if len(row) > adc_col else ""
-                    if not adc_name:
-                        continue
-
-                    adc_loc = self._parse_adc_location(adc_name)
-                    if adc_loc is None:
-                        raise boardgen.PinGeneratorError(
-                            "Invalid ADC mapping '{}' for pin '{}'".format(adc_name, cpu_pin_name)
-                        )
-
-                    prev = self._adc_by_cpu_pin.get(cpu_pin_name)
-                    if prev is not None and prev != adc_loc:
-                        raise boardgen.PinGeneratorError(
-                            "Conflicting ADC mapping for pin '{}': {} vs {}".format(
-                                cpu_pin_name, prev, adc_loc
-                            )
-                        )
-
-                    self._adc_by_cpu_pin[cpu_pin_name] = adc_loc
-
-                except boardgen.PinGeneratorError as er:
-                    raise boardgen.PinGeneratorError("{}:{}: {}".format(filename, linenum, er))
+        self._adc_by_cpu_pin[cpu_pin_name] = adc_loc
 
     # Collect all unhidden ports from the available
     # pins.
@@ -414,8 +385,8 @@ class PSE84PinGenerator(boardgen.PinGenerator):
     # Override the default implementation just to change the default arguments
     # (extra header row, skip first column).
     def parse_af_csv(self, filename):
+        self._adc_by_cpu_pin = {}
         super().parse_af_csv(filename, header_rows=1, pin_col=1, af_col=2)
-        self.parse_adc_map_from_af_csv(filename)
 
     def print_port_defines(self, out_header):
         print(file=out_header)
