@@ -230,21 +230,9 @@ Port-specific behavior
   - Extra keyword arguments are forwarded to ``ADC.init()``.
 
 - ``sample_ns`` constraints:
-  - Must be in valid hardware range for this port.
-  - All active ADC objects in the same block must use the same ``sample_ns``.
-  - A mismatch raises ``ValueError``.
-
-- Channel ownership:
-  - Opening the same ADC channel twice raises ``ValueError``.
-  - Deinitialized ADC objects cannot be used for reads or reconfiguration.
-
-- Read methods:
-  - ``read_u16()`` returns a 16-bit scaled value (0..65535).
-  - ``read_uv()`` returns the measured input in microvolts.
-
-.. note::
-    Current default ADC pin map for this port is P15_0 through P15_7 (channels
-    0 through 7).
+    - Must be in range ``1`` to ``12800`` ns for this port.
+    - All active ADC objects in the same block must use the same ``sample_ns``.
+    - A mismatch raises ``ValueError``.
 
 Real time clock (RTC)
 ---------------------
