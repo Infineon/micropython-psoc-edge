@@ -351,6 +351,7 @@ PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_systick_v2.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_tcpwm_counter.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_tcpwm_pwm.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_trigmux.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/ppu_v1.c \
 	\
 	mtb-dsl-pse8xxgp/support/source/mtb_stdlib_stubs.c \
@@ -595,6 +596,7 @@ MOD_SRC_C += \
 	machine_scb.c \
 	tcpwm.c \
 	machine_timer.c \
+	machine_counter.c \
 	machine_bitstream.c \
 	modpsocedge.c \
 

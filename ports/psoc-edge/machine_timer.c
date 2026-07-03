@@ -83,21 +83,21 @@ const mp_obj_type_t machine_timer_type;  // forward declaration
 
 // ---------------------------------------------------------------------------
 // Per-ID hardware mapping — generated from the board AF configuration.
-// Macro is defined in pins_af.h as MICROPY_PY_MACHINE_TIMER_HW_MAP(X).
-// Each row: X(timer_id, tcpwm_counter_num, irq)
+// Macro is defined in pins_af.h as MICROPY_PY_MACHINE_TCPWM_MAP(X).
+// Each row: X(timer_id, tcpwm_counter_num, irq, pclk_dst, trig_out_enum)
 // ---------------------------------------------------------------------------
 
-#define TIMER_HW_ENTRY(id, counter, irq, pclk) counter,
+#define TIMER_HW_ENTRY(id, counter, irq, pclk, trig) counter,
 static const uint32_t timer_hw[MACHINE_TIMER_NUM_INSTANCES] = {
-    MICROPY_PY_MACHINE_TCPWM_HW_MAP(TIMER_HW_ENTRY)
+    MICROPY_PY_MACHINE_TCPWM_MAP(TIMER_HW_ENTRY)
 };
 #undef TIMER_HW_ENTRY
 
-#define TIMER_IRQ_CASE(id, counter, irq, pclk) case counter: \
+#define TIMER_IRQ_CASE(id, counter, irq, pclk, trig) case counter: \
         return irq;
 static IRQn_Type machine_timer_counter_irq(uint32_t counter_num) {
     switch (counter_num) {
-        MICROPY_PY_MACHINE_TCPWM_HW_MAP(TIMER_IRQ_CASE)
+        MICROPY_PY_MACHINE_TCPWM_MAP(TIMER_IRQ_CASE)
         default:
             mp_raise_msg_varg(&mp_type_ValueError,
                 MP_ERROR_TEXT("Timer counter %lu does not have an IRQ mapping"),
@@ -153,19 +153,19 @@ static void machine_timer_isr(machine_timer_obj_t *self) {
 }
 
 // Generate one IRQ handler per timer id for direct dispatch without scanning.
-#define TIMER_IRQ_HANDLER_DECL(id, counter, irq, pclk) \
+#define TIMER_IRQ_HANDLER_DECL(id, counter, irq, pclk, trig) \
     static void machine_timer_irq_handler_##id(void) { \
         machine_timer_obj_t *self = timer_obj[id]; \
         if (self != NULL) { \
             machine_timer_isr(self); \
         } \
     }
-MICROPY_PY_MACHINE_TCPWM_HW_MAP(TIMER_IRQ_HANDLER_DECL)
+MICROPY_PY_MACHINE_TCPWM_MAP(TIMER_IRQ_HANDLER_DECL)
 #undef TIMER_IRQ_HANDLER_DECL
 
-#define TIMER_IRQ_HANDLER_ENTRY(id, counter, irq, pclk) machine_timer_irq_handler_##id,
+#define TIMER_IRQ_HANDLER_ENTRY(id, counter, irq, pclk, trig) machine_timer_irq_handler_##id,
 static const cy_israddress machine_timer_irq_handlers[MACHINE_TIMER_NUM_INSTANCES] = {
-    MICROPY_PY_MACHINE_TCPWM_HW_MAP(TIMER_IRQ_HANDLER_ENTRY)
+    MICROPY_PY_MACHINE_TCPWM_MAP(TIMER_IRQ_HANDLER_ENTRY)
 };
 #undef TIMER_IRQ_HANDLER_ENTRY
 
