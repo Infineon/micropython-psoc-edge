@@ -30,7 +30,7 @@
 #include <string.h>
 #include "cybsp.h"
 #include "cy_scb_spi.h"
-#include "cy_sysclk.h"
+#include "clk.h"
 #include "genhdr/pins_af.h"
 #include "machine_scb.h"
 #include "modmachine.h"
@@ -43,9 +43,7 @@
 #define SPI_TARGET_TICKS_WRAP_MS       (15000U) // from mp_hal_ticks_ms source timer period in modtime.c
 #define DEFAULT_SPI_TARGET_TIMEOUT_MS  (5000U)  // must stay below SPI_TARGET_TICKS_WRAP_MS
 
-#define SPI_TARGET_CLK_DIV_TYPE        CY_SYSCLK_DIV_8_BIT
 #define SPI_TARGET_CLK_DIV_BASE        (4U)
-#define SPI_TARGET_CLK_DIV_INVALID      (0xFFU)
 
 // mp_hal_ticks_ms() on this port wraps every SPI_TARGET_TICKS_WRAP_MS.
 // This computes elapsed time across one wrap; caller keeps timeout < wrap period.
@@ -65,7 +63,7 @@ typedef struct _machine_spi_target_obj_t {
     uint8_t bits;
     uint8_t firstbit;
     uint32_t timeout;
-    uint8_t div_num;  // Clock divider number for PCLK
+    pclk_div_obj_t *pclk_div;
     machine_scb_obj_t *scb_obj;
     cy_stc_scb_spi_config_t cfg;
     cy_stc_scb_spi_context_t ctx;
@@ -77,7 +75,6 @@ static inline machine_spi_target_obj_t *machine_spi_target_obj_alloc(void) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_SPI_TARGET_MAX; i++) {
         if (machine_spi_target_obj[i] == NULL) {
             machine_spi_target_obj[i] = mp_obj_malloc(machine_spi_target_obj_t, &machine_spi_target_type);
-            machine_spi_target_obj[i]->div_num = SPI_TARGET_CLK_DIV_INVALID;
             return machine_spi_target_obj[i];
         }
     }
@@ -144,27 +141,19 @@ static void machine_spi_target_hw_init(machine_spi_target_obj_t *self) {
     uint8_t scb_unit = machine_spi_target_pins_config_and_get_scb_unit(
         self->sck, self->mosi, self->miso, self->ssel);
 
-    // Power on the peripheral group that contains this SCB.
-    machine_scb_enable_group(scb_unit);
 
     // Allocate SCB
     self->scb_obj = machine_scb_obj_alloc(scb_unit, self,
         machine_spi_target_scb_isr);
 
-    if (!machine_scb_div8_try_alloc(self->scb_obj->clk,
-        SPI_TARGET_CLK_DIV_BASE,
-        SPI_TARGET_CLK_DIV_INVALID,
-        self,
-        &self->div_num)) {
+    pclk_div_slave_init(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
+    self->pclk_div = pclk_div_init(self->scb_obj->clk, SPI_TARGET_CLK_DIV_BASE, 0);
+    if (self->pclk_div == NULL) {
+        pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
         machine_scb_obj_free(self->scb_obj);
         self->scb_obj = NULL;
         mp_raise_ValueError(MP_ERROR_TEXT("SPITarget clock dividers exhausted"));
     }
-
-    // Configure SPI PCLK divider (needed for slave's internal clock even though
-    // the bit clock comes from master's SCK)
-    machine_scb_peri_pclk_config_divider(self->scb_obj->clk,
-        SPI_TARGET_CLK_DIV_TYPE, self->div_num, 0U);
 
     // Select SPI clock polarity and phase
     cy_en_scb_spi_sclk_mode_t sclk_mode;
@@ -214,8 +203,9 @@ static void machine_spi_target_hw_init(machine_spi_target_obj_t *self) {
         Cy_SCB_SPI_Init(self->scb_obj->scb, &self->cfg, &self->ctx);
 
     if (result != CY_SCB_SPI_SUCCESS) {
-        machine_scb_div8_free(self->scb_obj->clk, self->div_num, self);
-        self->div_num = SPI_TARGET_CLK_DIV_INVALID;
+        pclk_div_deinit(self->pclk_div);
+        self->pclk_div = NULL;
+        pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
         machine_scb_obj_free(self->scb_obj);
         self->scb_obj = NULL;
         mp_raise_msg_varg(&mp_type_ValueError,
@@ -230,11 +220,9 @@ static void machine_spi_target_hw_deinit(machine_spi_target_obj_t *self) {
     Cy_SCB_SPI_Disable(self->scb_obj->scb, &self->ctx);
     Cy_SCB_SPI_DeInit(self->scb_obj->scb);
     sys_int_deinit(&self->scb_obj->irq);
-    if (self->div_num != SPI_TARGET_CLK_DIV_INVALID) {
-        machine_scb_div8_free(self->scb_obj->clk, self->div_num, self);
-        Cy_SysClk_PeriPclkDisableDivider(self->scb_obj->clk, SPI_TARGET_CLK_DIV_TYPE, self->div_num);
-        self->div_num = SPI_TARGET_CLK_DIV_INVALID;
-    }
+    pclk_div_deinit(self->pclk_div);
+    self->pclk_div = NULL;
+    pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
     machine_scb_obj_free(self->scb_obj);
     self->scb_obj = NULL;
 }
@@ -282,6 +270,7 @@ static mp_obj_t machine_spi_target_make_new(const mp_obj_type_t *type, size_t n_
     self->bits = args[ARG_bits].u_int;
     self->firstbit = args[ARG_firstbit].u_int;
     self->timeout = DEFAULT_SPI_TARGET_TIMEOUT_MS;
+    self->pclk_div = NULL;
     self->scb_obj = NULL;
 
     nlr_buf_t nlr;
