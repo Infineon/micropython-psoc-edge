@@ -28,15 +28,7 @@
 #include "stdio.h"
 
 // MTB includes
-<<<<<<< HEAD
-#include "retarget_io_init.h"
-
-// PDL includes
-#include "cy_crypto_core_trng.h"
-=======
 #include "mtb_hal_system.h"
-#include "mtb_hal_timer.h"
->>>>>>> eeb3c0131 (psoc-edge/mphalport: Added machine.UART based stdio implementation.)
 
 // micropython includes
 #include "mpconfigport.h"
@@ -44,7 +36,10 @@
 
 #include "py/runtime.h"
 
-extern mtb_hal_timer_t psoc_edge_timer;
+extern void machine_uart_repl_init(void);
+extern int machine_uart_repl_readchar(void);
+extern void machine_uart_repl_write(const void *buf_in, mp_uint_t size);
+extern uintptr_t machine_uart_repl_ioctl(uintptr_t arg);
 
 void mp_hal_get_random(size_t n, uint8_t *buf) {
     uint32_t r = 0;
@@ -56,39 +51,6 @@ void mp_hal_get_random(size_t n, uint8_t *buf) {
         r >>= 8;
     }
 }
-
-void mp_hal_delay_us(mp_uint_t us) {
-    mtb_hal_system_delay_us(us);
-}
-
-uint64_t mp_hal_time_ns(void) {
-    // TODO: This is not fully functional until rtc machine module is implemented.
-    cy_stc_rtc_config_t current_date_time = {0};
-    Cy_RTC_GetDateAndTime(&current_date_time);
-
-    uint64_t s = timeutils_seconds_since_epoch(current_date_time.year, current_date_time.month, current_date_time.date,
-        current_date_time.hour, current_date_time.min, current_date_time.sec);
-
-    // add ticks to make sure time is strictly monotonic
-    return s * 1000000000ULL + mtb_hal_timer_read(&psoc_edge_timer) * 1000ULL;
-}
-
-mp_uint_t mp_hal_ticks_ms(void) {
-    return mtb_hal_timer_read(&psoc_edge_timer) / 1000;
-}
-
-mp_uint_t mp_hal_ticks_us(void) {
-    return mtb_hal_timer_read(&psoc_edge_timer);
-}
-
-mp_uint_t mp_hal_ticks_cpu(void) {
-    return mtb_hal_timer_read(&psoc_edge_timer);
-}
-
-extern void machine_uart_repl_init(void);
-extern int machine_uart_repl_readchar(void);
-extern void machine_uart_repl_write(const void *buf_in, mp_uint_t size);
-extern uintptr_t machine_uart_repl_ioctl(uintptr_t arg);
 
 void mp_hal_stdio_init(void) {
     machine_uart_repl_init();

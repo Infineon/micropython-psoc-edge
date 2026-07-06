@@ -867,15 +867,16 @@ static uint8_t repl_uart_buf[MICROPYTHON_REPL_RINGBUF_SIZE];
 void machine_uart_repl_init() {
     repl_uart_obj.tx = MICROPYTHON_REPL_UART_TX_PIN;
     repl_uart_obj.rx = MICROPYTHON_REPL_UART_RX_PIN;
-    mp_hal_pin_af_config_t uart_pins_config[2];
 
-    MP_HAL_PIN_AF_INIT(uart_pins_config[0], repl_uart_obj.tx, CY_GPIO_DM_STRONG_IN_OFF, 1, MACHINE_PIN_AF_SIGNAL_UART_TX);
-    MP_HAL_PIN_AF_INIT(uart_pins_config[1], repl_uart_obj.rx, CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_UART_RX);
+    mp_hal_pin_af_config_t uart_pins_config[2] = {
+        MP_HAL_PIN_AF_CONF_INIT(repl_uart_obj.tx, CY_GPIO_DM_STRONG_IN_OFF, 1, MACHINE_PIN_AF_SIGNAL_UART_TX),
+        MP_HAL_PIN_AF_CONF_INIT(repl_uart_obj.rx, CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_UART_RX),
+    };
 
     uint8_t scb_unit = uart_pins_config[0].af->unit;
 
     repl_uart_obj.scb_obj = machine_scb_obj_alloc(scb_unit, &repl_uart_obj, machine_uart_scb_isr);
-    mp_hal_periph_pins_af_config(uart_pins_config, 2);
+    mp_hal_periph_pins_af_init(uart_pins_config, 2);
 
     repl_uart_obj.baudrate = DEFAULT_UART_BAUDRATE;
     machine_uart_baudrate_set(&repl_uart_obj);
