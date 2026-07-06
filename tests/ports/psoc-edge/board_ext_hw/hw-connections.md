@@ -8,6 +8,8 @@
 |                   |               |               |                                |
 | UART              | P17_0         | P17_1         | UART RX to TX                  |
 |                   | P16_5         | P16_6         | UART CTS to RTS                |
+|                   |               |               |                                |
+| Counter           | P16_7         | P11_1         | GPIO pulse output to Counter input |
 
 # Pin Connections for HIL Test Setup Between 2 Boards
 
