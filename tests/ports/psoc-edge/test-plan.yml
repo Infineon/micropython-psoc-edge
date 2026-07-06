@@ -89,6 +89,14 @@
         features:
           - pwm
 
+- name: counter
+  test: 
+    script: ports/psoc-edge/board_ext_hw/single/counter.py
+    device: 
+      - board: KIT_PSE84_AI
+        features:
+          - counter
+
 - name: network
   type: multi
   test:
