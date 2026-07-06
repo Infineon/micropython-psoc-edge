@@ -53,6 +53,20 @@ enum clock_freq_type freq_peri;
 #define MICROPY_PY_MACHINE_SPITARGET_GLOBAL
 #endif
 
+#if MICROPY_PY_MACHINE_ADC
+#define MICROPY_PY_MACHINE_ADC_GLOBAL \
+    { MP_ROM_QSTR(MP_QSTR_ADC), MP_ROM_PTR(&machine_adc_type) },
+#else
+#define MICROPY_PY_MACHINE_ADC_GLOBAL
+#endif
+
+#if MICROPY_PY_MACHINE_ADC_BLOCK
+#define MICROPY_PY_MACHINE_ADC_BLOCK_GLOBAL \
+    { MP_ROM_QSTR(MP_QSTR_ADCBlock), MP_ROM_PTR(&machine_adc_block_type) },
+#else
+#define MICROPY_PY_MACHINE_ADC_BLOCK_GLOBAL
+#endif
+
 // machine.idle()
 // This executies a wfi machine instruction which reduces power consumption
 // of the MCU until an interrupt occurs, at which point execution continues.
@@ -78,6 +92,8 @@ static void mp_machine_set_freq(size_t n_args, const mp_obj_t *args) {
 
 #define MICROPY_PY_MACHINE_EXTRA_GLOBALS \
     /* Modules */ \
+    MICROPY_PY_MACHINE_ADC_GLOBAL \
+    MICROPY_PY_MACHINE_ADC_BLOCK_GLOBAL \
     { MP_ROM_QSTR(MP_QSTR_Pin),                 MP_ROM_PTR(&machine_pin_type) }, \
     { MP_ROM_QSTR(MP_QSTR_PDM_PCM),             MP_ROM_PTR(&machine_pdm_pcm_type) }, \
     { MP_ROM_QSTR(MP_QSTR_RTC),                 MP_ROM_PTR(&machine_rtc_type) }, \

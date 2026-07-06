@@ -311,6 +311,7 @@ PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
 	\
 	mtb-dsl-pse8xxgp/device-utils/syspm/source/mtb_syspm_callbacks_scb_uart.c \
 	\
+	mtb-dsl-pse8xxgp/hal/source/mtb_hal_adc_sar.c \
 	mtb-dsl-pse8xxgp/hal/source/mtb_hal_clock.c \
 	mtb-dsl-pse8xxgp/hal/source/mtb_hal_gpio.c \
 	mtb-dsl-pse8xxgp/hal/source/mtb_hal_lptimer.c \
@@ -342,6 +343,14 @@ PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_smif_memnum.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_smif_memslot.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_smif_sfdp.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_ac.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_sar.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_ctb.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_dac.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_ptc.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_systrimm.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_rram.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_sysclk_v2.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_sysint_v2.c \
     mtb-dsl-pse8xxgp/pdl/drivers/source/cy_syslib.c \

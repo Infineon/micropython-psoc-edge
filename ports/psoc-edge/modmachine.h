@@ -54,4 +54,12 @@ extern const mp_obj_type_t machine_wdt_type;
 extern const mp_obj_type_t machine_spi_target_type;
 #endif
 
+#if MICROPY_PY_MACHINE_ADC
+extern const mp_obj_type_t machine_adc_type;
+#endif
+
+#if MICROPY_PY_MACHINE_ADC_BLOCK
+extern const mp_obj_type_t machine_adc_block_type;
+#endif
+
 #endif // MICROPY_INCLUDED_PSOCEDGE_MODMACHINE_H
