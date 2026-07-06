@@ -31,7 +31,7 @@
 #include "py/mperrno.h"
 #include "cybsp.h"
 #include "cy_scb_spi.h"
-#include "cy_sysclk.h"
+#include "clk.h"
 #include "genhdr/pins_af.h"
 #include "machine_scb.h"
 #include "modmachine.h"
@@ -44,9 +44,7 @@
 #define DEFAULT_SPI_TIMEOUT     (50000)
 
 #define SPI_OVERSAMPLE          (4U)
-#define SPI_CLK_DIV_TYPE        CY_SYSCLK_DIV_8_BIT
 #define SPI_CLK_DIV_BASE        (4U)
-#define SPI_CLK_DIV_INVALID      (0xFFU)
 
 typedef struct _machine_spi_obj_t {
     mp_obj_base_t base;
@@ -59,7 +57,7 @@ typedef struct _machine_spi_obj_t {
     uint8_t bits;
     uint8_t firstbit;
     uint32_t timeout;
-    uint8_t div_num;
+    pclk_div_obj_t *pclk_div;
     machine_scb_obj_t *scb_obj;
     cy_stc_scb_spi_config_t cfg;
     cy_stc_scb_spi_context_t ctx;
@@ -71,7 +69,6 @@ static inline machine_spi_obj_t *machine_hw_spi_obj_alloc(void) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_SPI_NUM_ENTRIES; i++) {
         if (machine_hw_spi_obj[i] == NULL) {
             machine_hw_spi_obj[i] = mp_obj_malloc(machine_spi_obj_t, &machine_spi_type);
-            machine_hw_spi_obj[i]->div_num = SPI_CLK_DIV_INVALID;
             return machine_hw_spi_obj[i];
         }
     }
@@ -141,32 +138,19 @@ static void machine_spi_hw_init(machine_spi_obj_t *self) {
     uint8_t scb_unit = machine_spi_pins_config_and_get_scb_unit(
         self->sck, self->mosi, self->miso);
 
-    // Power on the peripheral group that contains this SCB.
-    // Note: "Slave" in PeriGroupSlaveInit refers to the bus architecture
-    // (SCB is a slave on the internal PERI interconnect), not SPI slave mode.
-    machine_scb_enable_group(scb_unit);
-
     // Allocate SCB
     self->scb_obj = machine_scb_obj_alloc(scb_unit, self,
         machine_spi_scb_isr);
 
-    if (!machine_scb_div8_try_alloc(self->scb_obj->clk,
-        SPI_CLK_DIV_BASE,
-        SPI_CLK_DIV_INVALID,
-        self,
-        &self->div_num)) {
+    pclk_div_slave_init(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
+
+    uint32_t clk_hf_freq = pclk_div_get_input_freq(self->scb_obj->clk);
+    if (clk_hf_freq == 0U) {
+        pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
         machine_scb_obj_free(self->scb_obj);
         self->scb_obj = NULL;
-        mp_raise_ValueError(MP_ERROR_TEXT("SPI clock dividers exhausted"));
+        mp_raise_ValueError(MP_ERROR_TEXT("failed to get SPI input clock"));
     }
-
-    // Configure SPI clock divider
-    machine_scb_peri_pclk_config_divider(self->scb_obj->clk,
-        SPI_CLK_DIV_TYPE, self->div_num, 0U);
-
-    // Get HF clock frequency and calculate divider value for desired baudrate
-    uint32_t clk_hf_freq = Cy_SysClk_PeriPclkGetFrequency(
-        self->scb_obj->clk, SPI_CLK_DIV_TYPE, self->div_num);
 
     // Compute divider value for requested baudrate
     uint32_t div_val = clk_hf_freq / ((uint64_t)self->baudrate * SPI_OVERSAMPLE);
@@ -174,9 +158,18 @@ static void machine_spi_hw_init(machine_spi_obj_t *self) {
         div_val--;
     }
 
-    // Apply divider
-    machine_scb_peri_pclk_config_divider(self->scb_obj->clk,
-        SPI_CLK_DIV_TYPE, self->div_num, div_val);
+    if (div_val < SPI_CLK_DIV_BASE) {
+        div_val = SPI_CLK_DIV_BASE;
+    }
+
+    self->pclk_div = pclk_div_init(self->scb_obj->clk, div_val, 0);
+    if (self->pclk_div == NULL) {
+        pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
+        machine_scb_obj_free(self->scb_obj);
+        self->pclk_div = NULL;
+        self->scb_obj = NULL;
+        mp_raise_ValueError(MP_ERROR_TEXT("SPI clock dividers exhausted"));
+    }
 
     // Select SPI clock polarity and phase
     cy_en_scb_spi_sclk_mode_t sclk_mode;
@@ -226,8 +219,9 @@ static void machine_spi_hw_init(machine_spi_obj_t *self) {
         Cy_SCB_SPI_Init(self->scb_obj->scb, &self->cfg, &self->ctx);
 
     if (result != CY_SCB_SPI_SUCCESS) {
-        machine_scb_div8_free(self->scb_obj->clk, self->div_num, self);
-        self->div_num = SPI_CLK_DIV_INVALID;
+        pclk_div_deinit(self->pclk_div);
+        self->pclk_div = NULL;
+        pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
         machine_scb_obj_free(self->scb_obj);
         self->scb_obj = NULL;
         mp_raise_msg_varg(&mp_type_ValueError,
@@ -242,11 +236,9 @@ static void machine_spi_hw_deinit(machine_spi_obj_t *self) {
     Cy_SCB_SPI_Disable(self->scb_obj->scb, &self->ctx);
     Cy_SCB_SPI_DeInit(self->scb_obj->scb);
     sys_int_deinit(&self->scb_obj->irq);
-    if (self->div_num != SPI_CLK_DIV_INVALID) {
-        machine_scb_div8_free(self->scb_obj->clk, self->div_num, self);
-        Cy_SysClk_PeriPclkDisableDivider(self->scb_obj->clk, SPI_CLK_DIV_TYPE, self->div_num);
-        self->div_num = SPI_CLK_DIV_INVALID;
-    }
+    pclk_div_deinit(self->pclk_div);
+    self->pclk_div = NULL;
+    pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
     machine_scb_obj_free(self->scb_obj);
     self->scb_obj = NULL;
 }
@@ -429,6 +421,7 @@ mp_obj_t mp_machine_spi_make_new(const mp_obj_type_t *type, size_t n_args, size_
     self->bits = DEFAULT_SPI_BITS;
     self->firstbit = MICROPY_PY_MACHINE_SPI_MSB;
     self->timeout = DEFAULT_SPI_TIMEOUT;
+    self->pclk_div = NULL;
     self->scb_obj = NULL;
     self->sck = NULL;
     self->mosi = NULL;
