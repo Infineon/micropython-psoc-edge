@@ -120,7 +120,7 @@ USER_LED1,P10_7
 ,-P11_0
 
 # PCKL level translator
-,-P11_1
+,P11_1
 
 # Bluetooth
 ,-P11_2
