@@ -244,7 +244,7 @@ static void machine_spi_hw_deinit(machine_spi_obj_t *self) {
 }
 
 // Parse and validate user arguments shared by constructor and init().
-static void machine_spi_init_helper(machine_spi_obj_t *self, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
+static void machine_spi_init(mp_obj_base_t *self_in, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     enum { ARG_id, ARG_baudrate, ARG_polarity, ARG_phase, ARG_bits,
            ARG_firstbit, ARG_sck, ARG_mosi, ARG_miso };
 
@@ -261,7 +261,9 @@ static void machine_spi_init_helper(machine_spi_obj_t *self, size_t n_args, size
     };
 
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
-    mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    machine_spi_obj_t *self = (machine_spi_obj_t *)self_in;
 
     bool reinit = false;
 
@@ -310,29 +312,6 @@ static void machine_spi_init_helper(machine_spi_obj_t *self, size_t n_args, size
         }
         machine_spi_hw_init(self);
     }
-}
-
-// Thin protocol adapter for mp_machine_spi_p.init signature.
-static void machine_spi_init(mp_obj_base_t *self_in, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
-    machine_spi_obj_t *self = (machine_spi_obj_t *)self_in;
-
-    // Convert runtime pos/kw args into the kw-array form expected by init_helper.
-    size_t n_kw = kw_args->used;
-    size_t all_args_len = n_args + 2 * n_kw;
-    mp_obj_t all_args[all_args_len == 0 ? 1 : all_args_len];
-
-    size_t out = 0;
-    for (size_t i = 0; i < n_args; i++) {
-        all_args[out++] = pos_args[i];
-    }
-    for (size_t i = 0; i < kw_args->alloc; i++) {
-        if (mp_map_slot_is_filled(kw_args, i)) {
-            all_args[out++] = kw_args->table[i].key;
-            all_args[out++] = kw_args->table[i].value;
-        }
-    }
-
-    machine_spi_init_helper(self, n_args, n_kw, all_args);
 }
 
 static void machine_spi_deinit(mp_obj_base_t *self_in) {
@@ -414,6 +393,9 @@ mp_obj_t mp_machine_spi_make_new(const mp_obj_type_t *type, size_t n_args, size_
         mp_raise_ValueError(MP_ERROR_TEXT("machine.SPI: Maximum number of SPI instances reached"));
     }
 
+    mp_map_t kw_args;
+    mp_map_init_fixed_table(&kw_args, n_kw, all_args + n_args);
+
     // Set defaults
     self->baudrate = DEFAULT_SPI_BAUDRATE;
     self->polarity = DEFAULT_SPI_POLARITY;
@@ -430,7 +412,7 @@ mp_obj_t mp_machine_spi_make_new(const mp_obj_type_t *type, size_t n_args, size_
     // Delegate argument parsing and initialization to init_helper
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
-        machine_spi_init_helper(self, n_args, n_kw, all_args);
+        machine_spi_init((mp_obj_base_t *)self, n_args, all_args, &kw_args);
         nlr_pop();
     } else {
         machine_hw_spi_obj_free(self);
