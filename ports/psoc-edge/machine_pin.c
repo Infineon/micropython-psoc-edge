@@ -37,28 +37,21 @@
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT(msg), ret); \
 }
 
+#define MACHINE_PIN_OUT_VAL_UNDEF    0xFFU
+
 uint8_t pin_get_mode(const machine_pin_obj_t *self) {
     uint32_t drive_mode = Cy_GPIO_GetDrivemode(Cy_GPIO_PortToAddr(self->port), self->pin);
 
     switch (drive_mode) {
         case CY_GPIO_DM_HIGHZ:
-        case CY_GPIO_DM_PULLUP:
-        case CY_GPIO_DM_PULLDOWN:
         case CY_GPIO_DM_PULLUP_DOWN:
             return GPIO_MODE_IN;
 
-        case CY_GPIO_DM_STRONG_IN_OFF:
-        case CY_GPIO_DM_PULLUP_IN_OFF:
-        case CY_GPIO_DM_PULLDOWN_IN_OFF:
-        case CY_GPIO_DM_PULLUP_DOWN_IN_OFF:
+        case CY_GPIO_DM_STRONG:
             return GPIO_MODE_OUT;
 
-        case CY_GPIO_DM_OD_DRIVESLOW_IN_OFF:
-        /* These 2 modes are not configurable
-        by the user but they could be set by
-        at C level */
         case CY_GPIO_DM_OD_DRIVESLOW:
-        case CY_GPIO_DM_OD_DRIVESHIGH:
+        case CY_GPIO_DM_PULLUP:
             return GPIO_MODE_OPEN_DRAIN;
 
         default:
@@ -66,125 +59,147 @@ uint8_t pin_get_mode(const machine_pin_obj_t *self) {
     }
 }
 
+static inline uint8_t pin_get_out_value(const machine_pin_obj_t *self) {
+    return Cy_GPIO_ReadOut(Cy_GPIO_PortToAddr(self->port), self->pin);
+}
+
 static uint8_t pin_get_pull(const machine_pin_obj_t *self) {
     uint32_t drive_mode = Cy_GPIO_GetDrivemode(Cy_GPIO_PortToAddr(self->port), self->pin);
 
     switch (drive_mode) {
         case CY_GPIO_DM_PULLUP:
-        case CY_GPIO_DM_PULLUP_IN_OFF:
             return GPIO_PULL_UP;
 
-        case CY_GPIO_DM_PULLDOWN:
-        case CY_GPIO_DM_PULLDOWN_IN_OFF:
-            return GPIO_PULL_DOWN;
-
         case CY_GPIO_DM_PULLUP_DOWN:
-        case CY_GPIO_DM_PULLUP_DOWN_IN_OFF:
-            return GPIO_PULL_UP_DOWN;
+            return (pin_get_out_value(self) == 1) ? GPIO_PULL_UP : GPIO_PULL_DOWN;
 
         default:
             return GPIO_PULL_NONE;
     }
 }
 
-uint32_t get_drive_mode(uint8_t mode, uint8_t pull) {
+static inline uint32_t pin_get_drive(const machine_pin_obj_t *self) {
+    return Cy_GPIO_GetDriveSel(Cy_GPIO_PortToAddr(self->port), self->pin);
+}
+
+static inline void pin_set_drive(const machine_pin_obj_t *self, uint32_t drive) {
+    Cy_GPIO_SetDriveSel(Cy_GPIO_PortToAddr(self->port), self->pin, drive);
+}
+
+static inline void pin_init_default(const machine_pin_obj_t *self) {
+    Cy_GPIO_Pin_FastInit(Cy_GPIO_PortToAddr(self->port), self->pin, CY_GPIO_DM_HIGHZ, 0, HSIOM_SEL_GPIO);
+}
+
+qstr get_mode_str(uint8_t mode) {
+    switch (mode) {
+        case GPIO_MODE_IN:
+            return MP_QSTR_IN;
+        case GPIO_MODE_OUT:
+            return MP_QSTR_OUT;
+        case GPIO_MODE_OPEN_DRAIN:
+            return MP_QSTR_OPEN_DRAIN;
+        default:
+            return MP_QSTR_None;
+    }
+}
+
+qstr get_pull_str(uint8_t pull) {
+    switch (pull) {
+        case GPIO_PULL_UP:
+            return MP_QSTR_PULL_UP;
+        case GPIO_PULL_DOWN:
+            return MP_QSTR_PULL_DOWN;
+        default:
+            return MP_QSTR_None;
+    }
+}
+
+/**
+ * Get the PDL drive mode configuration for the given pin mode
+ * and pull configuration.
+ * The initial value is also validated and set to a coherent
+ * value with the pull configuration if not defined by the user.
+ */
+uint32_t get_drive_mode(uint8_t mode, uint8_t pull, uint8_t *value) {
     uint32_t drive_mode = CY_GPIO_DM_INVALID;
 
+    /* -- Pin.IN -- */
     if (mode == GPIO_MODE_IN) {
-        if (pull == GPIO_PULL_UP) {
-            drive_mode = CY_GPIO_DM_PULLUP;
-        } else if (pull == GPIO_PULL_DOWN) {
-            drive_mode = CY_GPIO_DM_PULLDOWN;
-        } else if (pull == GPIO_PULL_UP_DOWN) {
-            drive_mode = CY_GPIO_DM_PULLUP_DOWN;
-        } else {
+        if (*value != MACHINE_PIN_OUT_VAL_UNDEF) {
+            mp_printf(&mp_plat_print, "machine.Pin warning: initial value is ignored for Pin.IN mode\n");
+        }
+        if (pull == GPIO_PULL_NONE) {
             drive_mode = CY_GPIO_DM_HIGHZ;
-        }
-        // Additional available unused modes:
-        // - CY_GPIO_DM_STRONG
-    } else if (mode == GPIO_MODE_OUT) {
-        if (pull == GPIO_PULL_UP) {
-            drive_mode = CY_GPIO_DM_PULLUP_IN_OFF;
+        } else if (pull == GPIO_PULL_UP) {
+            drive_mode = CY_GPIO_DM_PULLUP_DOWN;
+            *value = 1;
         } else if (pull == GPIO_PULL_DOWN) {
-            drive_mode = CY_GPIO_DM_PULLDOWN_IN_OFF;
-        } else if (pull == GPIO_PULL_UP_DOWN) {
-            drive_mode = CY_GPIO_DM_PULLUP_DOWN_IN_OFF;
+            drive_mode = CY_GPIO_DM_PULLUP_DOWN;
+            *value = 0;
         } else {
-            drive_mode = CY_GPIO_DM_STRONG_IN_OFF;
+            drive_mode = CY_GPIO_DM_INVALID;
         }
+        /* -- Pin.OUT -- */
+    } else if (mode == GPIO_MODE_OUT) {
+        if (*value == MACHINE_PIN_OUT_VAL_UNDEF) {
+            *value = 0; // Default to low
+        }
+        if (pull == GPIO_PULL_NONE) {
+            drive_mode = CY_GPIO_DM_STRONG;
+        } else {
+            drive_mode = CY_GPIO_DM_INVALID;
+        }
+        /**
+         * Pull resistors not configurable for output mode
+         */
+        /* -- Pin.OPEN_DRAIN -- */
     } else if (mode == GPIO_MODE_OPEN_DRAIN) {
-        drive_mode = CY_GPIO_DM_OD_DRIVESLOW_IN_OFF;
-        // Additional available unused modes:
-        // - CY_GPIO_DM_OD_DRIVESLOW
-        // - CY_GPIO_DM_OD_DRIVESHIGH
+        if (*value == MACHINE_PIN_OUT_VAL_UNDEF) {
+            *value = 1; // Default to high
+        }
+        if (pull == GPIO_PULL_NONE) {
+            drive_mode = CY_GPIO_DM_OD_DRIVESLOW;
+        } else if (pull == GPIO_PULL_UP) {
+            drive_mode = CY_GPIO_DM_PULLUP;
+        } else {
+            drive_mode = CY_GPIO_DM_INVALID;
+        }
+        /* -- Pin.None (invalid) -- */
     } else if (mode == GPIO_MODE_NONE) {
         drive_mode = CY_GPIO_DM_INVALID;
+    }
+
+    if (drive_mode == CY_GPIO_DM_INVALID) {
+        qstr mode_qstr = get_mode_str(mode);
+        qstr pull_qstr = get_pull_str(pull);
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("machine.Pin with mode=Pin.%q + pull=Pin.%q is not supported"), mode_qstr, pull_qstr);
     }
 
     return drive_mode;
 }
 
-static uint8_t get_validated_initial_value(uint8_t mode, uint8_t pull, int8_t value) {
-    // No value was selected by the user,
-    // Select it coherent with the pull resistor
-    // configuration and low by default
-    if (value == -1) {
-        return (pull == GPIO_PULL_UP) ? 1 : 0;
+static inline void assert_mode(uint8_t mode) {
+    if (mode != GPIO_MODE_IN && mode != GPIO_MODE_OUT && mode != GPIO_MODE_OPEN_DRAIN) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("machine.Pin invalid mode %d. Valid modes are: Pin.IN, Pin.OUT, Pin.OPEN_DRAIN"), mode);
     }
-
-    if (mode == GPIO_MODE_IN) {
-        if (value == 0 && pull == GPIO_PULL_UP) {
-            mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("machine.Pin incompatible configuration. Input pull-up can not be initialized low.\n"));
-        } else if (value == 1 && pull == GPIO_PULL_DOWN) {
-            mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("machine.Pin incompatible configuration. Input pull-down can not be initialized high.\n"));
-        } else if (pull == GPIO_PULL_NONE || pull == GPIO_PULL_UP_DOWN) {
-            value = 0; // Default to low
-            mp_printf(&mp_plat_print, "machine.Pin warning: Initial value is undefined for input pull-none configuration.\n");
-        }
-        return value;
-    }
-
-    return value;
 }
 
-static mp_obj_t machine_pin_obj_init_helper(const machine_pin_obj_t *self, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
-    enum {
-        ARG_mode, ARG_pull, ARG_drive, ARG_value
-    };
-    static const mp_arg_t allowed_args[] = {
-        {MP_QSTR_mode,  MP_ARG_OBJ,                  {.u_rom_obj = MP_ROM_NONE}},
-        {MP_QSTR_pull,  MP_ARG_OBJ,                  {.u_rom_obj = MP_ROM_NONE}},
-        {MP_QSTR_drive, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE}},
-        {MP_QSTR_value, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE}}
-    };
-
-    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
-    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
-
-    uint8_t mode = GPIO_MODE_NONE;
-    if (args[ARG_mode].u_obj != mp_const_none) {
-        mode = mp_obj_get_uint(args[ARG_mode].u_obj);
+static inline void assert_pull(uint8_t pull) {
+    if (pull != GPIO_PULL_NONE && pull != GPIO_PULL_UP && pull != GPIO_PULL_DOWN) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("machine.Pin invalid pull %d. Valid pulls are: Pin.PULL_NONE, Pin.PULL_UP, Pin.PULL_DOWN"), pull);
     }
+}
 
-    uint8_t pull = GPIO_PULL_NONE;
-    if (args[ARG_pull].u_obj != mp_const_none) {
-        pull = mp_obj_get_uint(args[ARG_pull].u_obj);
+static inline void assert_drive(uint32_t drive) {
+    if (drive > CY_GPIO_DRIVE_SEL_7) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("machine.Pin invalid drive %d. Valid drives are: 0-7"), drive);
     }
+}
 
-    int8_t value = -1;
-    if (args[ARG_value].u_obj != mp_const_none) {
-        value = mp_obj_is_true(args[ARG_value].u_obj);
+static inline void assert_value(uint8_t value) {
+    if (value != 0 && value != 1) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("machine.Pin invalid value %d. Valid values are: 0, 1"), value);
     }
-
-    uint32_t drive = CY_GPIO_DRIVE_SEL_0;
-    if (args[ARG_drive].u_obj != mp_const_none) {
-        drive = mp_obj_get_uint(args[ARG_drive].u_obj);
-    }
-
-    mp_hal_pin_config(self, mode, pull, get_validated_initial_value(mode, pull, value));
-    mp_hal_pin_set_drive(self, drive);
-
-    return mp_const_none;
 }
 
 const machine_pin_obj_t *machine_pin_get_named_pin(const mp_obj_dict_t *named_pins, mp_obj_t name) {
@@ -240,10 +255,58 @@ const machine_pin_obj_t *machine_pin_get_pin_obj(mp_obj_t obj) {
     mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("Pin(%s) doesn't exist"), mp_obj_str_get_str(obj));
 }
 
+/******************************************************************************/
+// MicroPython bindings
+
+static mp_obj_t machine_pin_obj_init_helper(const machine_pin_obj_t *self, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum {
+        ARG_mode, ARG_pull, ARG_drive, ARG_value
+    };
+    static const mp_arg_t allowed_args[] = {
+        {MP_QSTR_mode,  MP_ARG_OBJ,                  {.u_rom_obj = MP_ROM_NONE}},
+        {MP_QSTR_pull,  MP_ARG_OBJ,                  {.u_rom_obj = MP_ROM_NONE}},
+        {MP_QSTR_drive, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE}},
+        {MP_QSTR_value, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE}}
+    };
+
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    uint8_t mode = pin_get_mode(self);
+    if (args[ARG_mode].u_obj != mp_const_none) {
+        mode = mp_obj_get_uint(args[ARG_mode].u_obj);
+        assert_mode(mode);
+    }
+
+    uint8_t pull = pin_get_pull(self);
+    if (args[ARG_pull].u_obj != mp_const_none) {
+        pull = mp_obj_get_uint(args[ARG_pull].u_obj);
+        assert_pull(pull);
+    }
+
+    uint8_t value = (mode != GPIO_MODE_IN) ? pin_get_out_value(self) : MACHINE_PIN_OUT_VAL_UNDEF;
+    if (args[ARG_value].u_obj != mp_const_none) {
+        value = mp_obj_is_true(args[ARG_value].u_obj);
+        assert_value(value);
+    }
+
+    uint32_t drive = pin_get_drive(self);
+    if (args[ARG_drive].u_obj != mp_const_none) {
+        drive = mp_obj_get_uint(args[ARG_drive].u_obj);
+        assert_drive(drive);
+    }
+
+    mp_hal_pin_config(self, mode, pull, value);
+    pin_set_drive(self, drive);
+
+    return mp_const_none;
+}
+
 mp_obj_t mp_pin_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     mp_arg_check_num(n_args, n_kw, 1, 6, true);
 
     const machine_pin_obj_t *self = machine_pin_get_pin_obj(args[0]);
+    pin_init_default(self);
 
     if (n_args > 1 || n_kw > 0) {
         // pin mode given, so configure this GPIO
@@ -265,29 +328,14 @@ static void machine_pin_print(const mp_print_t *print, mp_obj_t self_in, mp_prin
     mp_printf(print, "Pin(Pin.cpu.%q", self->name);
 
     uint8_t mode = pin_get_mode(self);
-    qstr mode_qst = MP_QSTRnull;
-    if (mode == GPIO_MODE_IN) {
-        mode_qst = MP_QSTR_IN;
-    } else if (mode == GPIO_MODE_OUT) {
-        mode_qst = MP_QSTR_OUT;
-    } else if (mode == GPIO_MODE_OPEN_DRAIN) {
-        mode_qst = MP_QSTR_OPEN_DRAIN;
-    }
-    if (mode_qst != MP_QSTRnull) {
+    qstr mode_qst = get_mode_str(mode);
+    if (mode_qst != MP_QSTR_None) {
         mp_printf(print, ", mode=Pin.%q", mode_qst);
     }
 
     uint8_t pull = pin_get_pull(self);
-    qstr pull_qst = MP_QSTRnull;
-    if (pull == GPIO_PULL_UP) {
-        pull_qst = MP_QSTR_PULL_UP;
-    } else if (pull == GPIO_PULL_DOWN) {
-        pull_qst = MP_QSTR_PULL_DOWN;
-    } else if (pull == GPIO_PULL_UP_DOWN) {
-        pull_qst = MP_QSTR_PULL_UP_DOWN;
-    }
-
-    if (pull_qst != MP_QSTRnull) {
+    qstr pull_qst = get_pull_str(pull);
+    if (pull_qst != MP_QSTR_None) {
         mp_printf(print, ", pull=Pin.%q", pull_qst);
     }
     mp_print_str(print, ")");
@@ -362,14 +410,13 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_pin_pull_obj, 1, 2, machine_p
 static mp_obj_t machine_pin_drive(size_t n_args, const mp_obj_t *args) {
     machine_pin_obj_t *self = MP_OBJ_TO_PTR(args[0]);
     if (n_args == 1) {
-        return MP_OBJ_NEW_SMALL_INT(mp_hal_pin_get_drive(self));
+        return MP_OBJ_NEW_SMALL_INT(pin_get_drive(self));
     } else {
-        mp_hal_pin_set_drive(self, mp_obj_get_uint(args[1]));
+        pin_set_drive(self, mp_obj_get_uint(args[1]));
         return mp_const_none;
     }
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_pin_drive_obj, 1, 2, machine_pin_drive);
-
 
 extern mp_obj_t machine_pin_irq(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args);
 static MP_DEFINE_CONST_FUN_OBJ_KW(machine_pin_irq_obj, 1, machine_pin_irq);
@@ -465,7 +512,6 @@ static const mp_rom_map_elem_t machine_pin_locals_dict_table[] = {
 
     { MP_ROM_QSTR(MP_QSTR_PULL_UP),                 MP_ROM_INT(GPIO_PULL_UP) },
     { MP_ROM_QSTR(MP_QSTR_PULL_DOWN),               MP_ROM_INT(GPIO_PULL_DOWN) },
-    { MP_ROM_QSTR(MP_QSTR_PULL_UP_DOWN),            MP_ROM_INT(GPIO_PULL_UP_DOWN) },
 
     { MP_ROM_QSTR(MP_QSTR_DRIVE_0),                MP_ROM_INT(CY_GPIO_DRIVE_SEL_0) },
     { MP_ROM_QSTR(MP_QSTR_DRIVE_1),                MP_ROM_INT(CY_GPIO_DRIVE_SEL_1) },
