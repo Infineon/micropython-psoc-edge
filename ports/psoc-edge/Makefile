@@ -107,7 +107,7 @@ GEN_PINS_AF_HDR= $(HEADER_BUILD)/pins_af.h
 # any of the objects. The normal dependency generation will deal with the
 # case when pins.h is modified. But when it doesn't exist, we don't know
 # which source files might need it.
-$(OBJ): | $(GEN_PINS_HDR)
+$(OBJ): | $(GEN_PINS_HDR) $(GEN_PINS_AF_HDR)
 
 # With conditional pins, we may need to regenerate qstrdefs.h when config
 # options change.
@@ -497,6 +497,7 @@ OBJ += $(addprefix $(BUILD)/, $(PSE_SRC_ASM:.S=.o))
 INC += -I.
 INC += -I$(TOP)
 INC += -I$(BUILD)
+INC += -I$(HEADER_BUILD)
 
 ifeq ($(MICROPY_PSOC_EDGE_LWIP),1)
 INC += -Ilwip_inc
