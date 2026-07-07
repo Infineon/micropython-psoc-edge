@@ -32,7 +32,7 @@
 
 enum {GPIO_MODE_NONE = 0, GPIO_MODE_IN, GPIO_MODE_OUT, GPIO_MODE_OPEN_DRAIN};
 
-enum {GPIO_PULL_NONE = 0, GPIO_PULL_UP, GPIO_PULL_DOWN, GPIO_PULL_UP_DOWN};
+enum {GPIO_PULL_NONE = 0, GPIO_PULL_UP, GPIO_PULL_DOWN};
 
 typedef struct _machine_pin_obj_t {
     mp_obj_base_t base;
