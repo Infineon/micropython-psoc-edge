@@ -34,6 +34,7 @@
 #include "cycfg_system.h"
 #include "cy_autanalog.h"
 #include "cy_autanalog_sar.h"
+#include "pins_af.h"
 
 // PSE84 SAR ADC: 1 block, 8 GPIO channels (P15_0 to P15_7), 3.3V VDDA
 #define PSE84_ADC_BLOCK_ID    (0)
@@ -60,11 +61,137 @@ static void mp_machine_adc_print(const mp_print_t *print, mp_obj_t self_in, mp_p
     mp_printf(print, "<ADC pin='%q' ch=%u>", self->pin->name, self->gpio_channel);
 }
 
-// Map P15_x pin to channel index (0xFF if not ADC pin)
-static uint8_t machine_adc_get_channel_from_pin(const machine_pin_obj_t *pin) {
-    if (pin->port == 15 && pin->pin < PSE84_ADC_NUM_CHANNELS) {
-        return (uint8_t)pin->pin;
+// Initialize CYBSP_SAR_ADC_* structures (defined in BSP, init via dynamic loops)
+
+// Initialize ADC GPIO channel configurations dynamically
+static void machine_adc_init_gpio_channels(void) {
+    // All 8 channels have identical configuration except for GPIO pin number
+    const cy_stc_autanalog_sar_hs_chan_t default_ch_cfg = {
+        .hsDiffEn = false,
+        .sign = false,
+        .posCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED,
+        .negPin = CY_AUTANALOG_SAR_PIN_MUX_VSSA,
+        .accShift = false,
+        .negCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED,
+        .hsLimit = CY_AUTANALOG_SAR_LIMIT_STATUS_DISABLED,
+        .fifoSel = CY_AUTANALOG_FIFO_DISABLED,
+    };
+
+    // Create GPIO channels 0-7, each mapped to CY_AUTANALOG_SAR_PIN_GPIO0-7
+    for (size_t i = 0; i < PSE84_ADC_NUM_CHANNELS; i++) {
+        CYBSP_SAR_ADC_gpio_ch_cfg[i] = default_ch_cfg;
+        CYBSP_SAR_ADC_gpio_ch_cfg[i].posPin = CY_AUTANALOG_SAR_PIN_GPIO0 + i;
     }
+}
+
+// Initialize high-speed static ADC configuration
+static void machine_adc_init_sta_hs_cfg(void) {
+    CYBSP_SAR_ADC_sta_hs_cfg.hsVref = CY_AUTANALOG_SAR_VREF_VDDA;
+
+    // All channels use same sample time
+    for (size_t i = 0; i < 4; i++) {
+        CYBSP_SAR_ADC_sta_hs_cfg.hsSampleTime[i] = 31U;
+    }
+
+    // Map all 8 GPIO channels
+    for (size_t i = 0; i < PSE84_ADC_NUM_CHANNELS; i++) {
+        CYBSP_SAR_ADC_sta_hs_cfg.hsGpioChan[i] = &CYBSP_SAR_ADC_gpio_ch_cfg[i];
+    }
+
+    CYBSP_SAR_ADC_sta_hs_cfg.hsGpioResultMask = 0xFFU;  // All 8 channels
+}
+
+// Initialize static ADC configuration
+static void machine_adc_init_sta_cfg(void) {
+    CYBSP_SAR_ADC_sta_cfg.lpStaCfg = NULL;
+    CYBSP_SAR_ADC_sta_cfg.hsStaCfg = &CYBSP_SAR_ADC_sta_hs_cfg;
+    CYBSP_SAR_ADC_sta_cfg.posBufPwr = CY_AUTANALOG_SAR_BUF_PWR_OFF;
+    CYBSP_SAR_ADC_sta_cfg.negBufPwr = CY_AUTANALOG_SAR_BUF_PWR_OFF;
+    CYBSP_SAR_ADC_sta_cfg.accMode = CY_AUTANALOG_SAR_ACC_DISABLED;
+    CYBSP_SAR_ADC_sta_cfg.startupCal = CY_AUTANALOG_SAR_CAL_DISABLED;
+    CYBSP_SAR_ADC_sta_cfg.chanID = false;
+    CYBSP_SAR_ADC_sta_cfg.shiftMode = false;
+
+    // Initialize all null pointers
+    for (size_t i = 0; i < 16; i++) {
+        CYBSP_SAR_ADC_sta_cfg.intMuxChan[i] = NULL;
+    }
+    for (size_t i = 0; i < 4; i++) {
+        CYBSP_SAR_ADC_sta_cfg.limitCond[i] = NULL;
+    }
+
+    CYBSP_SAR_ADC_sta_cfg.muxResultMask = CY_AUTANALOG_SAR_CHAN_MASK_MUX_DISABLED;
+    CYBSP_SAR_ADC_sta_cfg.firResultMask = CY_AUTANALOG_SAR_MASK_FIR_DISABLED;
+}
+
+// Initialize sequencer configuration
+static void machine_adc_init_seq_cfg(void) {
+    const cy_stc_autanalog_sar_seq_tab_hs_t default_seq_cfg = {
+        .chanEn = 0xFFU,  // All 8 channels
+        .muxMode = CY_AUTANALOG_SAR_CHAN_CFG_MUX_DISABLED,
+        .mux0Sel = CY_AUTANALOG_SAR_CHAN_CFG_MUX0,
+        .mux1Sel = CY_AUTANALOG_SAR_CHAN_CFG_MUX0,
+        .sampleTimeEn = true,
+        .sampleTime = CY_AUTANALOG_SAR_SAMPLE_TIME0,
+        .accEn = false,
+        .accCount = CY_AUTANALOG_SAR_ACC_CNT2,
+        .calReq = CY_AUTANALOG_SAR_CAL_DISABLED,
+        .nextAction = CY_AUTANALOG_SAR_NEXT_ACTION_GO_TO_ENTRY_ADDR,
+    };
+
+    // Initialize all sequencer entries with same config
+    for (size_t i = 0; i < 2; i++) {
+        CYBSP_SAR_ADC_seq_hs_cfg[i] = default_seq_cfg;
+    }
+}
+
+// Initialize main SAR ADC configuration
+static void machine_adc_init_sar_cfg(void) {
+    CYBSP_SAR_ADC_cfg.sarStaCfg = &CYBSP_SAR_ADC_sta_cfg;
+    CYBSP_SAR_ADC_cfg.hsSeqTabNum = 2;
+    CYBSP_SAR_ADC_cfg.hsSeqTabArr = &CYBSP_SAR_ADC_seq_hs_cfg[0U];
+    CYBSP_SAR_ADC_cfg.lpSeqTabNum = 0U;
+    CYBSP_SAR_ADC_cfg.lpSeqTabArr = NULL;
+    CYBSP_SAR_ADC_cfg.firNum = 0U;
+    CYBSP_SAR_ADC_cfg.firCfg = NULL;
+    CYBSP_SAR_ADC_cfg.fifoCfg = NULL;
+}
+
+// Initialize startup state configuration
+static void machine_adc_init_stt_cfg(void) {
+    const cy_stc_autanalog_stt_sar_t default_stt_cfg = {
+        .unlock = true,
+        .enable = true,
+        .trigger = false,
+        .entryState = 0U,
+    };
+
+    // Initialize all 3 startup states
+    for (size_t i = 0; i < 3; i++) {
+        CYBSP_SAR_ADC_stt[i] = default_stt_cfg;
+    }
+
+    // State 1 triggers scanning
+    CYBSP_SAR_ADC_stt[1].trigger = true;
+}
+
+// Initialize all ADC configuration structures
+static void machine_adc_init_configs(void) {
+    machine_adc_init_gpio_channels();
+    machine_adc_init_sta_hs_cfg();
+    machine_adc_init_sta_cfg();
+    machine_adc_init_seq_cfg();
+    machine_adc_init_sar_cfg();
+    machine_adc_init_stt_cfg();
+}
+
+// Map P15_x pin to channel index (0xFF if not ADC pin)
+// Uses MICROPY_HW_ADC_PIN_MAP macro from pins_af.h for dynamic discovery
+static uint8_t machine_adc_get_channel_from_pin(const machine_pin_obj_t *pin) {
+    #define MICROPY_HW_ADC_PIN_MAP_ENTRY(b, c, p, pn) \
+    if (pin->port == p && pin->pin == pn) { return c; }
+    MICROPY_HW_ADC_PIN_MAP(MICROPY_HW_ADC_PIN_MAP_ENTRY)
+#undef MICROPY_HW_ADC_PIN_MAP_ENTRY
     return 0xFF;  // Invalid ADC pin
 }
 
@@ -74,15 +201,11 @@ static void machine_adc_init_autanalog(void) {
         return;
     }
 
-    // Configure all GPIO channels
-    for (size_t i = 0; i < PSE84_ADC_NUM_CHANNELS; i++) {
-        CYBSP_SAR_ADC_sta_hs_cfg.hsGpioChan[i] = &CYBSP_SAR_ADC_gpio_ch_cfg[i];
-    }
-    CYBSP_SAR_ADC_sta_hs_cfg.hsGpioResultMask = 0xFFU;  // All GPIO channels
-    CYBSP_SAR_ADC_seq_hs_cfg[0].chanEn = 0xFFU;         // All GPIO channels
+    // Initialize ADC configuration structures dynamically
+    machine_adc_init_configs();
 
     // Initialize autonomous analog controller
-    uint32_t status = Cy_AutAnalog_Init(&autonomous_analog_init);
+    uint32_t status = Cy_AutAnalog_Init((cy_stc_autanalog_t *)&autonomous_analog_init);
     if (status != CY_AUTANALOG_SUCCESS) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("ADC autanalog init failed"));
     }
@@ -104,10 +227,7 @@ static mp_obj_t mp_machine_adc_make_new(const mp_obj_type_t *type, size_t n_args
     if (channel == 0xFF) {
         mp_raise_ValueError(MP_ERROR_TEXT("Pin doesn't have ADC capabilities"));
     }
-    // Check if channel is configured in BSP
-    if (CYBSP_SAR_ADC_sta_hs_cfg.hsGpioChan[channel] == NULL) {
-        mp_raise_ValueError(MP_ERROR_TEXT("ADC channel not available"));
-    }
+
     machine_adc_obj_t *o = mp_obj_malloc(machine_adc_obj_t, &machine_adc_type);
     o->pin = pin;
     o->sar_block = PSE84_ADC_BLOCK_ID;
