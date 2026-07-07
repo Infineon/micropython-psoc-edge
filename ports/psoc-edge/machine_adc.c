@@ -271,7 +271,7 @@ static mp_int_t mp_machine_adc_read_u16(machine_adc_obj_t *self) {
 // ADC.read_uv() -> int (0-3,300,000 microvolts)
 static mp_int_t mp_machine_adc_read_uv(machine_adc_obj_t *self) {
     uint16_t u16 = (uint16_t)mp_machine_adc_read_u16(self);
-    return (mp_int_t)((uint32_t)u16 * 3300000 / 65535);
+    return (mp_int_t)(((uint64_t)u16 * 3300000ULL) / 65535ULL);
 }
 
 // ADC.deinit() - no-op on PSE84
