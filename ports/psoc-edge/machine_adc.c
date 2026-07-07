@@ -29,6 +29,7 @@
 
 #include "py/mphal.h"
 #include "py/mperrno.h"
+#include "extmod/modmachine.h"
 #include "machine_pin.h"
 #include "cycfg_peripherals.h"
 #include "cycfg_system.h"
@@ -281,5 +282,7 @@ static void mp_machine_adc_deinit(machine_adc_obj_t *self) {
 // ADC.block() -> ADCBlock or None
 static mp_obj_t mp_machine_adc_block(machine_adc_obj_t *self) {
     (void)self;
-    return mp_const_none;
+    mp_obj_t block_id = MP_OBJ_NEW_SMALL_INT(PSE84_ADC_BLOCK_ID);
+    return MP_OBJ_TYPE_GET_SLOT(&machine_adc_block_type, make_new)(
+        &machine_adc_block_type, 1, 0, &block_id);
 }
