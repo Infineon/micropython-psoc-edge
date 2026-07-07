@@ -46,6 +46,7 @@ void machine_spi_target_deinit_all(void);
 void machine_pdm_pcm_deinit_all(void);
 void machine_ipc_deinit_all(void);
 void machine_timer_deinit_all(void);
+void machine_counter_deinit_all(void);
 void machine_wdt_deinit(void);
 
 enum clock_freq_type {

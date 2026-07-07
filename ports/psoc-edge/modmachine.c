@@ -99,6 +99,7 @@ void machine_deinit(void) {
     #endif
     machine_pdm_pcm_deinit_all();
     machine_ipc_deinit_all();
+    machine_counter_deinit_all();
     machine_timer_deinit_all();
     machine_wdt_deinit();
 }

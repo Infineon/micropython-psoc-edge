@@ -66,12 +66,11 @@ typedef struct _machine_counter_obj_t {
     en_clk_dst_t pclk_dst;
     const machine_pin_obj_t *src_pin;
     en_hsiom_sel_t src_hsiom;
+    uint8_t edge;
     uint8_t direction;
     mp_int_t offset;
     bool configured;
 } machine_counter_obj_t;
-
-const mp_obj_type_t machine_counter_type;
 
 // One Counter object per hardware id.
 static machine_counter_obj_t *counter_obj[MACHINE_COUNTER_NUM_INSTANCES] = { NULL };
@@ -131,19 +130,6 @@ static void machine_counter_configure_clock(void) {
 // Return the max period for this counter width (16-bit or 32-bit).
 static uint32_t machine_counter_period_max(uint32_t counter_num) {
     return (counter_num >= 256U) ? 0xFFFFU : UINT32_MAX;
-}
-
-// Map a hardware counter number to its routed trigger output line.
-static uint32_t machine_counter_out_trig_line(uint32_t counter_num) {
-    for (size_t i = 0; i < MP_ARRAY_SIZE(counter_hw); ++i) {
-        if (counter_hw[i] == counter_num) {
-            return counter_out_trig[i];
-        }
-    }
-
-    mp_raise_msg_varg(&mp_type_ValueError,
-        MP_ERROR_TEXT("Counter(%lu) trigger route not supported"),
-        (unsigned long)counter_num);
 }
 
 typedef struct _machine_counter_pin_trigger_map_t {
@@ -235,6 +221,10 @@ static void machine_counter_init_helper(machine_counter_obj_t *self,
     Cy_SysClk_PeriPclkAssignDivider(self->pclk_dst,
         CY_SYSCLK_DIV_16_BIT, CYBSP_GENERAL_PURPOSE_TIMER_CLK_DIV_NUM);
 
+    // Record the source pin now so rollback can restore it on any failure below.
+    self->src_pin = src_pin;
+    self->src_hsiom = hsiom;
+
     // Put pin in input mode and switch HSIOM to trigger-output function.
     mp_hal_pin_input(src_pin);
     GPIO_PRT_Type *src_port = Cy_GPIO_PortToAddr(src_pin->port);
@@ -242,7 +232,7 @@ static void machine_counter_init_helper(machine_counter_obj_t *self,
     Cy_GPIO_SetDrivemode(src_port, src_pin->pin, CY_GPIO_DM_HIGHZ);
 
     // Connect selected pin trigger line to this counter's dedicated trigger input.
-    uint32_t out_trig = machine_counter_out_trig_line(self->counter_num);
+    uint32_t out_trig = counter_out_trig[self->id];
     cy_en_trigmux_status_t mux_rslt = Cy_TrigMux_Connect(in_trig, out_trig, false, TRIGGER_TYPE_LEVEL);
     if (mux_rslt != CY_TRIGMUX_SUCCESS) {
         // Roll back pin mux state if trigger connect fails.
@@ -298,6 +288,7 @@ static void machine_counter_init_helper(machine_counter_obj_t *self,
 
     self->src_pin = src_pin;
     self->src_hsiom = hsiom;
+    self->edge = edge;
     self->direction = direction;
     self->offset = 0;
     self->configured = true;
@@ -333,6 +324,7 @@ static mp_obj_t machine_counter_make_new(const mp_obj_type_t *type,
     self->pclk_dst = machine_tcpwm_counter_pclk(self->counter_num);
     self->src_pin = NULL;
     self->src_hsiom = (en_hsiom_sel_t)0;
+    self->edge = COUNTER_EDGE_RISING;
     self->direction = COUNTER_DIR_UP;
     self->offset = 0;
     self->configured = false;
@@ -387,6 +379,16 @@ static mp_obj_t machine_counter_deinit(mp_obj_t self_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_counter_deinit_obj, machine_counter_deinit);
 
+// Module-level lifecycle called from machine_deinit().
+void machine_counter_deinit_all(void) {
+    for (uint8_t i = 0; i < MACHINE_COUNTER_NUM_INSTANCES; i++) {
+        machine_counter_obj_t *self = counter_obj[i];
+        if (self != NULL) {
+            machine_counter_deinit(MP_OBJ_FROM_PTR(self));
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // counter.value([value])
 // ---------------------------------------------------------------------------
@@ -399,23 +401,38 @@ static mp_obj_t machine_counter_value(size_t n_args, const mp_obj_t *args) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("not initialised"));
     }
 
+    if (n_args == 2) {
+        // Freeze counting during read/reset so no new edges arrive in this window.
+        Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
+    }
     uint32_t raw = Cy_TCPWM_Counter_GetCounter(TCPWM0, self->counter_num);
-    mp_int_t signed_count = (self->direction == COUNTER_DIR_DOWN) ? -(mp_int_t)raw : (mp_int_t)raw;
-    mp_int_t result = self->offset + signed_count;
+    long long signed_count = (self->direction == COUNTER_DIR_DOWN) ? -(long long)raw : (long long)raw;
+    long long result = (long long)self->offset + signed_count;
 
     if (n_args == 2) {
         self->offset = mp_obj_get_int(args[1]);
         Cy_TCPWM_Counter_SetCounter(TCPWM0, self->counter_num, 0);
+        Cy_TCPWM_Counter_Enable(TCPWM0, self->counter_num);
+        Cy_TCPWM_TriggerReloadOrIndex_Single(TCPWM0, self->counter_num);
     }
 
-    return mp_obj_new_int(result);
+    return mp_obj_new_int_from_ll(result);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_counter_value_obj, 1, 2, machine_counter_value);
 
 // Print user-facing representation as Counter(<id>).
 static void machine_counter_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     machine_counter_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    mp_printf(print, "Counter(%u)", (unsigned)self->id);
+    const char *edge_str = (self->edge == COUNTER_EDGE_FALLING) ? "FALLING" : "RISING";
+    const char *dir_str = (self->direction == COUNTER_DIR_DOWN) ? "DOWN" : "UP";
+
+    if (self->src_pin == NULL) {
+        mp_printf(print, "Counter(id=%u, src=None, edge=Counter.%s, direction=Counter.%s)",
+            (unsigned)self->id, edge_str, dir_str);
+    } else {
+        mp_printf(print, "Counter(id=%u, src=%q, edge=Counter.%s, direction=Counter.%s)",
+            (unsigned)self->id, self->src_pin->name, edge_str, dir_str);
+    }
 }
 
 static const mp_rom_map_elem_t machine_counter_locals_dict_table[] = {
