@@ -77,30 +77,18 @@ int mp_hal_stdin_rx_chr(void) {
     }
 }
 
-extern uint32_t get_drive_mode(uint8_t mode, uint8_t pull);
+extern uint32_t get_drive_mode(uint8_t mode, uint8_t pull, uint8_t *value);
 
 void mp_hal_pin_config(mp_hal_pin_obj_t pin, uint32_t mode, uint32_t pull, uint32_t value) {
-    uint32_t drive_mode = get_drive_mode(mode, pull);
-    Cy_GPIO_Pin_FastInit(Cy_GPIO_PortToAddr(pin->port), pin->pin, drive_mode, value, HSIOM_SEL_GPIO);
+    uint8_t validated_value = (uint8_t)value;
+    uint32_t drive_mode = get_drive_mode(mode, pull, &validated_value);
+    Cy_GPIO_Pin_FastInit(Cy_GPIO_PortToAddr(pin->port), pin->pin, drive_mode, validated_value, HSIOM_SEL_GPIO);
 }
 
 extern uint8_t pin_get_mode(const machine_pin_obj_t *self);
 
 uint32_t mp_hal_pin_read(mp_hal_pin_obj_t pin) {
-    uint8_t mode = pin_get_mode(pin);
-    if (mode == GPIO_MODE_OUT ||
-        mode == GPIO_MODE_OPEN_DRAIN) {
-        return Cy_GPIO_ReadOut(Cy_GPIO_PortToAddr(pin->port), pin->pin);
-    }
     return Cy_GPIO_Read(Cy_GPIO_PortToAddr(pin->port), pin->pin);
-}
-
-uint32_t mp_hal_pin_get_drive(mp_hal_pin_obj_t pin) {
-    return Cy_GPIO_GetDriveSel(Cy_GPIO_PortToAddr(pin->port), pin->pin);
-}
-
-void mp_hal_pin_set_drive(mp_hal_pin_obj_t pin, uint32_t drive) {
-    Cy_GPIO_SetDriveSel(Cy_GPIO_PortToAddr(pin->port), pin->pin, drive);
 }
 
 void mp_hal_pin_write(mp_hal_pin_obj_t pin, uint8_t polarity) {

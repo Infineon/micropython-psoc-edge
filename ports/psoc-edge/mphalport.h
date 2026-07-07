@@ -100,9 +100,6 @@ void mp_hal_pin_config(mp_hal_pin_obj_t pin, uint32_t mode, uint32_t pull, uint3
 void mp_hal_pin_write(mp_hal_pin_obj_t pin, uint8_t polarity);
 uint32_t mp_hal_pin_read(mp_hal_pin_obj_t pin);
 
-uint32_t mp_hal_pin_get_drive(mp_hal_pin_obj_t pin);
-void mp_hal_pin_set_drive(mp_hal_pin_obj_t pin, uint32_t drive);
-
 /**
  * HAL Pin AF helper functions and types
  */
