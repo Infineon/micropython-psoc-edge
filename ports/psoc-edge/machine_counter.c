@@ -94,17 +94,10 @@ static const uint32_t counter_out_trig[MACHINE_COUNTER_NUM_INSTANCES] = {
 };
 #undef COUNTER_OUT_TRIG_ENTRY
 
-// This mapping is used to route a TCPWM0 counter's output trigger to a GPIO pin.
+// Source pin map is generated from AF data and filtered by unhidden pins in pins.csv.
 // Each row: X(port_num, pin_num, in_trig_line, pin_hsiom)
 #define MACHINE_COUNTER_PIN_TRIGGER_MAP(X) \
-    X(11, 0, PERI_0_TRIG_IN_MUX_3_PERI0_HSIOM_TR_OUT0, P11_0_PERI0_TR_IO_INPUT0) \
-    X(11, 1, PERI_0_TRIG_IN_MUX_3_PERI0_HSIOM_TR_OUT1, P11_1_PERI0_TR_IO_INPUT1) \
-    X(11, 2, PERI_0_TRIG_IN_MUX_3_PERI0_HSIOM_TR_OUT2, P11_2_PERI0_TR_IO_INPUT2) \
-    X(11, 3, PERI_0_TRIG_IN_MUX_3_PERI0_HSIOM_TR_OUT3, P11_3_PERI0_TR_IO_INPUT3) \
-    X(7, 5, PERI_0_TRIG_IN_MUX_3_PERI0_HSIOM_TR_OUT4, P7_5_PERI0_TR_IO_INPUT4) \
-    X(7, 6, PERI_0_TRIG_IN_MUX_3_PERI0_HSIOM_TR_OUT5, P7_6_PERI0_TR_IO_INPUT5) \
-    X(7, 7, PERI_0_TRIG_IN_MUX_3_PERI0_HSIOM_TR_OUT6, P7_7_PERI0_TR_IO_INPUT6) \
-    X(8, 0, PERI_0_TRIG_IN_MUX_3_PERI0_HSIOM_TR_OUT7, P8_0_PERI0_TR_IO_INPUT7)
+    MICROPY_PY_MACHINE_COUNTER_SRC_PIN_MAP(X)
 
 // ---------------------------------------------------------------------------
 // Helpers
