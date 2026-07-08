@@ -45,6 +45,7 @@ const char *machine_pin_af_signal_str[] = {
     [MACHINE_PIN_AF_SIGNAL_PDM_DATA] = "PDM_DATA",
 
     [MACHINE_PIN_AF_SIGNAL_TCPWM_LINE] = "TCPWM_LINE",
+    [MACHINE_PIN_AF_SIGNAL_PERI_TR_IO_INPUT] = "PERI_TR_IO_INPUT",
 
     /* TODO: Add additional types */
 };

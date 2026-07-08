@@ -13,6 +13,7 @@ SUPPORTED_AF = {
     "SPI": ["CLK", "MOSI", "MISO", "SELECT0", "SELECT1"],
     "PDM": ["CLK", "DATA"],
     "TCPWM": ["LINE"],
+    "PERI_TR_IO": ["INPUT"],
     # TODO: Other active functionalities that we need to figure out:
     # - TDM
     # - SMIF
@@ -130,6 +131,22 @@ class PSE84Pin(boardgen.Pin):
         pin_af = PinAf(af_idx, af_fn, af_unit, af_signal, af_supported, af_name, af_ptr)
         self._afs.append(pin_af)
 
+    def add_af_peri_tr_io_input(self, af_idx, af_name, af):
+        # Map PERI0_TR_IO_INPUTx to regular pin AF objects so consumers can
+        # validate capability through the shared AF metadata path.
+        input_idx = af[len("PERI0_TR_IO_INPUT") :]
+        if not input_idx.isdigit():
+            return
+
+        af_ptr = "NULL"
+        af_fn = "PERI_TR_IO"
+        af_signal = "INPUT"
+        af_unit = input_idx
+        af_supported = af_fn in SUPPORTED_AF and af_signal in SUPPORTED_AF[af_fn]
+
+        pin_af = PinAf(af_idx, af_fn, af_unit, af_signal, af_supported, af_name, af_ptr)
+        self._afs.append(pin_af)
+
     def add_af(self, af_idx, af_name, af):
         # The AF index matches the column index for the ACTx functions 0-15
         # while for DSx functions the columns 16-19 are mapped to DS2-DS5 respectively.
@@ -142,6 +159,7 @@ class PSE84Pin(boardgen.Pin):
         # Counter source pin routing uses PERI0 trigger-input AFs.
         # Example AF token: PERI0_TR_IO_INPUT1
         if af.startswith("PERI0_TR_IO_INPUT"):
+            self.add_af_peri_tr_io_input(af_idx, af_name, af)
             input_idx = af[len("PERI0_TR_IO_INPUT") :]
             if input_idx.isdigit():
                 self._counter_src = {
