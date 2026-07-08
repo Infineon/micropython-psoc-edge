@@ -171,8 +171,19 @@ static void machine_counter_stop_hw(machine_counter_obj_t *self) {
     Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
 }
 
+// Roll back Counter state and release channel ownership after init failure.
+static void machine_counter_init_fail_cleanup(machine_counter_obj_t *self) {
+    machine_counter_stop_hw(self);
+    machine_counter_restore_src_pin(self);
+    self->configured = false;
+    self->offset = 0;
+
+    machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
+    counter_obj[self->id] = NULL;
+}
+
 // Parse init args and configure routing, trigger mux, and TCPWM hardware.
-static void machine_counter_init_helper(machine_counter_obj_t *self,
+static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
 
     enum { ARG_src, ARG_edge, ARG_direction };
@@ -287,6 +298,20 @@ static void machine_counter_init_helper(machine_counter_obj_t *self,
     self->configured = true;
 }
 
+// Wrapper that enforces identical rollback semantics for constructor and init().
+static void machine_counter_init_helper(machine_counter_obj_t *self,
+    size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+
+    nlr_buf_t nl;
+    if (nlr_push(&nl) == 0) {
+        machine_counter_init_helper_impl(self, n_args, pos_args, kw_args);
+        nlr_pop();
+    } else {
+        machine_counter_init_fail_cleanup(self);
+        nlr_jump(nl.ret_val);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Constructor: Counter(id, ...)
 // ---------------------------------------------------------------------------
@@ -325,16 +350,16 @@ static mp_obj_t machine_counter_make_new(const mp_obj_type_t *type,
     nlr_buf_t nl;
     if (nlr_push(&nl) == 0) {
         machine_tcpwm_counter_alloc(self->counter_num, MP_OBJ_FROM_PTR(self));
-        if (n_args > 1 || n_kw > 0) {
-            mp_map_t kw_map;
-            mp_map_init_fixed_table(&kw_map, n_kw, args + n_args);
-            machine_counter_init_helper(self, n_args - 1, args + 1, &kw_map);
-        }
         nlr_pop();
     } else {
-        machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
         counter_obj[id] = NULL;
         nlr_jump(nl.ret_val);
+    }
+
+    if (n_args > 1 || n_kw > 0) {
+        mp_map_t kw_map;
+        mp_map_init_fixed_table(&kw_map, n_kw, args + n_args);
+        machine_counter_init_helper(self, n_args - 1, args + 1, &kw_map);
     }
 
     return MP_OBJ_FROM_PTR(self);
