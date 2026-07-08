@@ -1,25 +1,34 @@
-Pin(Pin.cpu.P16_0, mode=Pin.OUT)
-Pin(Pin.cpu.P16_1, mode=Pin.IN, pull=Pin.PULL_UP)
 pin out initial value 1:  True
 pin out initial value 0:  True
-pin out (self) value 1:  True
-pin out value 1:  True
-pin out (self) value 0:  True
-pin out value 0:  True
-pin out value True:  True
-pin out value False:  True
-pin out value on:  True
-pin out value off:  True
 pin out callable 1:  True
 pin out callable 0:  True
 pin out value high:  True
 pin out value low:  True
 pin out value toggled (0->1):  True
-pin out with pull up initially high:  True
-pin out with pull none initially 0:  True
-pin out get mode:  True
-pin out get pull:  True
-pin out get drive:  True
+pin out value 0:  True
+pin out value 1:  True
+machine.Pin with mode=Pin.OUT + pull=Pin.PULL_UP is not supported
+machine.Pin with mode=Pin.OUT + pull=Pin.PULL_DOWN is not supported
+machine.Pin warning: initial value is ignored for Pin.IN mode
+pin in with pull none initially high-z:  True
+pin in with pull up initially 1:  True
+pin in with pull down initially 0:  True
+pin in value 1:  True
+pin in value 0:  True
+pin in writes 1 but strong out drives 0:  True
+pin in pull is now pull up after writing 1:  True
+pin in writes 0 but strong out drives 0:  True
+pin in pull is now pull down after writing 0:  True
+pin od with pull none initially high-z:  True
+pin od with pull up initially 1:  True
+pin od with pull up initially 0:  True
+pin od with pull up but strong out drives 0:  True
+pin od with pull up but strong out drives 1:  True
+pin od with pull up writes 1:  True
+pin od with pull up writes 0:  True
+pin od with pull none writes 1:  True
+pin od with pull none writes 0:  True
+machine.Pin with mode=Pin.OPEN_DRAIN + pull=Pin.PULL_DOWN is not supported
 pin out set mode:  True
 pin out set pull:  True
 pin out set drive:  True
