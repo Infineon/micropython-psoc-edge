@@ -41,6 +41,7 @@
 #include "mtb_hal.h"
 
 #include "genhdr/pins_af.h"
+#include "sys_int.h"
 
 // Number of Counter object slots supported by this port.
 #define MACHINE_COUNTER_NUM_INSTANCES  (32)
@@ -67,7 +68,10 @@ typedef struct _machine_counter_obj_t {
     mp_hal_pin_obj_t src_pin;
     uint8_t edge;
     uint8_t direction;
+    uint16_t cycles_u16;
     mp_int_t offset;
+    sys_int_cfg_t irq_cfg;
+    bool irq_active;
     bool configured;
 } machine_counter_obj_t;
 
@@ -92,6 +96,13 @@ static const uint32_t counter_out_trig[MACHINE_COUNTER_NUM_INSTANCES] = {
     MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_OUT_TRIG_ENTRY)
 };
 #undef COUNTER_OUT_TRIG_ENTRY
+
+// Expands generated map entries into id->counter-IRQ lookup.
+#define COUNTER_IRQ_ENTRY(id, counter, irq, pclk, trig) irq,
+static const IRQn_Type counter_irq[MACHINE_COUNTER_NUM_INSTANCES] = {
+    MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_IRQ_ENTRY)
+};
+#undef COUNTER_IRQ_ENTRY
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -150,11 +161,60 @@ static void machine_counter_stop_hw(machine_counter_obj_t *self) {
     Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
 }
 
+// Disable and unregister the counter IRQ if it is currently active.
+static void machine_counter_stop_irq(machine_counter_obj_t *self) {
+    if (self->irq_active) {
+        sys_int_deinit(&self->irq_cfg);
+        self->irq_active = false;
+    }
+}
+
+// Return the cycles counter as signed 16-bit value.
+static inline int16_t machine_counter_cycles_get(const machine_counter_obj_t *self) {
+    return (int16_t)self->cycles_u16;
+}
+
+// Increment/decrement cycles counter with 16-bit wrap semantics.
+static inline void machine_counter_cycles_step(machine_counter_obj_t *self) {
+    if (self->direction == COUNTER_DIR_DOWN) {
+        self->cycles_u16--;
+    } else {
+        self->cycles_u16++;
+    }
+}
+
+// Counter terminal-count ISR: track wrap events in software cycles.
+static void machine_counter_isr(machine_counter_obj_t *self) {
+    if (Cy_TCPWM_GetInterruptStatus(TCPWM0, self->counter_num) & CY_TCPWM_INT_ON_TC) {
+        Cy_TCPWM_ClearInterrupt(TCPWM0, self->counter_num, CY_TCPWM_INT_ON_TC);
+        machine_counter_cycles_step(self);
+    }
+}
+
+// Generate one IRQ handler per Counter id for direct dispatch.
+#define COUNTER_IRQ_HANDLER_DECL(id, counter, irq, pclk, trig) \
+    static void machine_counter_irq_handler_##id(void) { \
+        machine_counter_obj_t *self = counter_obj[id]; \
+        if (self != NULL) { \
+            machine_counter_isr(self); \
+        } \
+    }
+MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_IRQ_HANDLER_DECL)
+#undef COUNTER_IRQ_HANDLER_DECL
+
+#define COUNTER_IRQ_HANDLER_ENTRY(id, counter, irq, pclk, trig) machine_counter_irq_handler_##id,
+static const cy_israddress machine_counter_irq_handlers[MACHINE_COUNTER_NUM_INSTANCES] = {
+    MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_IRQ_HANDLER_ENTRY)
+};
+#undef COUNTER_IRQ_HANDLER_ENTRY
+
 // Roll back Counter state and release channel ownership after init failure.
 static void machine_counter_init_fail_cleanup(machine_counter_obj_t *self) {
     machine_counter_stop_hw(self);
+    machine_counter_stop_irq(self);
     machine_counter_restore_src_pin(self);
     self->configured = false;
+    self->cycles_u16 = 0;
     self->offset = 0;
 
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
@@ -198,6 +258,7 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
 
     // Tear down any previous run before programming new pin routing.
     machine_counter_stop_hw(self);
+    machine_counter_stop_irq(self);
     machine_counter_restore_src_pin(self);
 
     // Ensure shared timer clock is configured and bound to this counter PCLK.
@@ -230,7 +291,7 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     cfg.compare0 = 0;
     cfg.compare1 = 0;
     cfg.enableCompareSwap = false;
-    cfg.interruptSources = 0;
+    cfg.interruptSources = CY_TCPWM_INT_ON_TC;
     cfg.captureInputMode = COUNTER_INPUT_DISABLED & 0x3U;
     cfg.captureInput = CY_TCPWM_INPUT_0;
     cfg.reloadInputMode = COUNTER_INPUT_DISABLED & 0x3U;
@@ -262,11 +323,19 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     }
 
     Cy_TCPWM_Counter_SetCounter(TCPWM0, self->counter_num, 0);
+    Cy_TCPWM_ClearInterrupt(TCPWM0, self->counter_num, CY_TCPWM_INT_ON_TC);
+
+    self->irq_cfg.priority = SYS_INT_IRQ_LOWEST_PRIORITY;
+    self->irq_cfg.handler = machine_counter_irq_handlers[self->id];
+    sys_int_init(&self->irq_cfg);
+    self->irq_active = true;
+
     Cy_TCPWM_Counter_Enable(TCPWM0, self->counter_num);
     Cy_TCPWM_TriggerReloadOrIndex_Single(TCPWM0, self->counter_num);
 
     self->edge = edge;
     self->direction = direction;
+    self->cycles_u16 = 0;
     self->offset = 0;
     self->configured = true;
 }
@@ -316,7 +385,10 @@ static mp_obj_t machine_counter_make_new(const mp_obj_type_t *type,
     self->src_pin = NULL;
     self->edge = COUNTER_EDGE_RISING;
     self->direction = COUNTER_DIR_UP;
+    self->cycles_u16 = 0;
     self->offset = 0;
+    self->irq_cfg.irq_num = counter_irq[id];
+    self->irq_active = false;
     self->configured = false;
 
     nlr_buf_t nl;
@@ -357,9 +429,11 @@ static mp_obj_t machine_counter_deinit(mp_obj_t self_in) {
     machine_counter_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
     machine_counter_stop_hw(self);
+    machine_counter_stop_irq(self);
     machine_counter_restore_src_pin(self);
 
     self->configured = false;
+    self->cycles_u16 = 0;
     self->offset = 0;
 
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
@@ -395,13 +469,24 @@ static mp_obj_t machine_counter_value(size_t n_args, const mp_obj_t *args) {
         // Freeze counting during read/reset so no new edges arrive in this window.
         Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
     }
+
     uint32_t raw = Cy_TCPWM_Counter_GetCounter(TCPWM0, self->counter_num);
-    long long signed_count = (self->direction == COUNTER_DIR_DOWN) ? -(long long)raw : (long long)raw;
-    long long result = (long long)self->offset + signed_count;
+    uint64_t span = (uint64_t)machine_counter_period_max(self->counter_num) + 1ULL;
+    int16_t cycles = machine_counter_cycles_get(self);
+    long long edge_total;
+    if (self->direction == COUNTER_DIR_DOWN) {
+        edge_total = (long long)(-cycles) * (long long)span + (long long)raw;
+        edge_total = -edge_total;
+    } else {
+        edge_total = (long long)cycles * (long long)span + (long long)raw;
+    }
+    long long result = (long long)self->offset + edge_total;
 
     if (n_args == 2) {
         self->offset = mp_obj_get_int(args[1]);
+        self->cycles_u16 = 0;
         Cy_TCPWM_Counter_SetCounter(TCPWM0, self->counter_num, 0);
+        Cy_TCPWM_ClearInterrupt(TCPWM0, self->counter_num, CY_TCPWM_INT_ON_TC);
         Cy_TCPWM_Counter_Enable(TCPWM0, self->counter_num);
         Cy_TCPWM_TriggerReloadOrIndex_Single(TCPWM0, self->counter_num);
     }
@@ -409,6 +494,32 @@ static mp_obj_t machine_counter_value(size_t n_args, const mp_obj_t *args) {
     return mp_obj_new_int_from_ll(result);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_counter_value_obj, 1, 2, machine_counter_value);
+
+// ---------------------------------------------------------------------------
+// counter.cycles([value])
+// ---------------------------------------------------------------------------
+
+// Get or set the signed 16-bit software cycles counter.
+static mp_obj_t machine_counter_cycles(size_t n_args, const mp_obj_t *args) {
+    machine_counter_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+
+    if (!self->configured) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("not initialised"));
+    }
+
+    int16_t prev = machine_counter_cycles_get(self);
+
+    if (n_args == 2) {
+        mp_int_t value = mp_obj_get_int(args[1]);
+        if (value < -32768 || value > 32767) {
+            mp_raise_ValueError(MP_ERROR_TEXT("cycles out of range"));
+        }
+        self->cycles_u16 = (uint16_t)(int16_t)value;
+    }
+
+    return mp_obj_new_int(prev);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_counter_cycles_obj, 1, 2, machine_counter_cycles);
 
 // Print user-facing representation as Counter(<id>).
 static void machine_counter_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
@@ -429,6 +540,7 @@ static const mp_rom_map_elem_t machine_counter_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&machine_counter_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&machine_counter_deinit_obj) },
     { MP_ROM_QSTR(MP_QSTR_value), MP_ROM_PTR(&machine_counter_value_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cycles), MP_ROM_PTR(&machine_counter_cycles_obj) },
 
     { MP_ROM_QSTR(MP_QSTR_RISING), MP_ROM_INT(COUNTER_EDGE_RISING) },
     { MP_ROM_QSTR(MP_QSTR_FALLING), MP_ROM_INT(COUNTER_EDGE_FALLING) },
