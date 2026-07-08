@@ -110,12 +110,21 @@ expect_value_error("invalid_min_ge_max:", lambda: Counter(7, src=Pin(PIN_IN), ma
 expect_not_implemented_error(
     "filter_ns_not_supported:", lambda: Counter(7, src=Pin(PIN_IN), filter_ns=100)
 )
-expect_not_implemented_error(
-    "index_not_supported:", lambda: Counter(7, src=Pin(PIN_IN), index=Pin(PIN_IN))
-)
-expect_not_implemented_error(
-    "reset_not_supported:", lambda: Counter(7, src=Pin(PIN_IN), reset=Pin(PIN_IN))
-)
+
+# index support test: using the same pin as src/index should trigger index callback on each rising edge.
+c = Counter(7, src=Pin(PIN_IN), index=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP)
+prime_counter(c, pin_out)
+pulse(pin_out, 5)
+print("index_active:", c.cycles() > 0)
+c.deinit()
+
+# reset support test: using same pin as src/reset should keep value near zero and cycles unchanged.
+c = Counter(7, src=Pin(PIN_IN), reset=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP)
+prime_counter(c, pin_out)
+pulse(pin_out, 5)
+print("reset_active:", abs(c.value()) <= 1 and c.cycles() == 0)
+c.deinit()
+
 expect_not_implemented_error("match_not_supported:", lambda: Counter(7, src=Pin(PIN_IN), match=10))
 expect_not_implemented_error(
     "match_pin_not_supported:", lambda: Counter(7, src=Pin(PIN_IN), match_pin=Pin(PIN_OUT))

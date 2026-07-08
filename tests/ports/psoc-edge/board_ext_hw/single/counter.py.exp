@@ -18,8 +18,8 @@ invalid_src_pin: Pin 'P16_7' does not support 'PERI_TR_IO_INPUT'.
 invalid_max: max must be >= 0
 invalid_min_ge_max: min must be < max
 filter_ns_not_supported: filter_ns not supported
-index_not_supported: index not supported
-reset_not_supported: reset not supported
+index_active: True
+reset_active: True
 match_not_supported: match not supported
 match_pin_not_supported: match_pin not supported
 duplicate_counter_id: Counter(6) already created.
