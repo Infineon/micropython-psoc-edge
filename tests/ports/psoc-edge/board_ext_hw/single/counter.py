@@ -68,6 +68,13 @@ pulse(pin_out, 10)
 print("value_reset:", close_to(c.value(), -10))
 c.deinit()
 
+# cycles() tests: get, set, and previous-value return semantics.
+c = Counter(3, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP)
+print("cycles_default:", c.cycles() == 0)
+print("cycles_set_prev:", c.cycles(5) == 0)
+print("cycles_after_set:", c.cycles() == 5)
+c.deinit()
+
 # Negative tests: boundary and input validation (ValueError paths).
 expect_value_error("invalid_id_-1:", lambda: Counter(-1, src=Pin(PIN_IN)))
 expect_value_error("invalid_id_32:", lambda: Counter(32, src=Pin(PIN_IN)))
