@@ -163,6 +163,7 @@ class PSE84Pin(boardgen.Pin):
             input_idx = af[len("PERI0_TR_IO_INPUT") :]
             if input_idx.isdigit():
                 self._counter_src = {
+                    "input_idx": int(input_idx),
                     "in_trig": f"PERI_0_TRIG_IN_MUX_3_PERI0_HSIOM_TR_OUT{input_idx}",
                     "hsiom": f"{self.name()}_{af}",
                 }
@@ -252,8 +253,8 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self._pwm_pin_count = 0  # unique exposed pins with a TCPWM LINE AF
         self._tcpwm_counter_max = 0  # highest counter number seen across all LINE AFs
         self._tcpwm_counters = []  # sorted unique TCPWM counter IDs seen in LINE AFs
-        # Counter source routing entries filtered by unhidden CPU pins from pins.csv.
-        self._counter_src_entries = []
+        # Counter input trigger entries indexed by PERI0_TR_IO_INPUT unit.
+        self._counter_input_entries = []
 
     # Collect all unhidden ports from the available
     # pins.
@@ -313,20 +314,22 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self._tcpwm_counters = sorted(seen_counters)
         self._pwm_pin_count = len(seen_counters)
 
-    # Collect Counter source routing entries from unhidden pins that expose
-    # PERI0_TR_IO_INPUTx AFs.
-    def add_counter_src(self):
-        entries = []
+    # Collect unique Counter trigger routes from PERI0_TR_IO_INPUTx units.
+    def add_counter_input_routes(self):
+        input_routes = {}
         for pin in self.available_pins(exclude_hidden=True):
             if pin._counter_src is None:
                 continue
-            entries.append(
-                (pin._port, pin._pin, pin._counter_src["in_trig"], pin._counter_src["hsiom"])
-            )
 
-        # Keep output deterministic by sorting on port/pin.
-        entries.sort(key=lambda x: (x[0], x[1]))
-        self._counter_src_entries = entries
+            input_idx = pin._counter_src["input_idx"]
+            in_trig = pin._counter_src["in_trig"]
+            if input_idx in input_routes and input_routes[input_idx] != in_trig:
+                raise boardgen.PinGeneratorError(
+                    f"Conflicting Counter route for PERI0_TR_IO_INPUT{input_idx}."
+                )
+            input_routes[input_idx] = in_trig
+
+        self._counter_input_entries = sorted(input_routes.items())
 
     # Override the parse_board_csv to add
     # the unhidden ports after parsing the board CSV.
@@ -335,7 +338,7 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self.add_ports()
         self.add_scbs()
         self.add_tcpwm()
-        self.add_counter_src()
+        self.add_counter_input_routes()
 
     # Override the default implementation just to change the default arguments
     # (extra header row, skip first column).
@@ -494,28 +497,28 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self.print_scb_defines(out_af_header)
         self.print_tcpwm_defines(out_af_header)
         self.print_tcpwm_hw_map(out_af_header)
-        self.print_counter_src_map(out_af_header)
+        self.print_counter_input_map(out_af_header)
 
-    def print_counter_src_map(self, out_header):
+    def print_counter_input_map(self, out_header):
         print(file=out_header)
         print(
-            "// Counter source routing map filtered to unhidden pins from board pins.csv.",
+            "// Counter trigger-input map indexed by PERI0_TR_IO_INPUT unit.",
             file=out_header,
         )
         print(
-            "// Each row: X(port_num, pin_num, in_trig_line, pin_hsiom)",
+            "// Each row: X(input_idx, in_trig_line)",
             file=out_header,
         )
-        print("#define MICROPY_PY_MACHINE_COUNTER_SRC_PIN_MAP(X) \\", file=out_header)
+        print("#define MICROPY_PY_MACHINE_COUNTER_IN_TRIG_MAP(X) \\", file=out_header)
 
-        if not self._counter_src_entries:
-            print("    /* no available counter source pins */", file=out_header)
+        if not self._counter_input_entries:
+            print("    /* no available counter input routes */", file=out_header)
             print(file=out_header)
             return
 
-        for i, (port, pin, in_trig, hsiom) in enumerate(self._counter_src_entries):
-            suffix = " \\" if i < len(self._counter_src_entries) - 1 else ""
-            print(f"    X({port}, {pin}, {in_trig}, {hsiom}){suffix}", file=out_header)
+        for i, (input_idx, in_trig) in enumerate(self._counter_input_entries):
+            suffix = " \\" if i < len(self._counter_input_entries) - 1 else ""
+            print(f"    X({input_idx}, {in_trig}){suffix}", file=out_header)
         print(file=out_header)
 
     # Add additional header file for AF defines and constants
