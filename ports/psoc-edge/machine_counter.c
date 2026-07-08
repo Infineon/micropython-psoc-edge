@@ -129,25 +129,22 @@ typedef struct _machine_counter_pin_trigger_map_t {
     uint8_t port;
     uint8_t pin;
     uint32_t in_trig;
-    en_hsiom_sel_t hsiom;
 } machine_counter_pin_trigger_map_t;
 
 // Expands pin mapping rows into lookup table entries.
 #define PIN_TRIG_ENTRY(port_num, pin_num, in_trig_line, pin_hsiom) \
-    { (uint8_t)(port_num), (uint8_t)(pin_num), (in_trig_line), (pin_hsiom) },
+    { (uint8_t)(port_num), (uint8_t)(pin_num), (in_trig_line) },
 static const machine_counter_pin_trigger_map_t machine_counter_pin_trigger_map[] = {
     MACHINE_COUNTER_PIN_TRIGGER_MAP(PIN_TRIG_ENTRY)
 };
 #undef PIN_TRIG_ENTRY
 
-// Resolve a source pin to its trigger input line and HSIOM function.
-static bool machine_counter_pin_to_trigger(const machine_pin_obj_t *pin,
-    uint32_t *in_trig, en_hsiom_sel_t *hsiom) {
+// Resolve a source pin to its trigger input line.
+static bool machine_counter_pin_to_trigger(const machine_pin_obj_t *pin, uint32_t *in_trig) {
     for (size_t i = 0; i < MP_ARRAY_SIZE(machine_counter_pin_trigger_map); ++i) {
         const machine_counter_pin_trigger_map_t *entry = &machine_counter_pin_trigger_map[i];
         if (pin->port == entry->port && pin->pin == entry->pin) {
             *in_trig = entry->in_trig;
-            *hsiom = entry->hsiom;
             return true;
         }
     }
@@ -207,14 +204,29 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
         mp_raise_ValueError(MP_ERROR_TEXT("invalid direction"));
     }
 
-    // Resolve source pin object and fetch its trigger-routing metadata.
-    const machine_pin_obj_t *src_pin = machine_pin_get_pin_obj(args[ARG_src].u_obj);
-    uint32_t in_trig = 0;
-    en_hsiom_sel_t hsiom = (en_hsiom_sel_t)0;
-    if (!machine_counter_pin_to_trigger(src_pin, &in_trig, &hsiom)) {
+    // Resolve source pin object and validate it exposes Counter input AF.
+    const machine_pin_obj_t *src_pin = mp_hal_get_pin_obj(args[ARG_src].u_obj);
+    const machine_pin_af_obj_t *src_pin_af = NULL;
+    for (size_t i = 0; i < src_pin->af_num; ++i) {
+        const machine_pin_af_obj_t *af = &src_pin->af[i];
+        if (af->signal == MACHINE_PIN_AF_SIGNAL_PERI_TR_IO_INPUT) {
+            src_pin_af = af;
+            break;
+        }
+    }
+    if (src_pin_af == NULL) {
         mp_raise_msg_varg(&mp_type_ValueError,
             MP_ERROR_TEXT("Pin %q does not support Counter input routing"), src_pin->name);
     }
+
+    // Fetch trigger-routing metadata for the selected source pin.
+    uint32_t in_trig = 0;
+    if (!machine_counter_pin_to_trigger(src_pin, &in_trig)) {
+        mp_raise_msg_varg(&mp_type_ValueError,
+            MP_ERROR_TEXT("Pin %q is missing Counter input route data"), src_pin->name);
+    }
+
+    en_hsiom_sel_t hsiom = src_pin_af->idx;
 
     // Tear down any previous run before programming new pin routing.
     machine_counter_stop_hw(self);
