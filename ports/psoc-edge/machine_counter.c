@@ -65,7 +65,6 @@ typedef struct _machine_counter_obj_t {
     uint32_t counter_num;
     en_clk_dst_t pclk_dst;
     const machine_pin_obj_t *src_pin;
-    en_hsiom_sel_t src_hsiom;
     uint8_t edge;
     uint8_t direction;
     mp_int_t offset;
@@ -94,10 +93,10 @@ static const uint32_t counter_out_trig[MACHINE_COUNTER_NUM_INSTANCES] = {
 };
 #undef COUNTER_OUT_TRIG_ENTRY
 
-// Source pin map is generated from AF data and filtered by unhidden pins in pins.csv.
-// Each row: X(port_num, pin_num, in_trig_line, pin_hsiom)
-#define MACHINE_COUNTER_PIN_TRIGGER_MAP(X) \
-    MICROPY_PY_MACHINE_COUNTER_SRC_PIN_MAP(X)
+// Counter trigger-input map generated from AF data.
+// Each row: X(input_idx, in_trig_line)
+#define MACHINE_COUNTER_IN_TRIG_MAP(X) \
+    MICROPY_PY_MACHINE_COUNTER_IN_TRIG_MAP(X)
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -125,25 +124,24 @@ static uint32_t machine_counter_period_max(uint32_t counter_num) {
     return (counter_num >= 256U) ? 0xFFFFU : UINT32_MAX;
 }
 
-typedef struct _machine_counter_pin_trigger_map_t {
-    uint8_t port;
-    uint8_t pin;
+typedef struct _machine_counter_in_trig_map_t {
+    uint16_t input_idx;
     uint32_t in_trig;
-} machine_counter_pin_trigger_map_t;
+} machine_counter_in_trig_map_t;
 
-// Expands pin mapping rows into lookup table entries.
-#define PIN_TRIG_ENTRY(port_num, pin_num, in_trig_line, pin_hsiom) \
-    { (uint8_t)(port_num), (uint8_t)(pin_num), (in_trig_line) },
-static const machine_counter_pin_trigger_map_t machine_counter_pin_trigger_map[] = {
-    MACHINE_COUNTER_PIN_TRIGGER_MAP(PIN_TRIG_ENTRY)
+// Expands input-route rows into lookup table entries.
+#define IN_TRIG_ENTRY(input_idx, in_trig_line) \
+    { (uint16_t)(input_idx), (in_trig_line) },
+static const machine_counter_in_trig_map_t machine_counter_in_trig_map[] = {
+    MACHINE_COUNTER_IN_TRIG_MAP(IN_TRIG_ENTRY)
 };
-#undef PIN_TRIG_ENTRY
+#undef IN_TRIG_ENTRY
 
-// Resolve a source pin to its trigger input line.
-static bool machine_counter_pin_to_trigger(const machine_pin_obj_t *pin, uint32_t *in_trig) {
-    for (size_t i = 0; i < MP_ARRAY_SIZE(machine_counter_pin_trigger_map); ++i) {
-        const machine_counter_pin_trigger_map_t *entry = &machine_counter_pin_trigger_map[i];
-        if (pin->port == entry->port && pin->pin == entry->pin) {
+// Resolve PERI0_TR_IO_INPUT unit to trigger input line.
+static bool machine_counter_input_to_trigger(uint16_t input_idx, uint32_t *in_trig) {
+    for (size_t i = 0; i < MP_ARRAY_SIZE(machine_counter_in_trig_map); ++i) {
+        const machine_counter_in_trig_map_t *entry = &machine_counter_in_trig_map[i];
+        if (input_idx == entry->input_idx) {
             *in_trig = entry->in_trig;
             return true;
         }
@@ -219,9 +217,9 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
             MP_ERROR_TEXT("Pin %q does not support Counter input routing"), src_pin->name);
     }
 
-    // Fetch trigger-routing metadata for the selected source pin.
+    // Resolve trigger-routing metadata from the selected Counter input AF unit.
     uint32_t in_trig = 0;
-    if (!machine_counter_pin_to_trigger(src_pin, &in_trig)) {
+    if (!machine_counter_input_to_trigger(src_pin_af->unit, &in_trig)) {
         mp_raise_msg_varg(&mp_type_ValueError,
             MP_ERROR_TEXT("Pin %q is missing Counter input route data"), src_pin->name);
     }
@@ -239,7 +237,6 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
 
     // Record the source pin now so rollback can restore it on any failure below.
     self->src_pin = src_pin;
-    self->src_hsiom = hsiom;
 
     // Put pin in input mode and switch HSIOM to trigger-output function.
     mp_hal_pin_input(src_pin);
@@ -302,8 +299,6 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     Cy_TCPWM_Counter_Enable(TCPWM0, self->counter_num);
     Cy_TCPWM_TriggerReloadOrIndex_Single(TCPWM0, self->counter_num);
 
-    self->src_pin = src_pin;
-    self->src_hsiom = hsiom;
     self->edge = edge;
     self->direction = direction;
     self->offset = 0;
@@ -353,7 +348,6 @@ static mp_obj_t machine_counter_make_new(const mp_obj_type_t *type,
     self->counter_num = counter_hw[id];
     self->pclk_dst = machine_tcpwm_counter_pclk(self->counter_num);
     self->src_pin = NULL;
-    self->src_hsiom = (en_hsiom_sel_t)0;
     self->edge = COUNTER_EDGE_RISING;
     self->direction = COUNTER_DIR_UP;
     self->offset = 0;
