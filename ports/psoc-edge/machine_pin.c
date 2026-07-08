@@ -284,7 +284,7 @@ static mp_obj_t machine_pin_obj_init_helper(const machine_pin_obj_t *self, size_
         assert_pull(pull);
     }
 
-    uint8_t value = (mode != GPIO_MODE_IN) ? pin_get_out_value(self) : MACHINE_PIN_OUT_VAL_UNDEF;
+    uint8_t value = MACHINE_PIN_OUT_VAL_UNDEF;
     if (args[ARG_value].u_obj != mp_const_none) {
         value = mp_obj_is_true(args[ARG_value].u_obj);
         assert_value(value);
@@ -389,7 +389,7 @@ static mp_obj_t machine_pin_mode(size_t n_args, const mp_obj_t *args) {
     if (n_args == 1) {
         return MP_OBJ_NEW_SMALL_INT(pin_get_mode(self));
     } else {
-        mp_hal_pin_config(self, mp_obj_get_uint(args[1]), pin_get_pull(self), mp_hal_pin_read(self));
+        mp_hal_pin_config(self, mp_obj_get_uint(args[1]), pin_get_pull(self), MACHINE_PIN_OUT_VAL_UNDEF);
         return mp_const_none;
     }
 }
@@ -400,7 +400,7 @@ static mp_obj_t machine_pin_pull(size_t n_args, const mp_obj_t *args) {
     if (n_args == 1) {
         return MP_OBJ_NEW_SMALL_INT(pin_get_pull(self));
     } else {
-        mp_hal_pin_config(self, pin_get_mode(self), mp_obj_get_uint(args[1]), mp_hal_pin_read(self));
+        mp_hal_pin_config(self, pin_get_mode(self), mp_obj_get_uint(args[1]), MACHINE_PIN_OUT_VAL_UNDEF);
         return mp_const_none;
     }
 }
