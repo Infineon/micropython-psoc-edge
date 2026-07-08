@@ -68,6 +68,8 @@ typedef struct _machine_counter_obj_t {
     mp_hal_pin_obj_t src_pin;
     uint8_t edge;
     uint8_t direction;
+    uint32_t range_min;
+    uint32_t range_max;
     uint16_t cycles_u16;
     mp_int_t offset;
     sys_int_cfg_t irq_cfg;
@@ -225,11 +227,29 @@ static void machine_counter_init_fail_cleanup(machine_counter_obj_t *self) {
 static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
 
-    enum { ARG_src, ARG_edge, ARG_direction };
+    enum {
+        ARG_src,
+        ARG_edge,
+        ARG_direction,
+        ARG_filter_ns,
+        ARG_max,
+        ARG_min,
+        ARG_index,
+        ARG_reset,
+        ARG_match,
+        ARG_match_pin,
+    };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_src, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
         { MP_QSTR_edge, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = COUNTER_EDGE_RISING} },
         { MP_QSTR_direction, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = COUNTER_DIR_UP} },
+        { MP_QSTR_filter_ns, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_max, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_min, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 0} },
+        { MP_QSTR_index, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_reset, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_match, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_match_pin, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
     };
 
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
@@ -245,6 +265,55 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     if (direction != COUNTER_DIR_UP && direction != COUNTER_DIR_DOWN) {
         mp_raise_ValueError(MP_ERROR_TEXT("invalid direction"));
     }
+
+    mp_int_t filter_ns = args[ARG_filter_ns].u_int;
+    if (filter_ns < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("filter_ns must be >= 0"));
+    }
+    if (filter_ns > 0) {
+        mp_raise_NotImplementedError(MP_ERROR_TEXT("filter_ns not supported"));
+    }
+
+    mp_int_t min = args[ARG_min].u_int;
+    if (min < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("min must be >= 0"));
+    }
+
+    if (args[ARG_index].u_obj != mp_const_none) {
+        mp_raise_NotImplementedError(MP_ERROR_TEXT("index not supported"));
+    }
+    if (args[ARG_reset].u_obj != mp_const_none) {
+        mp_raise_NotImplementedError(MP_ERROR_TEXT("reset not supported"));
+    }
+    if (args[ARG_match].u_obj != mp_const_none) {
+        mp_raise_NotImplementedError(MP_ERROR_TEXT("match not supported"));
+    }
+    if (args[ARG_match_pin].u_obj != mp_const_none) {
+        mp_raise_NotImplementedError(MP_ERROR_TEXT("match_pin not supported"));
+    }
+
+    uint32_t max_hw = machine_counter_period_max(self->counter_num);
+    uint32_t range_max = max_hw;
+    if (args[ARG_max].u_obj != mp_const_none) {
+        mp_int_t max = mp_obj_get_int(args[ARG_max].u_obj);
+        if (max < 0) {
+            mp_raise_ValueError(MP_ERROR_TEXT("max must be >= 0"));
+        }
+        if (max == 0 && min == 0) {
+            range_max = max_hw;
+        } else if ((uint64_t)max > (uint64_t)max_hw) {
+            mp_raise_ValueError(MP_ERROR_TEXT("max out of range"));
+        } else {
+            range_max = (uint32_t)max;
+        }
+    }
+
+    if ((uint64_t)min >= (uint64_t)range_max) {
+        mp_raise_ValueError(MP_ERROR_TEXT("min must be < max"));
+    }
+
+    uint32_t range_min = (uint32_t)min;
+    uint32_t period = range_max - range_min;
 
     // Resolve source pin object and validate it exposes Counter input AF.
     mp_hal_pin_obj_t src_pin = mp_hal_get_pin_obj(args[ARG_src].u_obj);
@@ -283,7 +352,7 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     }
 
     cy_stc_tcpwm_counter_config_t cfg = {0};
-    cfg.period = machine_counter_period_max(self->counter_num);
+    cfg.period = period;
     cfg.clockPrescaler = CY_TCPWM_COUNTER_PRESCALER_DIVBY_1;
     cfg.runMode = CY_TCPWM_COUNTER_CONTINUOUS;
     cfg.countDirection = CY_TCPWM_COUNTER_COUNT_UP;
@@ -335,6 +404,8 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
 
     self->edge = edge;
     self->direction = direction;
+    self->range_min = range_min;
+    self->range_max = range_max;
     self->cycles_u16 = 0;
     self->offset = 0;
     self->configured = true;
@@ -385,6 +456,8 @@ static mp_obj_t machine_counter_make_new(const mp_obj_type_t *type,
     self->src_pin = NULL;
     self->edge = COUNTER_EDGE_RISING;
     self->direction = COUNTER_DIR_UP;
+    self->range_min = 0;
+    self->range_max = machine_counter_period_max(self->counter_num);
     self->cycles_u16 = 0;
     self->offset = 0;
     self->irq_cfg.irq_num = counter_irq[id];
@@ -471,7 +544,7 @@ static mp_obj_t machine_counter_value(size_t n_args, const mp_obj_t *args) {
     }
 
     uint32_t raw = Cy_TCPWM_Counter_GetCounter(TCPWM0, self->counter_num);
-    uint64_t span = (uint64_t)machine_counter_period_max(self->counter_num) + 1ULL;
+    uint64_t span = (uint64_t)(self->range_max - self->range_min) + 1ULL;
     int16_t cycles = machine_counter_cycles_get(self);
     long long edge_total;
     if (self->direction == COUNTER_DIR_DOWN) {
