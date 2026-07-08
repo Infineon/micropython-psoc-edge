@@ -101,7 +101,8 @@ Instead, you can use ``init()`` to configure it.
     USER_LED2       USER_LED_B      USER_LED_G      USER_LED_R
 
 
-In addition to the supported ``pull`` configuration values, ``PULL_UP_DOWN`` is also available in this port.
+
+
 
 The ``drive`` parameter accepts up to 8 levels, which set the following drive strength for the pin:
 
@@ -122,6 +123,12 @@ For more information about drive strength, check the PSOC™ Edge `Datasheet <ps
 
         - ``alt``: Alternate functionality is not supported.
         - ``mode``: ``Pin.ALT``, ``Pin.ALT_OPEN_DRAIN``, and ``Pin.ANALOG`` modes are not supported.
+    
+    The following ``mode``- ``pull`` combinations are not supported in this port:
+    
+        - ``Pin.OUT`` with ``Pin.PULL_UP`` or ``Pin.PULL_DOWN``
+        - ``Pin.OPEN_DRAIN`` with ``Pin.PULL_DOWN``
+
 
 Methods
 ^^^^^^^
