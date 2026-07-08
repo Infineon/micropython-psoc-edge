@@ -105,8 +105,7 @@
 #define MICROPY_PY_MACHINE_PWM                  (1)
 #define MICROPY_PY_MACHINE_PWM_INCLUDEFILE      "ports/psoc-edge/machine_pwm.c"
 
-// ADC: PSoC Edge (PSE84) SAR ADC via HPPASS autonomous analog subsystem.
-// DEINIT, READ_UV, and BLOCK enable all required ADC methods.
+// ADC module
 #define MICROPY_PY_MACHINE_ADC                  (1)
 #define MICROPY_PY_MACHINE_ADC_INCLUDEFILE      "ports/psoc-edge/machine_adc.c"
 #define MICROPY_PY_MACHINE_ADC_DEINIT           (1)
