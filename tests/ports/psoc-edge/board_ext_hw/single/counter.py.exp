@@ -3,6 +3,9 @@ rising_count: True
 falling_count: True
 down_count: True
 value_reset: True
+cycles_default: True
+cycles_set_prev: True
+cycles_after_set: True
 invalid_id_-1: Counter id must be in range 0-31
 invalid_id_32: Counter id must be in range 0-31
 invalid_edge: invalid edge
