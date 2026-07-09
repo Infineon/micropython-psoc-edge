@@ -47,6 +47,13 @@ def expect_not_implemented_error(label, fn):
         print(label, e)
 
 
+def expect_runtime_error(label, fn):
+    try:
+        fn()
+    except RuntimeError as e:
+        print(label, e)
+
+
 print("*****Counter tests*****")
 
 pin_out = Pin(PIN_OUT, mode=Pin.OUT, value=0)
@@ -124,6 +131,73 @@ prime_counter(c, pin_out)
 pulse(pin_out, 5)
 print("reset_active:", abs(c.value()) <= 1 and c.cycles() == 0)
 c.deinit()
+
+# irq() tests: constants, trigger API, callback path, and validation.
+c = Counter(8, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=3, min=0)
+prime_counter(c, pin_out)
+irq_count = 0
+
+
+def on_rollover(_irq):
+    global irq_count
+    irq_count += 1
+
+
+irq = c.irq(handler=on_rollover, trigger=Counter.IRQ_ROLL_OVER)
+print("irq_obj_reuse:", irq is c.irq())
+print("irq_trigger_get:", irq.trigger() == Counter.IRQ_ROLL_OVER)
+print(
+    "irq_trigger_set_prev:",
+    irq.trigger(Counter.IRQ_ROLL_OVER | Counter.IRQ_INDEX) == Counter.IRQ_ROLL_OVER,
+)
+pulse(pin_out, 12)
+time.sleep_ms(20)
+print("irq_rollover_cb:", irq_count >= 2)
+print("irq_flags_rollover:", (irq.flags() & Counter.IRQ_ROLL_OVER) != 0)
+c.irq(handler=None, trigger=Counter.IRQ_ROLL_OVER)
+c.deinit()
+
+c = Counter(9, src=Pin(PIN_IN), index=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP)
+prime_counter(c, pin_out)
+index_irq_count = 0
+
+
+def on_index(_irq):
+    global index_irq_count
+    index_irq_count += 1
+
+
+c.irq(handler=on_index, trigger=Counter.IRQ_INDEX)
+pulse(pin_out, 5)
+time.sleep_ms(20)
+print("irq_index_cb:", index_irq_count >= 3)
+c.deinit()
+
+
+def expect_bad_counter_irq_handler():
+    c = Counter(10, src=Pin(PIN_IN))
+    try:
+        c.irq(handler=1)
+    finally:
+        c.deinit()
+
+
+expect_value_error("irq_bad_handler:", expect_bad_counter_irq_handler)
+
+
+def expect_unsupported_counter_irq_trigger():
+    c = Counter(11, src=Pin(PIN_IN))
+    try:
+        c.irq(handler=lambda _irq: None, trigger=Counter.IRQ_MATCH)
+    finally:
+        c.deinit()
+
+
+expect_value_error("irq_unsupported_trigger:", expect_unsupported_counter_irq_trigger)
+
+c = Counter(12, src=Pin(PIN_IN))
+c.deinit()
+expect_runtime_error("irq_not_initialised:", lambda: c.irq())
 
 expect_not_implemented_error("match_not_supported:", lambda: Counter(7, src=Pin(PIN_IN), match=10))
 expect_not_implemented_error(

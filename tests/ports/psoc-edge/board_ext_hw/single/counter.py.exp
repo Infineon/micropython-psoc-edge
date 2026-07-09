@@ -20,6 +20,15 @@ invalid_min_ge_max: min must be < max
 filter_ns_not_supported: filter_ns not supported
 index_active: True
 reset_active: True
+irq_obj_reuse: True
+irq_trigger_get: True
+irq_trigger_set_prev: True
+irq_rollover_cb: True
+irq_flags_rollover: True
+irq_index_cb: True
+irq_bad_handler: handler must be None or callable
+irq_unsupported_trigger: trigger 0x00000004 unsupported
+irq_not_initialised: not initialised
 match_not_supported: match not supported
 match_pin_not_supported: match_pin not supported
 duplicate_counter_id: Counter(6) already created.
