@@ -47,6 +47,9 @@
 // Reuse machine.Pin IRQ API to implement Counter index input callbacks.
 extern mp_obj_t machine_pin_irq(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args);
 
+// Forward declaration so init-failure path can reuse deinit logic.
+static mp_obj_t machine_counter_deinit(mp_obj_t self_in);
+
 // Number of Counter object slots supported by this port.
 #define MACHINE_COUNTER_NUM_INSTANCES  (32)
 // Shared TCPWM source clock frequency used by Counter.
@@ -71,6 +74,7 @@ typedef enum {
 #define MACHINE_COUNTER_IRQ_ROLL_OVER  (1U << 4)
 #define MACHINE_COUNTER_ALLOWED_FLAGS  (MACHINE_COUNTER_IRQ_RESET \
     | MACHINE_COUNTER_IRQ_INDEX \
+    | MACHINE_COUNTER_IRQ_MATCH \
     | MACHINE_COUNTER_IRQ_ROLL_UNDER \
     | MACHINE_COUNTER_IRQ_ROLL_OVER)
 
@@ -82,6 +86,8 @@ typedef struct _machine_counter_obj_t {
     mp_hal_pin_obj_t src_pin;
     const machine_pin_obj_t *index_pin;
     const machine_pin_obj_t *reset_pin;
+    uint32_t match_value;
+    bool match_enabled;
     uint8_t edge;
     uint8_t direction;
     uint32_t range_min;
@@ -228,6 +234,18 @@ static inline int16_t machine_counter_cycles_get(const machine_counter_obj_t *se
     return (int16_t)self->cycles_u16;
 }
 
+static inline uint32_t machine_counter_interrupt_mask(const machine_counter_obj_t *self) {
+    return CY_TCPWM_INT_ON_TC | (self->match_enabled ? CY_TCPWM_INT_ON_CC0 : 0U);
+}
+
+static inline void machine_counter_apply_interrupt_mask(const machine_counter_obj_t *self) {
+    Cy_TCPWM_SetInterruptMask(TCPWM0, self->counter_num, machine_counter_interrupt_mask(self));
+}
+
+static inline void clear_counter_irqs(const machine_counter_obj_t *self, uint32_t mask) {
+    Cy_TCPWM_ClearInterrupt(TCPWM0, self->counter_num, mask);
+}
+
 // Increment/decrement cycles counter with 16-bit wrap semantics.
 static inline void machine_counter_cycles_step(machine_counter_obj_t *self) {
     if (self->direction == COUNTER_DIR_DOWN) {
@@ -274,10 +292,33 @@ static inline void machine_counter_irq_raise(machine_counter_obj_t *self, mp_uin
     }
 }
 
+static mp_obj_t machine_counter_enable_aux_irq(const machine_pin_obj_t *pin, mp_obj_t handler_obj) {
+    mp_hal_pin_input(pin);
+
+    mp_obj_t pos_args[] = {
+        MP_OBJ_FROM_PTR((machine_pin_obj_t *)pin),
+        handler_obj,
+    };
+    mp_obj_t kw_table[] = {
+        MP_OBJ_NEW_QSTR(MP_QSTR_trigger), MP_OBJ_NEW_SMALL_INT(CY_GPIO_INTR_RISING),
+        MP_OBJ_NEW_QSTR(MP_QSTR_hard), mp_const_true,
+    };
+    mp_map_t kw_args;
+    mp_map_init_fixed_table(&kw_args, MP_ARRAY_SIZE(kw_table) / 2, kw_table);
+    return machine_pin_irq(2, pos_args, &kw_args);
+}
+
 // Counter terminal-count ISR: track wrap events in software cycles.
 static void machine_counter_isr(machine_counter_obj_t *self) {
-    if (Cy_TCPWM_GetInterruptStatus(TCPWM0, self->counter_num) & CY_TCPWM_INT_ON_TC) {
-        Cy_TCPWM_ClearInterrupt(TCPWM0, self->counter_num, CY_TCPWM_INT_ON_TC);
+    uint32_t status = Cy_TCPWM_GetInterruptStatus(TCPWM0, self->counter_num);
+
+    if (status & CY_TCPWM_INT_ON_CC0) {
+        clear_counter_irqs(self, CY_TCPWM_INT_ON_CC0);
+        machine_counter_irq_raise(self, MACHINE_COUNTER_IRQ_MATCH);
+    }
+
+    if (status & CY_TCPWM_INT_ON_TC) {
+        clear_counter_irqs(self, CY_TCPWM_INT_ON_TC);
         machine_counter_cycles_step(self);
         machine_counter_irq_raise(self,
             (self->direction == COUNTER_DIR_DOWN)
@@ -301,7 +342,7 @@ static inline void machine_counter_on_aux_event(machine_counter_obj_t *self, boo
         machine_counter_cycles_step(self);
     }
     Cy_TCPWM_Counter_SetCounter(TCPWM0, self->counter_num, 0);
-    Cy_TCPWM_ClearInterrupt(TCPWM0, self->counter_num, CY_TCPWM_INT_ON_TC);
+    clear_counter_irqs(self, CY_TCPWM_INT_ON_TC | CY_TCPWM_INT_ON_CC0);
     MICROPY_END_ATOMIC_SECTION(irq_state);
     machine_counter_irq_raise(self, irq_flag);
 }
@@ -416,25 +457,6 @@ static const mp_obj_t machine_counter_index_reset_handler_obj[MACHINE_COUNTER_NU
 
 // -------------------------------------------------------------------------- //
 
-// Roll back Counter state and release channel ownership after init failure.
-static void machine_counter_init_fail_cleanup(machine_counter_obj_t *self) {
-    machine_counter_stop_hw(self);
-    machine_counter_stop_irq(self);
-    machine_counter_disable_aux_irqs(self);
-    machine_counter_restore_src_pin(self);
-    self->configured = false;
-    self->cycles_u16 = 0;
-    self->offset = 0;
-    self->mp_irq_flags = 0;
-    self->mp_irq_trigger = 0;
-    if (self->mp_irq_obj != NULL) {
-        self->mp_irq_obj->handler = mp_const_none;
-    }
-
-    machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
-    counter_obj[self->id] = NULL;
-}
-
 // Parse init args and configure routing, trigger mux, and TCPWM hardware.
 static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
@@ -499,9 +521,7 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     if (args[ARG_reset].u_obj != mp_const_none) {
         reset_pin = mp_hal_get_pin_obj(args[ARG_reset].u_obj);
     }
-    if (args[ARG_match].u_obj != mp_const_none) {
-        mp_raise_NotImplementedError(MP_ERROR_TEXT("match not supported"));
-    }
+
     if (args[ARG_match_pin].u_obj != mp_const_none) {
         mp_raise_NotImplementedError(MP_ERROR_TEXT("match_pin not supported"));
     }
@@ -528,6 +548,17 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
 
     uint32_t range_min = (uint32_t)min;
     uint32_t period = range_max - range_min;
+    bool match_enabled = false;
+    uint32_t match_value = 0;
+
+    if (args[ARG_match].u_obj != mp_const_none) {
+        mp_int_t match = mp_obj_get_int(args[ARG_match].u_obj);
+        if (match < min || (uint64_t)match > (uint64_t)range_max) {
+            mp_raise_ValueError(MP_ERROR_TEXT("match out of range"));
+        }
+        match_enabled = true;
+        match_value = (uint32_t)((mp_uint_t)match - range_min);
+    }
 
     // Resolve source pin object and validate it exposes Counter input AF.
     mp_hal_pin_obj_t src_pin = mp_hal_get_pin_obj(args[ARG_src].u_obj);
@@ -574,40 +605,20 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
         && self->index_pin == self->reset_pin);
 
     if (self->index_pin != NULL) {
-        mp_hal_pin_input(self->index_pin);
-
-        mp_obj_t pos_args[] = {
-            MP_OBJ_FROM_PTR((machine_pin_obj_t *)self->index_pin),
+        self->index_irq_obj = machine_counter_enable_aux_irq(
+            self->index_pin,
             index_reset_same_pin
                 ? machine_counter_index_reset_handler_obj[self->id]
-                : machine_counter_index_handler_obj[self->id],
-        };
-        mp_obj_t kw_table[] = {
-            MP_OBJ_NEW_QSTR(MP_QSTR_trigger), MP_OBJ_NEW_SMALL_INT(CY_GPIO_INTR_RISING),
-            MP_OBJ_NEW_QSTR(MP_QSTR_hard), mp_const_true,
-        };
-        mp_map_t kw_args;
-        mp_map_init_fixed_table(&kw_args, MP_ARRAY_SIZE(kw_table) / 2, kw_table);
-        self->index_irq_obj = machine_pin_irq(2, pos_args, &kw_args);
+                : machine_counter_index_handler_obj[self->id]);
         if (index_reset_same_pin) {
             self->reset_irq_obj = self->index_irq_obj;
         }
     }
 
     if (self->reset_pin != NULL && !index_reset_same_pin) {
-        mp_hal_pin_input(self->reset_pin);
-
-        mp_obj_t pos_args[] = {
-            MP_OBJ_FROM_PTR((machine_pin_obj_t *)self->reset_pin),
-            machine_counter_reset_handler_obj[self->id],
-        };
-        mp_obj_t kw_table[] = {
-            MP_OBJ_NEW_QSTR(MP_QSTR_trigger), MP_OBJ_NEW_SMALL_INT(CY_GPIO_INTR_RISING),
-            MP_OBJ_NEW_QSTR(MP_QSTR_hard), mp_const_true,
-        };
-        mp_map_t kw_args;
-        mp_map_init_fixed_table(&kw_args, MP_ARRAY_SIZE(kw_table) / 2, kw_table);
-        self->reset_irq_obj = machine_pin_irq(2, pos_args, &kw_args);
+        self->reset_irq_obj = machine_counter_enable_aux_irq(
+            self->reset_pin,
+            machine_counter_reset_handler_obj[self->id]);
     }
 
     cy_stc_tcpwm_counter_config_t cfg = {0};
@@ -616,10 +627,10 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     cfg.runMode = CY_TCPWM_COUNTER_CONTINUOUS;
     cfg.countDirection = CY_TCPWM_COUNTER_COUNT_UP;
     cfg.compareOrCapture = CY_TCPWM_COUNTER_MODE_COMPARE;
-    cfg.compare0 = 0;
+    cfg.compare0 = match_value;
     cfg.compare1 = 0;
     cfg.enableCompareSwap = false;
-    cfg.interruptSources = CY_TCPWM_INT_ON_TC;
+    cfg.interruptSources = CY_TCPWM_INT_ON_TC | (match_enabled ? CY_TCPWM_INT_ON_CC0 : 0U);
     cfg.captureInputMode = COUNTER_INPUT_DISABLED & 0x3U;
     cfg.captureInput = CY_TCPWM_INPUT_0;
     cfg.reloadInputMode = COUNTER_INPUT_DISABLED & 0x3U;
@@ -651,7 +662,7 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     }
 
     Cy_TCPWM_Counter_SetCounter(TCPWM0, self->counter_num, 0);
-    Cy_TCPWM_ClearInterrupt(TCPWM0, self->counter_num, CY_TCPWM_INT_ON_TC);
+    clear_counter_irqs(self, CY_TCPWM_INT_ON_TC | CY_TCPWM_INT_ON_CC0);
 
     self->irq_cfg.priority = SYS_INT_IRQ_LOWEST_PRIORITY;
     self->irq_cfg.handler = machine_counter_irq_handlers[self->id];
@@ -665,8 +676,11 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     self->direction = direction;
     self->range_min = range_min;
     self->range_max = range_max;
+    self->match_enabled = match_enabled;
+    self->match_value = match_value;
     self->cycles_u16 = 0;
     self->offset = 0;
+    machine_counter_apply_interrupt_mask(self);
     self->configured = true;
 }
 
@@ -679,7 +693,7 @@ static void machine_counter_init_helper(machine_counter_obj_t *self,
         machine_counter_init_helper_impl(self, n_args, pos_args, kw_args);
         nlr_pop();
     } else {
-        machine_counter_init_fail_cleanup(self);
+        machine_counter_deinit(MP_OBJ_FROM_PTR(self));
         nlr_jump(nl.ret_val);
     }
 }
@@ -715,6 +729,8 @@ static mp_obj_t machine_counter_make_new(const mp_obj_type_t *type,
     self->src_pin = NULL;
     self->index_pin = NULL;
     self->reset_pin = NULL;
+    self->match_value = 0;
+    self->match_enabled = false;
     self->edge = COUNTER_EDGE_RISING;
     self->direction = COUNTER_DIR_UP;
     self->range_min = 0;
@@ -775,6 +791,8 @@ static mp_obj_t machine_counter_deinit(mp_obj_t self_in) {
     self->configured = false;
     self->cycles_u16 = 0;
     self->offset = 0;
+    self->match_enabled = false;
+    self->match_value = 0;
     self->mp_irq_flags = 0;
     self->mp_irq_trigger = 0;
     if (self->mp_irq_obj != NULL) {
@@ -831,7 +849,7 @@ static mp_obj_t machine_counter_value(size_t n_args, const mp_obj_t *args) {
         self->offset = mp_obj_get_int(args[1]);
         self->cycles_u16 = 0;
         Cy_TCPWM_Counter_SetCounter(TCPWM0, self->counter_num, 0);
-        Cy_TCPWM_ClearInterrupt(TCPWM0, self->counter_num, CY_TCPWM_INT_ON_TC);
+        clear_counter_irqs(self, CY_TCPWM_INT_ON_TC | CY_TCPWM_INT_ON_CC0);
         Cy_TCPWM_Counter_Enable(TCPWM0, self->counter_num);
         Cy_TCPWM_TriggerReloadOrIndex_Single(TCPWM0, self->counter_num);
     }
@@ -865,6 +883,47 @@ static mp_obj_t machine_counter_cycles(size_t n_args, const mp_obj_t *args) {
     return mp_obj_new_int(prev);
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_counter_cycles_obj, 1, 2, machine_counter_cycles);
+
+// Get or set compare-match value; pass None to disable match.
+static mp_obj_t machine_counter_match(size_t n_args, const mp_obj_t *args) {
+    machine_counter_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+
+    if (!self->configured) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("not initialised"));
+    }
+
+    mp_obj_t prev = self->match_enabled
+        ? mp_obj_new_int_from_uint(self->range_min + self->match_value)
+        : mp_const_none;
+
+    if (n_args == 2) {
+        if (args[1] == mp_const_none) {
+            mp_uint_t irq_state = MICROPY_BEGIN_ATOMIC_SECTION();
+            self->match_enabled = false;
+            self->match_value = 0;
+            machine_counter_apply_interrupt_mask(self);
+            clear_counter_irqs(self, CY_TCPWM_INT_ON_CC0);
+            MICROPY_END_ATOMIC_SECTION(irq_state);
+        } else {
+            mp_int_t match = mp_obj_get_int(args[1]);
+            if (match < (mp_int_t)self->range_min || (uint64_t)match > (uint64_t)self->range_max) {
+                mp_raise_ValueError(MP_ERROR_TEXT("match out of range"));
+            }
+
+            uint32_t match_value = (uint32_t)((mp_uint_t)match - self->range_min);
+            mp_uint_t irq_state = MICROPY_BEGIN_ATOMIC_SECTION();
+            self->match_enabled = true;
+            self->match_value = match_value;
+            Cy_TCPWM_Counter_SetCompare0(TCPWM0, self->counter_num, match_value);
+            machine_counter_apply_interrupt_mask(self);
+            clear_counter_irqs(self, CY_TCPWM_INT_ON_CC0);
+            MICROPY_END_ATOMIC_SECTION(irq_state);
+        }
+    }
+
+    return prev;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_counter_match_obj, 1, 2, machine_counter_match);
 
 // counter.irq(handler=None, trigger=0, hard=False)
 static mp_obj_t machine_counter_irq(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
@@ -935,6 +994,7 @@ static const mp_rom_map_elem_t machine_counter_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_irq), MP_ROM_PTR(&machine_counter_irq_obj) },
     { MP_ROM_QSTR(MP_QSTR_value), MP_ROM_PTR(&machine_counter_value_obj) },
     { MP_ROM_QSTR(MP_QSTR_cycles), MP_ROM_PTR(&machine_counter_cycles_obj) },
+    { MP_ROM_QSTR(MP_QSTR_match), MP_ROM_PTR(&machine_counter_match_obj) },
 
     { MP_ROM_QSTR(MP_QSTR_IRQ_RESET), MP_ROM_INT(MACHINE_COUNTER_IRQ_RESET) },
     { MP_ROM_QSTR(MP_QSTR_IRQ_INDEX), MP_ROM_INT(MACHINE_COUNTER_IRQ_INDEX) },
