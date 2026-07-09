@@ -27,6 +27,7 @@
 #include "py/obj.h"
 #include "py/runtime.h"
 #include "py/mphal.h"
+#include "shared/runtime/mpirq.h"
 
 #include "modmachine.h"
 #include "machine_pin.h"
@@ -63,6 +64,16 @@ typedef enum {
     COUNTER_DIR_DOWN = 2,
 } machine_counter_dir_t;
 
+#define MACHINE_COUNTER_IRQ_RESET      (1U << 0)
+#define MACHINE_COUNTER_IRQ_INDEX      (1U << 1)
+#define MACHINE_COUNTER_IRQ_MATCH      (1U << 2)
+#define MACHINE_COUNTER_IRQ_ROLL_UNDER (1U << 3)
+#define MACHINE_COUNTER_IRQ_ROLL_OVER  (1U << 4)
+#define MACHINE_COUNTER_ALLOWED_FLAGS  (MACHINE_COUNTER_IRQ_RESET \
+    | MACHINE_COUNTER_IRQ_INDEX \
+    | MACHINE_COUNTER_IRQ_ROLL_UNDER \
+    | MACHINE_COUNTER_IRQ_ROLL_OVER)
+
 typedef struct _machine_counter_obj_t {
     mp_obj_base_t base;
     uint8_t id;
@@ -79,6 +90,9 @@ typedef struct _machine_counter_obj_t {
     mp_int_t offset;
     mp_obj_t index_irq_obj;
     mp_obj_t reset_irq_obj;
+    mp_irq_obj_t *mp_irq_obj;
+    mp_uint_t mp_irq_flags;
+    mp_uint_t mp_irq_trigger;
     sys_int_cfg_t irq_cfg;
     bool irq_active;
     bool configured;
@@ -223,18 +237,60 @@ static inline void machine_counter_cycles_step(machine_counter_obj_t *self) {
     }
 }
 
+static mp_uint_t machine_counter_irq_trigger(mp_obj_t self_in, mp_uint_t new_trigger) {
+    machine_counter_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    self->mp_irq_trigger = new_trigger;
+    return 0;
+}
+
+static mp_uint_t machine_counter_irq_info(mp_obj_t self_in, mp_uint_t info_type) {
+    machine_counter_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (info_type == MP_IRQ_INFO_FLAGS) {
+        return self->mp_irq_flags;
+    } else if (info_type == MP_IRQ_INFO_TRIGGERS) {
+        return self->mp_irq_trigger;
+    }
+    return 0;
+}
+
+static const mp_irq_methods_t machine_counter_irq_methods = {
+    .trigger = machine_counter_irq_trigger,
+    .info = machine_counter_irq_info,
+};
+
+static inline void machine_counter_irq_raise(machine_counter_obj_t *self, mp_uint_t flags) {
+    if (self->mp_irq_obj == NULL) {
+        return;
+    }
+
+    mp_uint_t irq_state = MICROPY_BEGIN_ATOMIC_SECTION();
+    self->mp_irq_flags = flags;
+    bool call_handler = (self->mp_irq_obj->handler != mp_const_none)
+        && ((self->mp_irq_trigger & flags) != 0);
+    MICROPY_END_ATOMIC_SECTION(irq_state);
+
+    if (call_handler) {
+        mp_irq_handler(self->mp_irq_obj);
+    }
+}
+
 // Counter terminal-count ISR: track wrap events in software cycles.
 static void machine_counter_isr(machine_counter_obj_t *self) {
     if (Cy_TCPWM_GetInterruptStatus(TCPWM0, self->counter_num) & CY_TCPWM_INT_ON_TC) {
         Cy_TCPWM_ClearInterrupt(TCPWM0, self->counter_num, CY_TCPWM_INT_ON_TC);
         machine_counter_cycles_step(self);
+        machine_counter_irq_raise(self,
+            (self->direction == COUNTER_DIR_DOWN)
+                ? MACHINE_COUNTER_IRQ_ROLL_UNDER
+                : MACHINE_COUNTER_IRQ_ROLL_OVER);
     }
 }
 
 // Shared handler for index/reset pin rising edges.
 // If update_cycles is true (index), adjust cycles;
 // if false (reset), keep cycles unchanged.
-static inline void machine_counter_on_aux_event(machine_counter_obj_t *self, bool update_cycles) {
+static inline void machine_counter_on_aux_event(machine_counter_obj_t *self, bool update_cycles,
+    mp_uint_t irq_flag) {
     if (!self->configured) {
         return;
     }
@@ -247,6 +303,7 @@ static inline void machine_counter_on_aux_event(machine_counter_obj_t *self, boo
     Cy_TCPWM_Counter_SetCounter(TCPWM0, self->counter_num, 0);
     Cy_TCPWM_ClearInterrupt(TCPWM0, self->counter_num, CY_TCPWM_INT_ON_TC);
     MICROPY_END_ATOMIC_SECTION(irq_state);
+    machine_counter_irq_raise(self, irq_flag);
 }
 
 // -------------------------------------------------------------------------- //
@@ -276,7 +333,7 @@ static const cy_israddress machine_counter_irq_handlers[MACHINE_COUNTER_NUM_INST
         (void)pin_in; \
         machine_counter_obj_t *self = counter_obj[id]; \
         if (self != NULL && self->index_pin != NULL) { \
-            machine_counter_on_aux_event(self, true); \
+            machine_counter_on_aux_event(self, true, MACHINE_COUNTER_IRQ_INDEX); \
         } \
         return mp_const_none; \
     }
@@ -304,7 +361,7 @@ static const mp_obj_t machine_counter_index_handler_obj[MACHINE_COUNTER_NUM_INST
         (void)pin_in; \
         machine_counter_obj_t *self = counter_obj[id]; \
         if (self != NULL && self->reset_pin != NULL) { \
-            machine_counter_on_aux_event(self, false); \
+            machine_counter_on_aux_event(self, false, MACHINE_COUNTER_IRQ_RESET); \
         } \
         return mp_const_none; \
     }
@@ -333,10 +390,10 @@ static const mp_obj_t machine_counter_reset_handler_obj[MACHINE_COUNTER_NUM_INST
         machine_counter_obj_t *self = counter_obj[id]; \
         if (self != NULL) { \
             if (self->index_pin != NULL) { \
-                machine_counter_on_aux_event(self, true); \
+                machine_counter_on_aux_event(self, true, MACHINE_COUNTER_IRQ_INDEX); \
             } \
             if (self->reset_pin != NULL) { \
-                machine_counter_on_aux_event(self, false); \
+                machine_counter_on_aux_event(self, false, MACHINE_COUNTER_IRQ_RESET); \
             } \
         } \
         return mp_const_none; \
@@ -368,6 +425,11 @@ static void machine_counter_init_fail_cleanup(machine_counter_obj_t *self) {
     self->configured = false;
     self->cycles_u16 = 0;
     self->offset = 0;
+    self->mp_irq_flags = 0;
+    self->mp_irq_trigger = 0;
+    if (self->mp_irq_obj != NULL) {
+        self->mp_irq_obj->handler = mp_const_none;
+    }
 
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
     counter_obj[self->id] = NULL;
@@ -661,6 +723,9 @@ static mp_obj_t machine_counter_make_new(const mp_obj_type_t *type,
     self->offset = 0;
     self->index_irq_obj = MP_OBJ_NULL;
     self->reset_irq_obj = MP_OBJ_NULL;
+    self->mp_irq_obj = NULL;
+    self->mp_irq_flags = 0;
+    self->mp_irq_trigger = 0;
     self->irq_cfg.irq_num = counter_irq[id];
     self->irq_active = false;
     self->configured = false;
@@ -710,6 +775,11 @@ static mp_obj_t machine_counter_deinit(mp_obj_t self_in) {
     self->configured = false;
     self->cycles_u16 = 0;
     self->offset = 0;
+    self->mp_irq_flags = 0;
+    self->mp_irq_trigger = 0;
+    if (self->mp_irq_obj != NULL) {
+        self->mp_irq_obj->handler = mp_const_none;
+    }
 
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
     counter_obj[self->id] = NULL;
@@ -796,6 +866,54 @@ static mp_obj_t machine_counter_cycles(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_counter_cycles_obj, 1, 2, machine_counter_cycles);
 
+// counter.irq(handler=None, trigger=0, hard=False)
+static mp_obj_t machine_counter_irq(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    machine_counter_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
+    bool any_args = n_args > 1 || kw_args->used != 0;
+
+    if (!self->configured) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("not initialised"));
+    }
+
+    if (self->mp_irq_obj == NULL) {
+        self->mp_irq_obj = mp_irq_new(&machine_counter_irq_methods, MP_OBJ_FROM_PTR(self));
+        self->mp_irq_obj->ishard = false;
+    }
+
+    if (any_args) {
+        mp_arg_val_t args[MP_IRQ_ARG_INIT_NUM_ARGS];
+        mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args,
+            MP_IRQ_ARG_INIT_NUM_ARGS, mp_irq_init_args, args);
+
+        mp_obj_t handler = args[MP_IRQ_ARG_INIT_handler].u_obj;
+        if (handler != mp_const_none && !mp_obj_is_callable(handler)) {
+            mp_raise_ValueError(MP_ERROR_TEXT("handler must be None or callable"));
+        }
+
+        mp_uint_t trigger = args[MP_IRQ_ARG_INIT_trigger].u_int;
+        mp_uint_t not_supported = trigger & ~MACHINE_COUNTER_ALLOWED_FLAGS;
+        if (trigger != 0 && not_supported) {
+            mp_raise_msg_varg(&mp_type_ValueError,
+                MP_ERROR_TEXT("trigger 0x%08x unsupported"), not_supported);
+        }
+
+        self->mp_irq_obj->handler = handler;
+        self->mp_irq_obj->ishard = args[MP_IRQ_ARG_INIT_hard].u_bool;
+
+        #if defined(CY_RTOS_AWARE)
+        if (self->mp_irq_obj->ishard) {
+            self->mp_irq_obj->ishard = false;
+        }
+        #endif
+
+        self->mp_irq_flags = 0;
+        self->mp_irq_trigger = trigger;
+    }
+
+    return MP_OBJ_FROM_PTR(self->mp_irq_obj);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(machine_counter_irq_obj, 1, machine_counter_irq);
+
 // Print user-facing representation as Counter(<id>).
 static void machine_counter_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     machine_counter_obj_t *self = MP_OBJ_TO_PTR(self_in);
@@ -814,8 +932,15 @@ static void machine_counter_print(const mp_print_t *print, mp_obj_t self_in, mp_
 static const mp_rom_map_elem_t machine_counter_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&machine_counter_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&machine_counter_deinit_obj) },
+    { MP_ROM_QSTR(MP_QSTR_irq), MP_ROM_PTR(&machine_counter_irq_obj) },
     { MP_ROM_QSTR(MP_QSTR_value), MP_ROM_PTR(&machine_counter_value_obj) },
     { MP_ROM_QSTR(MP_QSTR_cycles), MP_ROM_PTR(&machine_counter_cycles_obj) },
+
+    { MP_ROM_QSTR(MP_QSTR_IRQ_RESET), MP_ROM_INT(MACHINE_COUNTER_IRQ_RESET) },
+    { MP_ROM_QSTR(MP_QSTR_IRQ_INDEX), MP_ROM_INT(MACHINE_COUNTER_IRQ_INDEX) },
+    { MP_ROM_QSTR(MP_QSTR_IRQ_MATCH), MP_ROM_INT(MACHINE_COUNTER_IRQ_MATCH) },
+    { MP_ROM_QSTR(MP_QSTR_IRQ_ROLL_UNDER), MP_ROM_INT(MACHINE_COUNTER_IRQ_ROLL_UNDER) },
+    { MP_ROM_QSTR(MP_QSTR_IRQ_ROLL_OVER), MP_ROM_INT(MACHINE_COUNTER_IRQ_ROLL_OVER) },
 
     { MP_ROM_QSTR(MP_QSTR_RISING), MP_ROM_INT(COUNTER_EDGE_RISING) },
     { MP_ROM_QSTR(MP_QSTR_FALLING), MP_ROM_INT(COUNTER_EDGE_FALLING) },
