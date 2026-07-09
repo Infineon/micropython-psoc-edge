@@ -278,7 +278,7 @@ static mp_obj_t machine_pin_obj_init_helper(const machine_pin_obj_t *self, size_
         assert_mode(mode);
     }
 
-    uint8_t pull = pin_get_pull(self);
+    uint8_t pull = GPIO_PULL_NONE;
     if (args[ARG_pull].u_obj != mp_const_none) {
         pull = mp_obj_get_uint(args[ARG_pull].u_obj);
         assert_pull(pull);
@@ -400,7 +400,8 @@ static mp_obj_t machine_pin_pull(size_t n_args, const mp_obj_t *args) {
     if (n_args == 1) {
         return MP_OBJ_NEW_SMALL_INT(pin_get_pull(self));
     } else {
-        mp_hal_pin_config(self, pin_get_mode(self), mp_obj_get_uint(args[1]), MACHINE_PIN_OUT_VAL_UNDEF);
+        uint8_t pull = (args[1] == mp_const_none) ? GPIO_PULL_NONE : mp_obj_get_uint(args[1]);
+        mp_hal_pin_config(self, pin_get_mode(self), pull, MACHINE_PIN_OUT_VAL_UNDEF);
         return mp_const_none;
     }
 }
