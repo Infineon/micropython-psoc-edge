@@ -82,6 +82,7 @@ print("pin in value 1: ", pin_in.value() == 1)
 pin_out.value(0)
 print("pin in value 0: ", pin_in() == 0)
 
+pin_in.init(pull=Pin.PULL_UP)
 pin_in(1)
 print("pin in writes 1 but strong out drives 0: ", pin_in() == 0)
 print("pin in pull is now pull up after writing 1: ", pin_in.pull() == Pin.PULL_UP)
