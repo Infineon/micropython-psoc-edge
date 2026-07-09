@@ -110,6 +110,7 @@ void mp_hal_wake_main_task_from_isr(void);
 #include "py/obj.h"
 #include "driver/gpio.h"
 #define MP_HAL_PIN_FMT "%u"
+#define MP_HAL_PIN_OBJ_NULL ((mp_hal_pin_obj_t)-1)
 #define mp_hal_pin_obj_t gpio_num_t
 mp_hal_pin_obj_t machine_pin_get_id(mp_obj_t pin_in);
 #define mp_hal_get_pin_obj(o) machine_pin_get_id(o)
