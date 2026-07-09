@@ -33,6 +33,15 @@ def prime_counter(counter, pin):
     time.sleep_ms(2)
 
 
+def wait_irq_flag(irq, mask, timeout_ms=50):
+    # Poll briefly because IRQ scheduling/servicing can lag edge generation.
+    for _ in range(timeout_ms):
+        if (irq.flags() & mask) != 0:
+            return True
+        time.sleep_ms(1)
+    return False
+
+
 def expect_value_error(label, fn):
     try:
         fn()
@@ -132,10 +141,38 @@ pulse(pin_out, 5)
 print("reset_active:", abs(c.value()) <= 1 and c.cycles() == 0)
 c.deinit()
 
+# match tests: init option, runtime updates, disable path, and validation.
+c = Counter(7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=9, min=2, match=6)
+print("match_init_get:", c.match() == 6)
+print("match_set_prev:", c.match(4) == 6)
+print("match_after_set:", c.match() == 4)
+print("match_disable_prev:", c.match(None) == 4)
+print("match_after_disable:", c.match() is None)
+c.deinit()
+
+expect_value_error(
+    "match_init_out_of_range:",
+    lambda: Counter(
+        7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=9, min=2, match=12
+    ),
+)
+
+
+def expect_match_set_out_of_range():
+    c = Counter(7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=9, min=2)
+    try:
+        c.match(12)
+    finally:
+        c.deinit()
+
+
+expect_value_error("match_set_out_of_range:", expect_match_set_out_of_range)
+
 # irq() tests: constants, trigger API, callback path, and validation.
-c = Counter(8, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=3, min=0)
+c = Counter(8, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=5, min=0, match=3)
 prime_counter(c, pin_out)
 irq_count = 0
+match_irq_count = 0
 
 
 def on_rollover(_irq):
@@ -143,17 +180,34 @@ def on_rollover(_irq):
     irq_count += 1
 
 
+def on_match(_counter):
+    global match_irq_count
+    match_irq_count += 1
+
+
 irq = c.irq(handler=on_rollover, trigger=Counter.IRQ_ROLL_OVER)
 print("irq_obj_reuse:", irq is c.irq())
 print("irq_trigger_get:", irq.trigger() == Counter.IRQ_ROLL_OVER)
 print(
     "irq_trigger_set_prev:",
-    irq.trigger(Counter.IRQ_ROLL_OVER | Counter.IRQ_INDEX) == Counter.IRQ_ROLL_OVER,
+    irq.trigger(Counter.IRQ_ROLL_OVER | Counter.IRQ_INDEX | Counter.IRQ_MATCH)
+    == Counter.IRQ_ROLL_OVER,
 )
-pulse(pin_out, 12)
+# Check rollover behavior with rollover-only trigger so irq.flags() is deterministic.
+c.match(None)
+irq.trigger(Counter.IRQ_ROLL_OVER)
+pulse(pin_out, 18)
 time.sleep_ms(20)
 print("irq_rollover_cb:", irq_count >= 2)
-print("irq_flags_rollover:", (irq.flags() & Counter.IRQ_ROLL_OVER) != 0)
+print("irq_flags_rollover:", wait_irq_flag(irq, Counter.IRQ_ROLL_OVER))
+
+c.match(3)
+c.irq(handler=on_match, trigger=Counter.IRQ_MATCH)
+pulse(pin_out, 18)
+time.sleep_ms(20)
+print("irq_match_cb:", match_irq_count >= 2)
+print("irq_match_flags:", wait_irq_flag(irq, Counter.IRQ_MATCH))
+
 c.irq(handler=None, trigger=Counter.IRQ_ROLL_OVER)
 c.deinit()
 
@@ -184,22 +238,10 @@ def expect_bad_counter_irq_handler():
 
 expect_value_error("irq_bad_handler:", expect_bad_counter_irq_handler)
 
-
-def expect_unsupported_counter_irq_trigger():
-    c = Counter(11, src=Pin(PIN_IN))
-    try:
-        c.irq(handler=lambda _irq: None, trigger=Counter.IRQ_MATCH)
-    finally:
-        c.deinit()
-
-
-expect_value_error("irq_unsupported_trigger:", expect_unsupported_counter_irq_trigger)
-
 c = Counter(12, src=Pin(PIN_IN))
 c.deinit()
 expect_runtime_error("irq_not_initialised:", lambda: c.irq())
 
-expect_not_implemented_error("match_not_supported:", lambda: Counter(7, src=Pin(PIN_IN), match=10))
 expect_not_implemented_error(
     "match_pin_not_supported:", lambda: Counter(7, src=Pin(PIN_IN), match_pin=Pin(PIN_OUT))
 )
