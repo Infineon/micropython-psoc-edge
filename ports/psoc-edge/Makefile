@@ -510,10 +510,6 @@ endif
 
 CFLAGS += $(INC)
 
-# Keep extmod shared code unchanged: suppress this pointer/int sentinel warning
-# only for machine_adc_block.c in this port.
-$(BUILD)/extmod/machine_adc_block.o: CFLAGS += -Wno-int-conversion
-
 ifeq ($(MICROPY_PY_FREERTOS),1)
 CFLAGS += -DMICROPY_PY_FREERTOS=1
 endif
