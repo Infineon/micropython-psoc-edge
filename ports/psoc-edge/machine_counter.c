@@ -134,7 +134,7 @@ static const IRQn_Type counter_irq[MACHINE_COUNTER_NUM_INSTANCES] = {
 #undef COUNTER_IRQ_ENTRY
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Core Helpers
 // ---------------------------------------------------------------------------
 
 // Configure the shared peripheral clock once for all Counter objects.
@@ -255,6 +255,10 @@ static inline void machine_counter_cycles_step(machine_counter_obj_t *self) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// IRQ Internals
+// ---------------------------------------------------------------------------
+
 static mp_uint_t machine_counter_irq_trigger(mp_obj_t self_in, mp_uint_t new_trigger) {
     machine_counter_obj_t *self = MP_OBJ_TO_PTR(self_in);
     self->mp_irq_trigger = new_trigger;
@@ -290,22 +294,6 @@ static inline void machine_counter_irq_raise(machine_counter_obj_t *self, mp_uin
     if (call_handler) {
         mp_irq_handler(self->mp_irq_obj);
     }
-}
-
-static mp_obj_t machine_counter_enable_aux_irq(const machine_pin_obj_t *pin, mp_obj_t handler_obj) {
-    mp_hal_pin_input(pin);
-
-    mp_obj_t pos_args[] = {
-        MP_OBJ_FROM_PTR((machine_pin_obj_t *)pin),
-        handler_obj,
-    };
-    mp_obj_t kw_table[] = {
-        MP_OBJ_NEW_QSTR(MP_QSTR_trigger), MP_OBJ_NEW_SMALL_INT(CY_GPIO_INTR_RISING),
-        MP_OBJ_NEW_QSTR(MP_QSTR_hard), mp_const_true,
-    };
-    mp_map_t kw_args;
-    mp_map_init_fixed_table(&kw_args, MP_ARRAY_SIZE(kw_table) / 2, kw_table);
-    return machine_pin_irq(2, pos_args, &kw_args);
 }
 
 // Counter terminal-count ISR: track wrap events in software cycles.
@@ -348,6 +336,9 @@ static inline void machine_counter_on_aux_event(machine_counter_obj_t *self, boo
 }
 
 // -------------------------------------------------------------------------- //
+// Generated IRQ/Callback Dispatch Tables
+// -------------------------------------------------------------------------- //
+
 // Generate one IRQ handler per Counter id for direct dispatch.
 #define COUNTER_IRQ_HANDLER_DECL(id, counter, irq, pclk, trig) \
     static void machine_counter_irq_handler_##id(void) { \
@@ -456,6 +447,26 @@ static const mp_obj_t machine_counter_index_reset_handler_obj[MACHINE_COUNTER_NU
 #undef COUNTER_INDEX_RESET_HANDLER_OBJ_ENTRY
 
 // -------------------------------------------------------------------------- //
+
+// ---------------------------------------------------------------------------
+// Init Internals
+// ---------------------------------------------------------------------------
+
+static mp_obj_t machine_counter_enable_aux_irq(const machine_pin_obj_t *pin, mp_obj_t handler_obj) {
+    mp_hal_pin_input(pin);
+
+    mp_obj_t pos_args[] = {
+        MP_OBJ_FROM_PTR((machine_pin_obj_t *)pin),
+        handler_obj,
+    };
+    mp_obj_t kw_table[] = {
+        MP_OBJ_NEW_QSTR(MP_QSTR_trigger), MP_OBJ_NEW_SMALL_INT(CY_GPIO_INTR_RISING),
+        MP_OBJ_NEW_QSTR(MP_QSTR_hard), mp_const_true,
+    };
+    mp_map_t kw_args;
+    mp_map_init_fixed_table(&kw_args, MP_ARRAY_SIZE(kw_table) / 2, kw_table);
+    return machine_pin_irq(2, pos_args, &kw_args);
+}
 
 // Parse init args and configure routing, trigger mux, and TCPWM hardware.
 static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
@@ -699,9 +710,14 @@ static void machine_counter_init_helper(machine_counter_obj_t *self,
 }
 
 // ---------------------------------------------------------------------------
-// Constructor: Counter(id, ...)
+// ---------------------------------------------------------------------------
+// Public Lifecycle API
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Constructor: Counter(id, ...)
+// ---------------------------------------------------------------------------
 // Create a Counter object, reserve hardware, and run optional init.
 static mp_obj_t machine_counter_make_new(const mp_obj_type_t *type,
     size_t n_args, size_t n_kw, const mp_obj_t *args) {
@@ -817,9 +833,14 @@ void machine_counter_deinit_all(void) {
 }
 
 // ---------------------------------------------------------------------------
-// counter.value([value])
+// ---------------------------------------------------------------------------
+// Public Data/IRQ API
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// counter.value([value])
+// ---------------------------------------------------------------------------
 // Return current count, or reset logical origin when a value is provided.
 static mp_obj_t machine_counter_value(size_t n_args, const mp_obj_t *args) {
     machine_counter_obj_t *self = MP_OBJ_TO_PTR(args[0]);
@@ -861,7 +882,6 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_counter_value_obj, 1, 2, mach
 // ---------------------------------------------------------------------------
 // counter.cycles([value])
 // ---------------------------------------------------------------------------
-
 // Get or set the signed 16-bit software cycles counter.
 static mp_obj_t machine_counter_cycles(size_t n_args, const mp_obj_t *args) {
     machine_counter_obj_t *self = MP_OBJ_TO_PTR(args[0]);
@@ -884,6 +904,9 @@ static mp_obj_t machine_counter_cycles(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_counter_cycles_obj, 1, 2, machine_counter_cycles);
 
+// ---------------------------------------------------------------------------
+// counter.match([value])
+// ---------------------------------------------------------------------------
 // Get or set compare-match value; pass None to disable match.
 static mp_obj_t machine_counter_match(size_t n_args, const mp_obj_t *args) {
     machine_counter_obj_t *self = MP_OBJ_TO_PTR(args[0]);
@@ -925,7 +948,10 @@ static mp_obj_t machine_counter_match(size_t n_args, const mp_obj_t *args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_counter_match_obj, 1, 2, machine_counter_match);
 
+// ---------------------------------------------------------------------------
 // counter.irq(handler=None, trigger=0, hard=False)
+// ---------------------------------------------------------------------------
+// Return or configure a Counter IRQ object for this counter.
 static mp_obj_t machine_counter_irq(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     machine_counter_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
     bool any_args = n_args > 1 || kw_args->used != 0;
@@ -973,6 +999,9 @@ static mp_obj_t machine_counter_irq(size_t n_args, const mp_obj_t *pos_args, mp_
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(machine_counter_irq_obj, 1, machine_counter_irq);
 
+// ---------------------------------------------------------------------------
+// Printing
+// ---------------------------------------------------------------------------
 // Print user-facing representation as Counter(<id>).
 static void machine_counter_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     machine_counter_obj_t *self = MP_OBJ_TO_PTR(self_in);
@@ -991,10 +1020,10 @@ static void machine_counter_print(const mp_print_t *print, mp_obj_t self_in, mp_
 static const mp_rom_map_elem_t machine_counter_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&machine_counter_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&machine_counter_deinit_obj) },
-    { MP_ROM_QSTR(MP_QSTR_irq), MP_ROM_PTR(&machine_counter_irq_obj) },
     { MP_ROM_QSTR(MP_QSTR_value), MP_ROM_PTR(&machine_counter_value_obj) },
     { MP_ROM_QSTR(MP_QSTR_cycles), MP_ROM_PTR(&machine_counter_cycles_obj) },
     { MP_ROM_QSTR(MP_QSTR_match), MP_ROM_PTR(&machine_counter_match_obj) },
+    { MP_ROM_QSTR(MP_QSTR_irq), MP_ROM_PTR(&machine_counter_irq_obj) },
 
     { MP_ROM_QSTR(MP_QSTR_IRQ_RESET), MP_ROM_INT(MACHINE_COUNTER_IRQ_RESET) },
     { MP_ROM_QSTR(MP_QSTR_IRQ_INDEX), MP_ROM_INT(MACHINE_COUNTER_IRQ_INDEX) },
@@ -1008,6 +1037,10 @@ static const mp_rom_map_elem_t machine_counter_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_DOWN), MP_ROM_INT(COUNTER_DIR_DOWN) },
 };
 static MP_DEFINE_CONST_DICT(machine_counter_locals_dict, machine_counter_locals_dict_table);
+
+// ---------------------------------------------------------------------------
+// Type Registration
+// ---------------------------------------------------------------------------
 
 MP_DEFINE_CONST_OBJ_TYPE(
     machine_counter_type,
