@@ -15,7 +15,8 @@ invalid_id_32: Counter id must be in range 0-31
 invalid_edge: invalid edge
 invalid_direction: invalid direction
 invalid_src_pin: Pin 'P16_7' does not support 'PERI_TR_IO_INPUT'.
-invalid_max: max must be >= 0
+invalid_min_negative: min must be >= 0
+invalid_max_negative: max must be >= 0
 invalid_min_ge_max: min must be < max
 filter_ns_not_supported: filter_ns not supported
 index_active: True
