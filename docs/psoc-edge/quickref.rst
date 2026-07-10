@@ -181,11 +181,8 @@ Use :func:`machine.bitstream` directly for timing-sensitive one-wire protocols::
 Interrupt control
 -----------------
 
-Use ``machine.disable_irq()`` and ``machine.enable_irq(state)`` for short
-critical sections where interrupts must be masked briefly.
-
-See :ref:`machine.disable_irq <machine.disable_irq>` and
-:ref:`machine.enable_irq <machine.enable_irq>` for full API details.
+Use :func:`machine.disable_irq` and :func:`machine.enable_irq` to guard short
+critical sections, then restore the saved IRQ state as soon as possible.
 
 ::
 
