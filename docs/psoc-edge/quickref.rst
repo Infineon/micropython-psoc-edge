@@ -937,6 +937,86 @@ Complete example
     tim.deinit()
     print("hard fired:", fired[0])
 
+Counter
+-------
+
+Hardware edge counter using TCPWM0 on PSOC\ |trade|\ Edge. See :ref:`machine.Counter <machine.Counter>` for the common API.
+
+This section lists only PSOC\ |trade|\ Edge specifics and deviations.
+
+.. note::
+
+    - IDs ``0`` to ``31`` are available (same TCPWM mapping as ``Timer``: 32-bit IDs ``0-7``, 16-bit IDs ``8-31``).
+    - ``src`` must be a pin with ``PERI_TR_IO_INPUT`` routing. On KIT_PSE84_AI these are: ``P11_1``, ``P11_3``, ``P7_7``, ``P8_0``.
+    - ``min`` and ``max`` must both be ``>= 0``, and ``min`` must be ``< max``.
+    - ``max`` and ``match`` must fit the selected counter width/range.
+    - ``filter_ns`` is currently not supported.
+    - ``match_pin`` is currently not supported.
+    - Under RTOS-aware builds, ``Counter.irq(..., hard=True)`` is forced to soft IRQ callbacks.
+
+Complete example
+^^^^^^^^^^^^^^^^
+
+::
+
+    # Setup on KIT_PSE84_AI:
+    #   P16_7 -> P11_1  (pulse source -> counter src)
+    # Optional for index/reset demo:
+    #   P16_6 -> P11_3
+
+    from machine import Counter, Pin
+    import time
+
+    src = Pin("P11_1")
+    pulse_out = Pin("P16_7", Pin.OUT, value=0)
+
+    # Uses edge/direction/max/min/index/reset/match in one init.
+    c = Counter(
+        0,
+        src=src,
+        edge=Counter.RISING,
+        direction=Counter.UP,
+        max=100,
+        min=0,
+        index=Pin("P11_3"),
+        reset=Pin("P11_3"),
+        match=10,
+    )
+
+    # value()/cycles()/match() read-write API.
+    print("value:", c.value())
+    print("cycles:", c.cycles())
+    print("match:", c.match())
+    c.cycles(2)
+    c.match(20)
+
+    irq_events = 0
+
+    def on_counter_irq(_counter):
+        global irq_events
+        irq_events += 1
+
+    # Subscribe to multiple trigger sources (bitmask).
+    irq = c.irq(handler=on_counter_irq,
+                trigger=Counter.IRQ_ROLL_OVER | Counter.IRQ_MATCH | Counter.IRQ_INDEX | Counter.IRQ_RESET)
+
+    # Generate a few pulses on src.
+    for _ in range(30):
+        pulse_out(1)
+        time.sleep_us(100)
+        pulse_out(0)
+        time.sleep_us(100)
+
+    print("value after pulses:", c.value())
+    print("cycles after pulses:", c.cycles())
+    print("irq flags:", irq.flags())
+    print("irq calls:", irq_events)
+
+    # Disable match dynamically.
+    c.match(None)
+
+    c.deinit()
+
 Network Module
 --------------
 
