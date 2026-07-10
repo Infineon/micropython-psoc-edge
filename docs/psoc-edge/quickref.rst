@@ -940,9 +940,9 @@ Complete example
 Counter
 -------
 
-Hardware edge counter using TCPWM0 on PSOC\ |trade|\ Edge. See :ref:`machine.Counter <machine.Counter>` for the common API.
+Hardware edge counter using TCPWM0 on PSOC-Edge. See :ref:`machine.Counter <machine.Counter>` for the common API.
 
-This section lists only PSOC\ |trade|\ Edge specifics and deviations.
+This section lists only PSOC-Edge specifics and deviations.
 
 .. note::
 
