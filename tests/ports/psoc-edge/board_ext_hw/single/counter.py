@@ -120,7 +120,8 @@ expect_value_error("invalid_id_32:", lambda: Counter(32, src=Pin(PIN_IN)))
 expect_value_error("invalid_edge:", lambda: Counter(3, src=Pin(PIN_IN), edge=3))
 expect_value_error("invalid_direction:", lambda: Counter(4, src=Pin(PIN_IN), direction=3))
 expect_value_error("invalid_src_pin:", lambda: Counter(5, src=Pin(PIN_OUT)))
-expect_value_error("invalid_max:", lambda: Counter(7, src=Pin(PIN_IN), max=-1))
+expect_value_error("invalid_min_negative:", lambda: Counter(5, src=Pin(PIN_IN), min=-50))
+expect_value_error("invalid_max_negative:", lambda: Counter(6, src=Pin(PIN_IN), max=-1))
 expect_value_error("invalid_min_ge_max:", lambda: Counter(7, src=Pin(PIN_IN), max=10, min=10))
 
 expect_not_implemented_error(
