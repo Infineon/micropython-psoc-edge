@@ -4,28 +4,28 @@ This port is intended to run on PSOC™ Edge microcontrollers.
 
 ## Build environment
 
-Install the following tools on your Linux host machine: 
+Install the following tools on your Linux host machine:
 
- - An ARM cross compiler such as `arm-none-eabi-gcc` and associated binary utilities and libc. The minimum required version is 14.2.1. 
- 
+ - An ARM cross compiler such as `arm-none-eabi-gcc` and associated binary utilities and libc. The minimum required version is 14.2.1.
+
     Download the [Infineon MTB GCC package](https://softwaretools.infineon.com/tools/com.ifx.tb.tool.mtbgccpackage) and install it with the command:
-   
+
         sudo apt install ./mtbgccpackage_14.2.1.265_Linux_x64.deb
-        
+
     Alternatively, you can also install the `gcc-arm-none-eabi` official package:
-  
+
         sudo apt-get install gcc-arm-none-eabi libnewlib-arm-none-eabi
-  
-- [edgeprotecttools](https://github.com/Infineon/edgeprotecttools/). The minimum required version is 1.6.0. 
+
+- [edgeprotecttools](https://github.com/Infineon/edgeprotecttools/). The minimum required version is 1.6.0.
 
     It can be installed from PyPi via `pip`:
 
         sudo pip install edgeprotecttools
-        
+
 - [Infineon OpenOCD](https://github.com/Infineon/openocd). Download the latest [release](https://github.com/Infineon/openocd/releases) manually or via `wget`. The minimum required version is v5.8.0. For example:
 
         wget -O openocd.tar.gz https://github.com/Infineon/openocd/releases/download/release-v5.16.1/openocd-5.16.1.4486-linux.tar.gz
-        
+
     And unarchive it in the desired location. For example, in the `/opt/openocd` dir:
 
         mkdir -p /opt/openocd
@@ -72,5 +72,6 @@ Find more information about all the available makefile targets:
 
 # Run micropython
 
-Use any serial terminal (e.g. putty, minicom..) and establish a session with your device with 115200 bauds and 8-N-1 configuration. 
+Use any serial terminal (e.g. putty, minicom..) and establish a session with your device with
+115200 bauds and 8-N-1 configuration.
 

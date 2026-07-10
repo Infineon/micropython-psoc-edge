@@ -44,7 +44,7 @@ MAG_INT,P6_4
 # KitProg UART RX
 ,-P6_5
 
-# Int IMU 
+# Int IMU
 IMU0_INT,P6_6
 
 # KitProg UART TX
@@ -128,7 +128,7 @@ USER_LED1,P10_7
 # Int pressure sensor
 PRESS_SENS_INT,P11_3
 
-# Wifi 
+# Wifi
 ,-P11_4
 
 # Not connected
@@ -228,7 +228,7 @@ USER_LED_R,P20_6
 # Radar reset
 RADAR_RESET,P20_7
 
-# Wifi 
+# Wifi
 ,-P21_0
 
 # I2S
