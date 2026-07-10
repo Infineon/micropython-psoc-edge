@@ -519,8 +519,9 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
         mp_raise_NotImplementedError(MP_ERROR_TEXT("filter_ns not supported"));
     }
 
-    mp_int_t min = args[ARG_min].u_int;
-    if (min < 0) {
+    uint32_t min = args[ARG_min].u_int;
+    // TODO: support negative min/max values (similar to MIMXRT port)
+    if ((mp_int_t)min < 0) {
         mp_raise_ValueError(MP_ERROR_TEXT("min must be >= 0"));
     }
 
@@ -541,6 +542,7 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     uint32_t range_max = max_hw;
     if (args[ARG_max].u_obj != mp_const_none) {
         mp_int_t max = mp_obj_get_int(args[ARG_max].u_obj);
+        // TODO: support negative max values (similar to MIMXRT port)
         if (max < 0) {
             mp_raise_ValueError(MP_ERROR_TEXT("max must be >= 0"));
         }
@@ -553,7 +555,7 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
         }
     }
 
-    if ((uint64_t)min >= (uint64_t)range_max) {
+    if (min >= range_max) {
         mp_raise_ValueError(MP_ERROR_TEXT("min must be < max"));
     }
 
@@ -564,7 +566,7 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
 
     if (args[ARG_match].u_obj != mp_const_none) {
         mp_int_t match = mp_obj_get_int(args[ARG_match].u_obj);
-        if (match < min || (uint64_t)match > (uint64_t)range_max) {
+        if (match < (mp_int_t)min || match > (mp_int_t)range_max) {
             mp_raise_ValueError(MP_ERROR_TEXT("match out of range"));
         }
         match_enabled = true;
@@ -916,7 +918,7 @@ static mp_obj_t machine_counter_match(size_t n_args, const mp_obj_t *args) {
     }
 
     mp_obj_t prev = self->match_enabled
-        ? mp_obj_new_int_from_uint(self->range_min + self->match_value)
+        ? mp_obj_new_int_from_ll(self->range_min + self->match_value)
         : mp_const_none;
 
     if (n_args == 2) {
@@ -929,11 +931,11 @@ static mp_obj_t machine_counter_match(size_t n_args, const mp_obj_t *args) {
             MICROPY_END_ATOMIC_SECTION(irq_state);
         } else {
             mp_int_t match = mp_obj_get_int(args[1]);
-            if (match < (mp_int_t)self->range_min || (uint64_t)match > (uint64_t)self->range_max) {
+            if (match < (mp_int_t)self->range_min || match > (mp_int_t)self->range_max) {
                 mp_raise_ValueError(MP_ERROR_TEXT("match out of range"));
             }
 
-            uint32_t match_value = (uint32_t)((mp_uint_t)match - self->range_min);
+            uint32_t match_value = (uint32_t)((mp_uint_t)match - (mp_uint_t)self->range_min);
             mp_uint_t irq_state = MICROPY_BEGIN_ATOMIC_SECTION();
             self->match_enabled = true;
             self->match_value = match_value;
