@@ -92,6 +92,8 @@ typedef struct _machine_counter_obj_t {
     uint8_t direction;
     uint32_t range_min;
     uint32_t range_max;
+    bool range_min_negative;
+    bool range_max_negative;
     uint16_t cycles_u16;
     mp_int_t offset;
     mp_obj_t index_irq_obj;
@@ -232,6 +234,22 @@ static void machine_counter_stop_irq(machine_counter_obj_t *self) {
 // Return the cycles counter as signed 16-bit value.
 static inline int16_t machine_counter_cycles_get(const machine_counter_obj_t *self) {
     return (int16_t)self->cycles_u16;
+}
+
+static inline int64_t machine_counter_range_min_value(const machine_counter_obj_t *self) {
+    // Reinterpret the stored raw bits as signed when the configured min was negative,
+    // then widen to int64_t so later arithmetic uses the intended logical value.
+    return self->range_min_negative ? (int64_t)(int32_t)self->range_min : (int64_t)self->range_min;
+}
+
+static inline int64_t machine_counter_range_max_value(const machine_counter_obj_t *self) {
+    // Reinterpret the stored raw bits as signed when the configured max was negative,
+    // then widen to int64_t so later arithmetic uses the intended logical value.
+    return self->range_max_negative ? (int64_t)(int32_t)self->range_max : (int64_t)self->range_max;
+}
+
+static inline int64_t machine_counter_range_span_value(const machine_counter_obj_t *self) {
+    return machine_counter_range_max_value(self) - machine_counter_range_min_value(self) + 1;
 }
 
 static inline uint32_t machine_counter_interrupt_mask(const machine_counter_obj_t *self) {
@@ -519,11 +537,8 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
         mp_raise_NotImplementedError(MP_ERROR_TEXT("filter_ns not supported"));
     }
 
-    uint32_t min = args[ARG_min].u_int;
-    // TODO: support negative min/max values (similar to MIMXRT port)
-    if ((mp_int_t)min < 0) {
-        mp_raise_ValueError(MP_ERROR_TEXT("min must be >= 0"));
-    }
+    mp_int_t min = (mp_int_t)args[ARG_min].u_int;
+    int64_t min_value = (int64_t)min;
 
     const machine_pin_obj_t *index_pin = NULL;
     if (args[ARG_index].u_obj != mp_const_none) {
@@ -540,37 +555,43 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
 
     uint32_t max_hw = machine_counter_period_max(self->counter_num);
     uint32_t range_max = max_hw;
+    int64_t max_value = (int64_t)max_hw;
     if (args[ARG_max].u_obj != mp_const_none) {
         mp_int_t max = mp_obj_get_int(args[ARG_max].u_obj);
-        // TODO: support negative max values (similar to MIMXRT port)
-        if (max < 0) {
-            mp_raise_ValueError(MP_ERROR_TEXT("max must be >= 0"));
-        }
         if (max == 0 && min == 0) {
             range_max = max_hw;
-        } else if ((uint64_t)max > (uint64_t)max_hw) {
+            max_value = (int64_t)max_hw;
+        } else if (max > 0 && (uint64_t)max > (uint64_t)max_hw) {
             mp_raise_ValueError(MP_ERROR_TEXT("max out of range"));
         } else {
             range_max = (uint32_t)max;
+            max_value = (int64_t)max;
         }
     }
 
-    if (min >= range_max) {
+    if (min_value >= max_value) {
         mp_raise_ValueError(MP_ERROR_TEXT("min must be < max"));
     }
 
     uint32_t range_min = (uint32_t)min;
-    uint32_t period = range_max - range_min;
+    // Compute the logical span in signed space first so negative min/max values remain valid,
+    // then reject anything wider than the hardware period before narrowing to uint32_t.
+    int64_t period_value = max_value - min_value;
+    if (period_value > (int64_t)max_hw) {
+        mp_raise_ValueError(MP_ERROR_TEXT("range span out of range"));
+    }
+    uint32_t period = (uint32_t)period_value;
     bool match_enabled = false;
     uint32_t match_value = 0;
 
     if (args[ARG_match].u_obj != mp_const_none) {
         mp_int_t match = mp_obj_get_int(args[ARG_match].u_obj);
-        if ((uint64_t)match < (uint64_t)min || (uint64_t)match > (uint64_t)range_max) {
+        int64_t match_value_num = (int64_t)match;
+        if (match_value_num < min_value || match_value_num > max_value) {
             mp_raise_ValueError(MP_ERROR_TEXT("match out of range"));
         }
         match_enabled = true;
-        match_value = (uint32_t)((uint64_t)match - (uint64_t)range_min);
+        match_value = (uint32_t)(match_value_num - min_value);
     }
 
     // Resolve source pin object and validate it exposes Counter input AF.
@@ -689,6 +710,8 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     self->direction = direction;
     self->range_min = range_min;
     self->range_max = range_max;
+    self->range_min_negative = (min_value < 0);
+    self->range_max_negative = (max_value < 0);
     self->match_enabled = match_enabled;
     self->match_value = match_value;
     self->cycles_u16 = 0;
@@ -753,6 +776,8 @@ static mp_obj_t machine_counter_make_new(const mp_obj_type_t *type,
     self->direction = COUNTER_DIR_UP;
     self->range_min = 0;
     self->range_max = machine_counter_period_max(self->counter_num);
+    self->range_min_negative = false;
+    self->range_max_negative = false;
     self->cycles_u16 = 0;
     self->offset = 0;
     self->index_irq_obj = MP_OBJ_NULL;
@@ -857,7 +882,7 @@ static mp_obj_t machine_counter_value(size_t n_args, const mp_obj_t *args) {
     }
 
     uint32_t raw = Cy_TCPWM_Counter_GetCounter(TCPWM0, self->counter_num);
-    uint64_t span = (uint64_t)(self->range_max - self->range_min) + 1ULL;
+    uint64_t span = (uint64_t)machine_counter_range_span_value(self);
     int16_t cycles = machine_counter_cycles_get(self);
     long long edge_total;
     if (self->direction == COUNTER_DIR_DOWN) {
@@ -918,7 +943,7 @@ static mp_obj_t machine_counter_match(size_t n_args, const mp_obj_t *args) {
     }
 
     mp_obj_t prev = self->match_enabled
-        ? mp_obj_new_int_from_ll(self->range_min + self->match_value)
+        ? mp_obj_new_int_from_ll(machine_counter_range_min_value(self) + (int64_t)self->match_value)
         : mp_const_none;
 
     if (n_args == 2) {
@@ -931,12 +956,14 @@ static mp_obj_t machine_counter_match(size_t n_args, const mp_obj_t *args) {
             MICROPY_END_ATOMIC_SECTION(irq_state);
         } else {
             mp_int_t match = mp_obj_get_int(args[1]);
-            if ((uint64_t)match < (uint64_t)self->range_min
-                || (uint64_t)match > (uint64_t)self->range_max) {
+            int64_t match_value_num = (int64_t)match;
+            int64_t range_min_value = machine_counter_range_min_value(self);
+            int64_t range_max_value = machine_counter_range_max_value(self);
+            if (match_value_num < range_min_value || match_value_num > range_max_value) {
                 mp_raise_ValueError(MP_ERROR_TEXT("match out of range"));
             }
 
-            uint32_t match_value = (uint32_t)((uint64_t)match - (uint64_t)self->range_min);
+            uint32_t match_value = (uint32_t)(match_value_num - range_min_value);
             mp_uint_t irq_state = MICROPY_BEGIN_ATOMIC_SECTION();
             self->match_enabled = true;
             self->match_value = match_value;
