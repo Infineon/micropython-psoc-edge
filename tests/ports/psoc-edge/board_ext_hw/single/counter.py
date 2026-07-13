@@ -114,15 +114,40 @@ print("range_min_nonzero_value:", close_to(c.value(), 25))
 print("range_min_nonzero_cycles:", c.cycles() == 3)
 c.deinit()
 
+# Negative min/max support: both can be negative, min < max constraint still applies.
+c = Counter(5, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=100, min=-50)
+prime_counter(c, pin_out)
+pulse(pin_out, 50)
+print("negative_range_value:", close_to(c.value(), 50))
+c.deinit()
+
+# Negative min/max with down-count: value goes negative.
+c = Counter(6, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.DOWN, max=50, min=-50)
+prime_counter(c, pin_out)
+c.value(25)
+pulse(pin_out, 75)
+print("negative_range_down_count:", close_to(c.value(), -50))
+c.deinit()
+
+# Negative min/max with value set to negative.
+c = Counter(5, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=100, min=-100)
+prime_counter(c, pin_out)
+c.value(-75)
+pulse(pin_out, 50)
+print("negative_value_set:", close_to(c.value(), -25))
+c.deinit()
+
 # Negative tests: boundary and input validation (ValueError paths).
 expect_value_error("invalid_id_-1:", lambda: Counter(-1, src=Pin(PIN_IN)))
 expect_value_error("invalid_id_32:", lambda: Counter(32, src=Pin(PIN_IN)))
 expect_value_error("invalid_edge:", lambda: Counter(3, src=Pin(PIN_IN), edge=3))
 expect_value_error("invalid_direction:", lambda: Counter(4, src=Pin(PIN_IN), direction=3))
 expect_value_error("invalid_src_pin:", lambda: Counter(5, src=Pin(PIN_OUT)))
-expect_value_error("invalid_min_negative:", lambda: Counter(5, src=Pin(PIN_IN), min=-50))
-expect_value_error("invalid_max_negative:", lambda: Counter(6, src=Pin(PIN_IN), max=-1))
 expect_value_error("invalid_min_ge_max:", lambda: Counter(7, src=Pin(PIN_IN), max=10, min=10))
+expect_value_error(
+    "range_span_out_of_range:",
+    lambda: Counter(8, src=Pin(PIN_IN), max=40000, min=-40000),
+)
 
 expect_not_implemented_error(
     "filter_ns_not_supported:", lambda: Counter(7, src=Pin(PIN_IN), filter_ns=100)
@@ -143,26 +168,28 @@ print("reset_active:", abs(c.value()) <= 1 and c.cycles() == 0)
 c.deinit()
 
 # match tests: init option, runtime updates, disable path, and validation.
-c = Counter(7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=9, min=2, match=6)
-print("match_init_get:", c.match() == 6)
-print("match_set_prev:", c.match(4) == 6)
-print("match_after_set:", c.match() == 4)
-print("match_disable_prev:", c.match(None) == 4)
-print("match_after_disable:", c.match() is None)
+c = Counter(
+    7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=100, min=-50, match=-25
+)
+print("match_negative_init_get:", c.match() == -25)
+print("match_negative_set_prev:", c.match(50) == -25)
+print("match_negative_after_set:", c.match() == 50)
+print("match_negative_disable_prev:", c.match(None) == 50)
+print("match_negative_after_disable:", c.match() is None)
 c.deinit()
 
 expect_value_error(
     "match_init_out_of_range:",
     lambda: Counter(
-        7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=9, min=2, match=12
+        7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=100, min=-50, match=200
     ),
 )
 
 
 def expect_match_set_out_of_range():
-    c = Counter(7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=9, min=2)
+    c = Counter(7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=100, min=-50)
     try:
-        c.match(12)
+        c.match(200)
     finally:
         c.deinit()
 
