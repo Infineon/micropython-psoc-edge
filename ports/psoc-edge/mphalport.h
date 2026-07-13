@@ -40,18 +40,9 @@
 #include "cybsp.h"
 
 #if defined(CY_RTOS_AWARE)
-// When FreeRTOS is active the CM33 NTZ port uses BASEPRI for critical sections,
-// not PRIMASK.  Using __disable_irq() (PRIMASK) from ISR context can corrupt
-// RTOS state because it masks the SysTick/PendSV interrupts that FreeRTOS owns.
-//
-// ulSetInterruptMask() / vClearInterruptMask() are the FreeRTOS-provided,
-// ISR-safe equivalents of portSET_INTERRUPT_MASK_FROM_ISR() /
-// portCLEAR_INTERRUPT_MASK_FROM_ISR().  They save/restore BASEPRI and are
-// safe to call from both task and ISR context.
-//
-// Constraint: all MicroPython hard-IRQ NVIC priorities must be numerically
-// >= configMAX_SYSCALL_INTERRUPT_PRIORITY so they are masked by BASEPRI during
-// the atomic section.  The default SYS_INT_IRQ_LOWEST_PRIORITY satisfies this.
+// FreeRTOS CM33 NTZ uses BASEPRI (not PRIMASK) for critical sections.
+// Use the ISR-safe BASEPRI wrappers so hard IRQ and task context both work.
+// Hard-IRQ NVIC priorities must be >= configMAX_SYSCALL_INTERRUPT_PRIORITY.
 extern uint32_t ulSetInterruptMask(void);
 extern void vClearInterruptMask(uint32_t ulMask);
 

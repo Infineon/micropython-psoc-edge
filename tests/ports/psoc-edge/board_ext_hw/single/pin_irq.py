@@ -36,14 +36,20 @@ print("irq flag rising:", irq.flags() == Pin.IRQ_RISING)
 
 
 # Test hard IRQ
+# Use a pre-allocated flag — print() from hard IRQ context calls the UART
+# driver which uses a FreeRTOS semaphore (invalid in ISR context).
+_hard_irq_seen = [False]
+
+
 def irq_handler_hard(pin):
-    print("irq hard")
+    _hard_irq_seen[0] = True
 
 
-# TODO: Re-enable hard irq. Not working after FreeRTOS based implementation.
-# irq = pin_irq.irq(irq_handler_hard, trigger=Pin.IRQ_FALLING, hard=True)
-irq = pin_irq.irq(irq_handler_hard, trigger=Pin.IRQ_FALLING)
+irq = pin_irq.irq(irq_handler_hard, trigger=Pin.IRQ_FALLING, hard=True)
 pin_trigger(0)
+time.sleep_ms(10)
+if _hard_irq_seen[0]:
+    print("irq hard")
 
 
 # Trigger set to None, should not trigger any interrupt.
