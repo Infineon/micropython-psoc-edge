@@ -13,7 +13,7 @@ SUPPORTED_AF = {
     "SPI": ["CLK", "MOSI", "MISO", "SELECT0", "SELECT1"],
     "PDM": ["CLK", "DATA"],
     "TCPWM": ["LINE"],
-    "PERI_TR_IO": ["INPUT"],
+    "PERI_TR_IO": ["INPUT", "OUTPUT"],
     # TODO: Other active functionalities that we need to figure out:
     # - TDM
     # - SMIF
@@ -131,17 +131,18 @@ class PSE84Pin(boardgen.Pin):
         pin_af = PinAf(af_idx, af_fn, af_unit, af_signal, af_supported, af_name, af_ptr)
         self._afs.append(pin_af)
 
-    def add_af_peri_tr_io_input(self, af_idx, af_name, af):
-        # Map PERI0_TR_IO_INPUTx to regular pin AF objects so consumers can
+    def add_af_peri_tr_io(self, af_idx, af_name, af):
+        # Map PERIx_TR_IO_INPUT/OUTPUTy to regular pin AF objects so consumers can
         # validate capability through the shared AF metadata path.
-        input_idx = af[len("PERI0_TR_IO_INPUT") :]
-        if not input_idx.isdigit():
+        # Matches patterns like: PERI0_TR_IO_INPUT4, PERI1_TR_IO_OUTPUT1
+        match = re.match(r"^(PERI\d+)_TR_IO_(INPUT|OUTPUT)(\d+)$", af)
+        if not match:
             return
 
-        af_ptr = "NULL"
+        af_ptr = match.group(1)  # e.g., "PERI0", "PERI1"
+        af_signal = match.group(2)  # e.g., "INPUT", "OUTPUT"
+        af_unit = match.group(3)  # e.g., "4", "1"
         af_fn = "PERI_TR_IO"
-        af_signal = "INPUT"
-        af_unit = input_idx
         af_supported = af_fn in SUPPORTED_AF and af_signal in SUPPORTED_AF[af_fn]
 
         pin_af = PinAf(af_idx, af_fn, af_unit, af_signal, af_supported, af_name, af_ptr)
@@ -154,19 +155,6 @@ class PSE84Pin(boardgen.Pin):
         af_ds_num = 4
 
         if af_idx > af_act_max_idx + af_ds_num:
-            return
-
-        # Counter source pin routing uses PERI0 trigger-input AFs.
-        # Example AF token: PERI0_TR_IO_INPUT1
-        if af.startswith("PERI0_TR_IO_INPUT"):
-            self.add_af_peri_tr_io_input(af_idx, af_name, af)
-            input_idx = af[len("PERI0_TR_IO_INPUT") :]
-            if input_idx.isdigit():
-                self._counter_src = {
-                    "input_idx": int(input_idx),
-                    "in_trig": f"PERI_0_TRIG_IN_MUX_3_PERI0_HSIOM_TR_OUT{input_idx}",
-                    "hsiom": f"{self.name()}_{af}",
-                }
             return
 
         if af_idx <= af_act_max_idx:
@@ -204,6 +192,8 @@ class PSE84Pin(boardgen.Pin):
             self.add_af_pdm(af_idx, af_name, af)
         elif "TCPWM" in af:
             self.add_af_tcpwm(af_idx, af_name, af)
+        elif af.startswith("PERI"):
+            self.add_af_peri_tr_io(af_idx, af_name, af)
         else:
             # TODO: Extend the parsing to other peripherals.
             pass
@@ -253,8 +243,17 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self._pwm_pin_count = 0  # unique exposed pins with a TCPWM LINE AF
         self._tcpwm_counter_max = 0  # highest counter number seen across all LINE AFs
         self._tcpwm_counters = []  # sorted unique TCPWM counter IDs seen in LINE AFs
-        # Counter input trigger entries indexed by PERI0_TR_IO_INPUT unit.
-        self._counter_input_entries = []
+
+        # Trigger routing
+        self._unhidden_peri0_tr_io_input = []
+        self._unhidden_peri0_tr_io_output = []
+        self._peri0_tr_io_input_max_index = 0
+        self._peri0_tr_io_output_max_index = 0
+
+        self._unhidden_peri1_tr_io_input = []
+        self._unhidden_peri1_tr_io_output = []
+        self._peri1_tr_io_input_max_index = 0
+        self._peri1_tr_io_output_max_index = 0
 
     # Collect all unhidden ports from the available
     # pins.
@@ -314,22 +313,37 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self._tcpwm_counters = sorted(seen_counters)
         self._pwm_pin_count = len(seen_counters)
 
-    # Collect unique Counter trigger routes from PERI0_TR_IO_INPUTx units.
-    def add_counter_input_routes(self):
-        input_routes = {}
+    def add_peri_tr_ios(self):
         for pin in self.available_pins(exclude_hidden=True):
-            if pin._counter_src is None:
-                continue
+            for af in pin._afs:
+                if af.af_fn == "PERI_TR_IO":
+                    if af.af_ptr == "PERI0":
+                        if af.af_signal == "INPUT":
+                            if af.af_unit not in self._unhidden_peri0_tr_io_input:
+                                self._unhidden_peri0_tr_io_input.append(af.af_unit)
+                                if int(af.af_unit) > self._peri0_tr_io_input_max_index:
+                                    self._peri0_tr_io_input_max_index = int(af.af_unit)
+                        elif af.af_signal == "OUTPUT":
+                            if af.af_unit not in self._unhidden_peri0_tr_io_output:
+                                self._unhidden_peri0_tr_io_output.append(af.af_unit)
+                                if int(af.af_unit) > self._peri0_tr_io_output_max_index:
+                                    self._peri0_tr_io_output_max_index = int(af.af_unit)
+                    elif af.af_ptr == "PERI1":
+                        if af.af_signal == "INPUT":
+                            if af.af_unit not in self._unhidden_peri1_tr_io_input:
+                                self._unhidden_peri1_tr_io_input.append(af.af_unit)
+                                if int(af.af_unit) > self._peri1_tr_io_input_max_index:
+                                    self._peri1_tr_io_input_max_index = int(af.af_unit)
+                        elif af.af_signal == "OUTPUT":
+                            if af.af_unit not in self._unhidden_peri1_tr_io_output:
+                                self._unhidden_peri1_tr_io_output.append(af.af_unit)
+                                if int(af.af_unit) > self._peri1_tr_io_output_max_index:
+                                    self._peri1_tr_io_output_max_index = int(af.af_unit)
 
-            input_idx = pin._counter_src["input_idx"]
-            in_trig = pin._counter_src["in_trig"]
-            if input_idx in input_routes and input_routes[input_idx] != in_trig:
-                raise boardgen.PinGeneratorError(
-                    f"Conflicting Counter route for PERI0_TR_IO_INPUT{input_idx}."
-                )
-            input_routes[input_idx] = in_trig
-
-        self._counter_input_entries = sorted(input_routes.items())
+        self._unhidden_peri0_tr_io_input.sort(key=int)
+        self._unhidden_peri0_tr_io_output.sort(key=int)
+        self._unhidden_peri1_tr_io_input.sort(key=int)
+        self._unhidden_peri1_tr_io_output.sort(key=int)
 
     # Override the parse_board_csv to add
     # the unhidden ports after parsing the board CSV.
@@ -338,7 +352,7 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self.add_ports()
         self.add_scbs()
         self.add_tcpwm()
-        self.add_counter_input_routes()
+        self.add_peri_tr_ios()
 
     # Override the default implementation just to change the default arguments
     # (extra header row, skip first column).
@@ -493,33 +507,57 @@ class PSE84PinGenerator(boardgen.PinGenerator):
             print(f"    X({tid:2d}, {counter}, {irq}, {pclk}, {trig}){suffix}", file=out_header)
         print(file=out_header)
 
+    def print_peri_tr_io_defines(self, out_header):
+        print(file=out_header)
+        print(
+            f"#define MICROPY_PY_MACHINE_PERI0_TR_IO_INPUT_NUM_ENTRIES ({self._peri0_tr_io_input_max_index + 1})",
+            file=out_header,
+        )
+        print(
+            f"#define MICROPY_PY_MACHINE_PERI0_TR_IO_OUTPUT_NUM_ENTRIES ({self._peri0_tr_io_output_max_index + 1})",
+            file=out_header,
+        )
+        print(
+            f"#define MICROPY_PY_MACHINE_PERI1_TR_IO_INPUT_NUM_ENTRIES ({self._peri1_tr_io_input_max_index + 1})",
+            file=out_header,
+        )
+        print(
+            f"#define MICROPY_PY_MACHINE_PERI1_TR_IO_OUTPUT_NUM_ENTRIES ({self._peri1_tr_io_output_max_index + 1})",
+            file=out_header,
+        )
+        print(file=out_header)
+
+        print("#define MICROPY_PY_MACHINE_FOR_ALL_PERI0_TR_IO_INPUTS(DO) \\", file=out_header)
+        lines = [f"DO({in_idx})" for in_idx in self._unhidden_peri0_tr_io_input]
+        macro_body = " \\\n".join(lines)
+        print(macro_body, file=out_header)
+        print(file=out_header)
+
+        print("#define MICROPY_PY_MACHINE_FOR_ALL_PERI0_TR_IO_OUTPUTS(DO) \\", file=out_header)
+        lines = [f"DO({out_idx})" for out_idx in self._unhidden_peri0_tr_io_output]
+        macro_body = " \\\n".join(lines)
+        print(macro_body, file=out_header)
+        print(file=out_header)
+
+        print("#define MICROPY_PY_MACHINE_FOR_ALL_PERI1_TR_IO_INPUTS(DO) \\", file=out_header)
+        lines = [f"DO({in_idx})" for in_idx in self._unhidden_peri1_tr_io_input]
+        macro_body = " \\\n".join(lines)
+        print(macro_body, file=out_header)
+        print(file=out_header)
+
+        print("#define MICROPY_PY_MACHINE_FOR_ALL_PERI1_TR_IO_OUTPUTS(DO) \\", file=out_header)
+        lines = [f"DO({out_idx})" for out_idx in self._unhidden_peri1_tr_io_output]
+        macro_body = " \\\n".join(lines)
+        print(macro_body, file=out_header)
+        print(file=out_header)
+
+        print(file=out_header)
+
     def print_af_header(self, out_af_header):
         self.print_scb_defines(out_af_header)
         self.print_tcpwm_defines(out_af_header)
         self.print_tcpwm_hw_map(out_af_header)
-        self.print_counter_input_map(out_af_header)
-
-    def print_counter_input_map(self, out_header):
-        print(file=out_header)
-        print(
-            "// Counter trigger-input map indexed by PERI0_TR_IO_INPUT unit.",
-            file=out_header,
-        )
-        print(
-            "// Each row: X(input_idx, in_trig_line)",
-            file=out_header,
-        )
-        print("#define MICROPY_PY_MACHINE_COUNTER_IN_TRIG_MAP(X) \\", file=out_header)
-
-        if not self._counter_input_entries:
-            print("    /* no available counter input routes */", file=out_header)
-            print(file=out_header)
-            return
-
-        for i, (input_idx, in_trig) in enumerate(self._counter_input_entries):
-            suffix = " \\" if i < len(self._counter_input_entries) - 1 else ""
-            print(f"    X({input_idx}, {in_trig}){suffix}", file=out_header)
-        print(file=out_header)
+        self.print_peri_tr_io_defines(out_af_header)
 
     # Add additional header file for AF defines and constants
     def extra_args(self, parser):
