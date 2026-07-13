@@ -948,7 +948,7 @@ This section lists only PSOC-Edge specifics and deviations.
 
     - IDs ``0`` to ``31`` are available (same TCPWM mapping as ``Timer``: 32-bit IDs ``0-7``, 16-bit IDs ``8-31``).
     - ``src`` must be a pin with ``PERI_TR_IO_INPUT`` routing. On KIT_PSE84_AI these are: ``P11_1``, ``P11_3``, ``P7_7``, ``P8_0``.
-    - ``min`` and ``max`` must both be ``>= 0``, and ``min`` must be ``< max``.
+    - ``min`` must be ``< max``. Both can be negative (e.g., ``min=-100, max=100``).
     - ``max`` and ``match`` must fit the selected counter width/range.
     - ``filter_ns`` is currently not supported.
     - ``match_pin`` is currently not supported.
@@ -977,10 +977,10 @@ Complete example
         edge=Counter.RISING,
         direction=Counter.UP,
         max=100,
-        min=0,
+        min=-50,
         index=Pin("P11_3"),
         reset=Pin("P11_3"),
-        match=10,
+        match=-25,
     )
 
     # value()/cycles()/match() read-write API.
