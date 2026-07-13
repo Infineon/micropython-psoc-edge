@@ -65,6 +65,7 @@ typedef enum {
 
     MACHINE_PIN_AF_SIGNAL_TCPWM_LINE,
     MACHINE_PIN_AF_SIGNAL_PERI_TR_IO_INPUT,
+    MACHINE_PIN_AF_SIGNAL_PERI_TR_IO_OUTPUT,
 
     /* TODO: Add additional types */
 } machine_pin_af_signal_t;
