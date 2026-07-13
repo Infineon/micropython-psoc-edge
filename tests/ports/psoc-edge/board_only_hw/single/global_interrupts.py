@@ -13,9 +13,10 @@ def _cb(_):
 irq_state = machine.disable_irq()
 tim = Timer(0, period=20, mode=Timer.ONE_SHOT, callback=_cb)
 
-# Keep IRQs masked long enough for the one-shot period to elapse.
-for _ in range(500000):
-    pass
+# Wait past one-shot period.
+start = time.ticks_ms()
+while time.ticks_diff(time.ticks_ms(), start) < 30:
+    time.sleep_ms(1)
 
 # Callback should still be blocked while IRQs are disabled.
 print("while_disabled:", fired)
