@@ -566,11 +566,11 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
 
     if (args[ARG_match].u_obj != mp_const_none) {
         mp_int_t match = mp_obj_get_int(args[ARG_match].u_obj);
-        if (match < (mp_int_t)min || match > (mp_int_t)range_max) {
+        if ((uint64_t)match < (uint64_t)min || (uint64_t)match > (uint64_t)range_max) {
             mp_raise_ValueError(MP_ERROR_TEXT("match out of range"));
         }
         match_enabled = true;
-        match_value = (uint32_t)((mp_uint_t)match - range_min);
+        match_value = (uint32_t)((uint64_t)match - (uint64_t)range_min);
     }
 
     // Resolve source pin object and validate it exposes Counter input AF.
@@ -931,11 +931,12 @@ static mp_obj_t machine_counter_match(size_t n_args, const mp_obj_t *args) {
             MICROPY_END_ATOMIC_SECTION(irq_state);
         } else {
             mp_int_t match = mp_obj_get_int(args[1]);
-            if (match < (mp_int_t)self->range_min || match > (mp_int_t)self->range_max) {
+            if ((uint64_t)match < (uint64_t)self->range_min
+                || (uint64_t)match > (uint64_t)self->range_max) {
                 mp_raise_ValueError(MP_ERROR_TEXT("match out of range"));
             }
 
-            uint32_t match_value = (uint32_t)((mp_uint_t)match - (mp_uint_t)self->range_min);
+            uint32_t match_value = (uint32_t)((uint64_t)match - (uint64_t)self->range_min);
             mp_uint_t irq_state = MICROPY_BEGIN_ATOMIC_SECTION();
             self->match_enabled = true;
             self->match_value = match_value;
