@@ -178,22 +178,6 @@ Use :func:`machine.bitstream` directly for timing-sensitive one-wire protocols::
     - Each timing value must be at least 300 ns; smaller values raise ``ValueError``.
     - If the runtime core clock is invalid (0 Hz), transmission raises ``ValueError``.
 
-Interrupt control
------------------
-
-Use :func:`machine.disable_irq` and :func:`machine.enable_irq` to guard short
-critical sections, then restore the saved IRQ state as soon as possible.
-
-::
-
-    import machine
-
-    state = machine.disable_irq()
-
-    # Do brief time-critical work here.
-
-    machine.enable_irq(state)
-
 Real time clock (RTC)
 ---------------------
 
