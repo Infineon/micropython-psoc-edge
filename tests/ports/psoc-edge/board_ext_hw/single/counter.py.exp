@@ -10,22 +10,24 @@ range_max_value: True
 range_max_cycles: True
 range_min_nonzero_value: True
 range_min_nonzero_cycles: True
+negative_range_value: True
+negative_range_down_count: True
+negative_value_set: True
 invalid_id_-1: Counter id must be in range 0-31
 invalid_id_32: Counter id must be in range 0-31
 invalid_edge: invalid edge
 invalid_direction: invalid direction
 invalid_src_pin: Pin 'P16_7' does not support 'PERI_TR_IO_INPUT'.
-invalid_min_negative: min must be >= 0
-invalid_max_negative: max must be >= 0
 invalid_min_ge_max: min must be < max
+range_span_out_of_range: range span out of range
 filter_ns_not_supported: filter_ns not supported
 index_active: True
 reset_active: True
-match_init_get: True
-match_set_prev: True
-match_after_set: True
-match_disable_prev: True
-match_after_disable: True
+match_negative_init_get: True
+match_negative_set_prev: True
+match_negative_after_set: True
+match_negative_disable_prev: True
+match_negative_after_disable: True
 match_init_out_of_range: match out of range
 match_set_out_of_range: match out of range
 irq_obj_reuse: True
