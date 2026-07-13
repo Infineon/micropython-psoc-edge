@@ -41,6 +41,22 @@
 #define MICROPY_READER_VFS                      (1)
 #define MICROPY_ENABLE_GC                       (1)
 #define MICROPY_STACK_CHECK_MARGIN              (1024)
+// When FreeRTOS is active (MICROPY_PY_FREERTOS), MicroPython tasks run on PSP
+// but ISRs use MSP. Without this, mp_cstack_check() computes usage as
+// (PSP_task_base - MSP_current) which gives a nonsensical result and triggers
+// a false stack-overflow exception before the hard-IRQ callback can run.
+// This causes mp_irq_dispatch() to call mp_cstack_init_with_sp_here() at ISR
+// entry, resetting the check to measure from the current ISR stack pointer.
+// Value must not exceed __StackSize (0x1000 = 4096 bytes, default MSP stack).
+#define MICROPY_STACK_SIZE_HARD_IRQ             (4096U)
+
+#if defined(CY_RTOS_AWARE)
+// Override the error printer with an ISR-safe version that discards output
+// when called from ISR context (IPSR != 0) to avoid blocking on the FreeRTOS
+// UART semaphore.  Defined in mphalport.c.
+extern const struct _mp_print_t mp_psoc_error_print;
+#define MICROPY_ERROR_PRINTER (&mp_psoc_error_print)
+#endif
 #define MICROPY_ENABLE_EMERGENCY_EXCEPTION_BUF  (1)
 #define MICROPY_LONGINT_IMPL                    (MICROPY_LONGINT_IMPL_MPZ)
 #define MICROPY_FLOAT_IMPL                      (MICROPY_FLOAT_IMPL_FLOAT)
