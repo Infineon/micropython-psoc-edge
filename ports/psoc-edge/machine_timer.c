@@ -278,14 +278,6 @@ static mp_obj_t machine_timer_init_helper(machine_timer_obj_t *self,
     }
     self->ishard = (hard == mp_const_true);
 
-    // Hard IRQ callbacks not supported on FreeRTOS: scheduler cannot be locked from ISR context.
-    // TODO: Re-enable hard irq and remove this patch
-    #if defined(CY_RTOS_AWARE)
-    if (self->ishard) {
-        self->ishard = false;  // silently convert to soft callback
-    }
-    #endif
-
     // Compute period in timer clock ticks in 64-bit, then range-check.
     uint64_t period_ticks_64;
     uint32_t period_ticks;
