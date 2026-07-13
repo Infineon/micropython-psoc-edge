@@ -64,7 +64,7 @@ typedef struct _machine_counter_obj_t {
     uint8_t id;
     uint32_t counter_num;
     en_clk_dst_t pclk_dst;
-    const machine_pin_obj_t *src_pin;
+    mp_hal_pin_obj_t src_pin;
     uint8_t edge;
     uint8_t direction;
     mp_int_t offset;
@@ -93,11 +93,6 @@ static const uint32_t counter_out_trig[MACHINE_COUNTER_NUM_INSTANCES] = {
 };
 #undef COUNTER_OUT_TRIG_ENTRY
 
-// Counter trigger-input map generated from AF data.
-// Each row: X(input_idx, in_trig_line)
-#define MACHINE_COUNTER_IN_TRIG_MAP(X) \
-    MICROPY_PY_MACHINE_COUNTER_IN_TRIG_MAP(X)
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -124,31 +119,20 @@ static uint32_t machine_counter_period_max(uint32_t counter_num) {
     return (counter_num >= 256U) ? 0xFFFFU : UINT32_MAX;
 }
 
-typedef struct _machine_counter_in_trig_map_t {
-    uint16_t input_idx;
-    uint32_t in_trig;
-} machine_counter_in_trig_map_t;
+/**
+ * TODO:
+ * The TrigMux functionality might be required for other modules,
+ * and these definitions might be move in the future to a separate
+ * c file to be shared by other modules.
+ * Only PERI0 is used here, but PERI1 is also available and could
+ * be used.
+ */
+#define MAP_COUNTER_PIN_INPUT_TRIGGER(id) \
+    [id] = PERI_0_TRIG_IN_MUX_3_PERI0_HSIOM_TR_OUT##id,
 
-// Expands input-route rows into lookup table entries.
-#define IN_TRIG_ENTRY(input_idx, in_trig_line) \
-    { (uint16_t)(input_idx), (in_trig_line) },
-static const machine_counter_in_trig_map_t machine_counter_in_trig_map[] = {
-    MACHINE_COUNTER_IN_TRIG_MAP(IN_TRIG_ENTRY)
+static const en_peri0_trig_input_debugreducation1_t peri0_tr_io_input[MICROPY_PY_MACHINE_PERI0_TR_IO_INPUT_NUM_ENTRIES] = {
+    MICROPY_PY_MACHINE_FOR_ALL_PERI0_TR_IO_INPUTS(MAP_COUNTER_PIN_INPUT_TRIGGER)
 };
-#undef IN_TRIG_ENTRY
-
-// Resolve PERI0_TR_IO_INPUT unit to trigger input line.
-static bool machine_counter_input_to_trigger(uint16_t input_idx, uint32_t *in_trig) {
-    for (size_t i = 0; i < MP_ARRAY_SIZE(machine_counter_in_trig_map); ++i) {
-        const machine_counter_in_trig_map_t *entry = &machine_counter_in_trig_map[i];
-        if (input_idx == entry->input_idx) {
-            *in_trig = entry->in_trig;
-            return true;
-        }
-    }
-
-    return false;
-}
 
 // Restore the routed source pin back to GPIO input mode.
 static void machine_counter_restore_src_pin(machine_counter_obj_t *self) {
@@ -203,28 +187,14 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     }
 
     // Resolve source pin object and validate it exposes Counter input AF.
-    const machine_pin_obj_t *src_pin = mp_hal_get_pin_obj(args[ARG_src].u_obj);
-    const machine_pin_af_obj_t *src_pin_af = NULL;
-    for (size_t i = 0; i < src_pin->af_num; ++i) {
-        const machine_pin_af_obj_t *af = &src_pin->af[i];
-        if (af->signal == MACHINE_PIN_AF_SIGNAL_PERI_TR_IO_INPUT) {
-            src_pin_af = af;
-            break;
-        }
-    }
-    if (src_pin_af == NULL) {
-        mp_raise_msg_varg(&mp_type_ValueError,
-            MP_ERROR_TEXT("Pin %q does not support Counter input routing"), src_pin->name);
-    }
+    mp_hal_pin_obj_t src_pin = mp_hal_get_pin_obj(args[ARG_src].u_obj);
 
-    // Resolve trigger-routing metadata from the selected Counter input AF unit.
-    uint32_t in_trig = 0;
-    if (!machine_counter_input_to_trigger(src_pin_af->unit, &in_trig)) {
-        mp_raise_msg_varg(&mp_type_ValueError,
-            MP_ERROR_TEXT("Pin %q is missing Counter input route data"), src_pin->name);
-    }
+    mp_hal_pin_af_config_t src_pin_af_config = MP_HAL_PIN_AF_CONF_INIT(src_pin, CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_PERI_TR_IO_INPUT);
 
-    en_hsiom_sel_t hsiom = src_pin_af->idx;
+    machine_pin_af_unit_t fn_unit = MACHINE_PIN_AF_UNIT_NONE;
+    mp_hal_periph_pins_af_resolve_fn_unit(&src_pin_af_config, 1, MACHINE_PIN_AF_FN_PERI_TR_IO, &fn_unit);
+
+    en_peri0_trig_input_debugreducation1_t in_trig = peri0_tr_io_input[fn_unit];
 
     // Tear down any previous run before programming new pin routing.
     machine_counter_stop_hw(self);
@@ -235,14 +205,10 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     Cy_SysClk_PeriPclkAssignDivider(self->pclk_dst,
         CY_SYSCLK_DIV_16_BIT, CYBSP_GENERAL_PURPOSE_TIMER_CLK_DIV_NUM);
 
+    mp_hal_periph_pins_af_init(&src_pin_af_config, 1);
+
     // Record the source pin now so rollback can restore it on any failure below.
     self->src_pin = src_pin;
-
-    // Put pin in input mode and switch HSIOM to trigger-output function.
-    mp_hal_pin_input(src_pin);
-    GPIO_PRT_Type *src_port = Cy_GPIO_PortToAddr(src_pin->port);
-    Cy_GPIO_SetHSIOM(src_port, src_pin->pin, hsiom);
-    Cy_GPIO_SetDrivemode(src_port, src_pin->pin, CY_GPIO_DM_HIGHZ);
 
     // Connect selected pin trigger line to this counter's dedicated trigger input.
     uint32_t out_trig = counter_out_trig[self->id];
