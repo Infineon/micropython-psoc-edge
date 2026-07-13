@@ -23,6 +23,11 @@ range_span_out_of_range: range span out of range
 filter_ns_not_supported: filter_ns not supported
 index_active: True
 reset_active: True
+match_init_get: True
+match_set_prev: True
+match_after_set: True
+match_disable_prev: True
+match_after_disable: True
 match_negative_init_get: True
 match_negative_set_prev: True
 match_negative_after_set: True
@@ -30,6 +35,8 @@ match_negative_disable_prev: True
 match_negative_after_disable: True
 match_init_out_of_range: match out of range
 match_set_out_of_range: match out of range
+match_negative_init_out_of_range: match out of range
+match_negative_set_out_of_range: match out of range
 irq_obj_reuse: True
 irq_trigger_get: True
 irq_trigger_set_prev: True

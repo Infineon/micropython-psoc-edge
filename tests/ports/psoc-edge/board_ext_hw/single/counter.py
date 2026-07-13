@@ -168,6 +168,14 @@ print("reset_active:", abs(c.value()) <= 1 and c.cycles() == 0)
 c.deinit()
 
 # match tests: init option, runtime updates, disable path, and validation.
+c = Counter(7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=9, min=2, match=6)
+print("match_init_get:", c.match() == 6)
+print("match_set_prev:", c.match(4) == 6)
+print("match_after_set:", c.match() == 4)
+print("match_disable_prev:", c.match(None) == 4)
+print("match_after_disable:", c.match() is None)
+c.deinit()
+
 c = Counter(
     7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=100, min=-50, match=-25
 )
@@ -181,12 +189,30 @@ c.deinit()
 expect_value_error(
     "match_init_out_of_range:",
     lambda: Counter(
-        7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=100, min=-50, match=200
+        7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=9, min=2, match=12
     ),
 )
 
 
 def expect_match_set_out_of_range():
+    c = Counter(7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=9, min=2)
+    try:
+        c.match(12)
+    finally:
+        c.deinit()
+
+
+expect_value_error("match_set_out_of_range:", expect_match_set_out_of_range)
+
+expect_value_error(
+    "match_negative_init_out_of_range:",
+    lambda: Counter(
+        7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=100, min=-50, match=200
+    ),
+)
+
+
+def expect_match_negative_set_out_of_range():
     c = Counter(7, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=100, min=-50)
     try:
         c.match(200)
@@ -194,7 +220,7 @@ def expect_match_set_out_of_range():
         c.deinit()
 
 
-expect_value_error("match_set_out_of_range:", expect_match_set_out_of_range)
+expect_value_error("match_negative_set_out_of_range:", expect_match_negative_set_out_of_range)
 
 # irq() tests: constants, trigger API, callback path, and validation.
 c = Counter(8, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=5, min=0, match=3)
