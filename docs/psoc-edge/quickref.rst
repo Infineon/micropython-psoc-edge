@@ -145,7 +145,11 @@ The following parameters have port-specific behavior:
 
         - ``trigger``: The ``Pin.IRQ_LOW_LEVEL`` and ``Pin.IRQ_HIGH_LEVEL`` triggers are not supported.
         - ``wake``: The wake parameter is currently not supported.
-        - ``hard``: This parameter is ignored. It can be passed but currently has no effect.
+
+.. note::
+
+    When using ``hard=True``, the callback runs directly in ISR context — keep it
+    short and allocation-free (no ``print``, no heap allocation).
 
 .. note::
 
@@ -316,7 +320,8 @@ The I2CTarget implementation on PSoC Edge has the following port-specific detail
 **IRQ triggers:**
 
 The ``hard`` argument in ``i2c_target.irq(..., hard=True)`` is supported.
-When using hard IRQ callbacks, keep handlers short and allocation-free.
+When ``True``, the callback executes in ISR context — keep it short and allocation-free
+(no ``print``, no heap allocation).
 
 Current implementation notes for IRQ data-phase events:
 
@@ -864,7 +869,8 @@ Hardware timer using the TCPWM0 peripheral on the PSOC™ Edge. See :ref:`machin
     - For **16-bit timers** (IDs ``8`` to ``31``), the maximum period is **65 ms**.
     - With ``freq``, the minimum frequency is **1 Hz** and the maximum is **1 000 000 Hz** (1 MHz).
     - Computed period ticks must fit the selected counter width: **1-4 294 967 295** for 32-bit timers, **1-65 535** for 16-bit timers.
-    - The ``hard`` parameter for ``Timer`` is still under development for this port and is not yet completely implemented.
+    - The ``hard`` parameter is supported. When ``True``, the callback executes in ISR context
+      — keep it short and allocation-free (no ``print``, no heap allocation).
 
 Complete example
 ^^^^^^^^^^^^^^^^
@@ -872,7 +878,6 @@ Complete example
 ::
 
     from machine import Timer
-    import micropython
     import time
 
     # --- Periodic soft timer (default) ---
@@ -903,8 +908,7 @@ Complete example
     time.sleep(3)
     tim.deinit()
 
-    # --- Hard IRQ timer (allocation-free callback required) ---
-    micropython.alloc_emergency_exception_buf(100)
+    # --- Hard IRQ timer (callback runs in ISR — must be allocation-free) ---
     fired = [False]
 
     def on_hard(timer):
