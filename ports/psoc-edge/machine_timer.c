@@ -34,6 +34,7 @@
 #include "shared/runtime/mpirq.h"
 #include "sys_int.h"
 
+#include "clk.h"
 #include "cy_tcpwm_counter.h"
 #include "cy_tcpwm.h"
 #include "cy_sysclk.h"
@@ -68,6 +69,7 @@ typedef struct _machine_timer_obj_t {
     uint8_t id;                  // 0..31
     uint32_t counter_num;        // TCPWM0 counter index mapped from timer_hw[]
     en_clk_dst_t pclk_dst;
+    pclk_div_obj_t *pclk_div;
     uint16_t mode;               // TIMER_MODE_ONE_SHOT or TIMER_MODE_PERIODIC
     mp_obj_t callback;
     bool ishard;
@@ -112,23 +114,34 @@ static IRQn_Type machine_timer_counter_irq(uint32_t counter_num) {
 
 static machine_timer_obj_t *timer_obj[MACHINE_TIMER_NUM_INSTANCES] = { NULL };
 
-static bool machine_timer_clock_configured = false;
 
-static void machine_timer_configure_clock(void) {
-    if (machine_timer_clock_configured) {
+static void machine_timer_configure_clock(machine_timer_obj_t *self) {
+    if (self->pclk_div != NULL) {
         return;
     }
 
-    // Keep timer periods stable even when other modules stop configuring this divider.
-    cy_rslt_t rslt = mtb_hal_clock_set_peri_clock_freq(&CYBSP_GENERAL_PURPOSE_TIMER_clock_ref,
-        TIMER_CLK_HZ, 1000);
-    if (rslt != CY_RSLT_SUCCESS) {
-        mp_raise_msg_varg(&mp_type_ValueError,
-            MP_ERROR_TEXT("Timer clock setup failed (0x%lx)"),
-            (unsigned long)rslt);
+    pclk_div_slave_init(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+
+    uint32_t clk_freq = pclk_div_get_input_freq(self->pclk_dst);
+
+    if (clk_freq == 0U) {
+        mp_raise_ValueError(MP_ERROR_TEXT("failed to get timer input clock"));
     }
 
-    machine_timer_clock_configured = true;
+    // HAL-like divider selection for f_out = f_in / ((divider + 1) + frac/32).
+    // Pick the smallest divisor that keeps output at or below TIMER_CLK_HZ.
+    uint64_t scaled_div = ((uint64_t)clk_freq * 32ULL + TIMER_CLK_HZ - 1ULL) / TIMER_CLK_HZ;
+    if (scaled_div < 32ULL) {
+        scaled_div = 32ULL;
+    }
+
+    uint32_t divider = (uint32_t)(scaled_div / 32ULL) - 1U;
+    uint8_t divider_frac = (uint8_t)(scaled_div % 32ULL);
+
+    self->pclk_div = pclk_div_init(self->pclk_dst, divider, divider_frac);
+    if (self->pclk_div == NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("Timer clock dividers exhausted"));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -174,7 +187,7 @@ static const cy_israddress machine_timer_irq_handlers[MACHINE_TIMER_NUM_INSTANCE
 // ---------------------------------------------------------------------------
 
 static void machine_timer_start(machine_timer_obj_t *self, uint32_t period_ticks) {
-    machine_timer_configure_clock();
+    machine_timer_configure_clock(self);
 
     // Stop counter and unregister any existing IRQ before reconfiguring.
     Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
@@ -182,10 +195,6 @@ static void machine_timer_start(machine_timer_obj_t *self, uint32_t period_ticks
         sys_int_deinit(&self->irq_cfg);
         self->active = false;
     }
-
-    // Connect the shared 1 MHz PCLK divider to this counter's clock input.
-    Cy_SysClk_PeriPclkAssignDivider(self->pclk_dst,
-        CY_SYSCLK_DIV_16_BIT, CYBSP_GENERAL_PURPOSE_TIMER_CLK_DIV_NUM);
 
     // The counter counts 0 → period_reg (inclusive) then fires TC.
     // So period_reg = period_ticks - 1.
@@ -345,6 +354,7 @@ static mp_obj_t machine_timer_make_new(const mp_obj_type_t *type,
     self->callback = mp_const_none;
     self->ishard = false;
     self->active = false;
+    self->pclk_div = NULL;
     self->irq_cfg.irq_num = machine_timer_counter_irq(self->counter_num);
 
     nlr_buf_t nl;
@@ -357,6 +367,8 @@ static mp_obj_t machine_timer_make_new(const mp_obj_type_t *type,
         }
         nlr_pop();
     } else {
+        pclk_div_deinit(self->pclk_div);
+        self->pclk_div = NULL;
         machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
         timer_obj[id] = NULL;
         nlr_jump(nl.ret_val);
@@ -389,6 +401,10 @@ static mp_obj_t machine_timer_deinit(mp_obj_t self_in) {
     self->callback = mp_const_none;
     self->ishard = false;
     self->active = false;
+    pclk_div_deinit(self->pclk_div);
+    /* TODO: Review obj initialization in general... */
+    // pclk_div_slave_deinit(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+    self->pclk_div = NULL;
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
     timer_obj[self->id] = NULL;
     return mp_const_none;
