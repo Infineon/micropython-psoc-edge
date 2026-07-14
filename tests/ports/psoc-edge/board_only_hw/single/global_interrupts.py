@@ -13,19 +13,17 @@ def _cb(_):
 irq_state = machine.disable_irq()
 tim = Timer(0, period=20, mode=Timer.ONE_SHOT, callback=_cb)
 
-# Wait past the one-shot period; bounded loop avoids hangs if ticks stop.
-start = time.ticks_ms()
+# Busy-wait with IRQs disabled (time.ticks_* is paused on this port).
 for _ in range(500000):
-    if time.ticks_diff(time.ticks_ms(), start) >= 30:
-        break
+    pass
 
-# Callback should still be blocked while IRQs are disabled.
+# Callback should still be blocked.
 print("while_disabled:", fired)
 
 machine.enable_irq(irq_state)
 time.sleep_ms(200)
 
-# Pending callback should run after restoring IRQs.
+# Callback should run after IRQ restore.
 print("after_enable:", fired)
 
 tim.deinit()
