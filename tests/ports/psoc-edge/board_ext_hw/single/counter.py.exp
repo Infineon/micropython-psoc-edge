@@ -8,6 +8,7 @@ cycles_set_prev: True
 cycles_after_set: True
 range_max_value: True
 range_max_cycles: True
+range_min_nonzero_initial_value: True
 range_min_nonzero_value: True
 range_min_nonzero_cycles: True
 negative_range_value: True
@@ -42,8 +43,9 @@ irq_trigger_get: True
 irq_trigger_set_prev: True
 irq_rollover_cb: True
 irq_flags_rollover: True
-irq_match_cb: True
+irq_match_one_shot_cb: True
 irq_match_flags: True
+irq_match_rearm_cb: True
 irq_index_cb: True
 irq_bad_handler: handler must be None or callable
 irq_not_initialised: not initialised
