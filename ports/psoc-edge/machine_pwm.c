@@ -392,7 +392,14 @@ static void mp_machine_pwm_deinit(machine_pwm_obj_t *self) {
     pwm_pin_restore(self->pin);
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
     pclk_div_deinit(self->pclk_div);
-    pclk_div_slave_deinit(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+    /**
+     * TODO: The TCPWM0 MMIO slave is shared across Timer and PWM instances.
+     * Tearing it down here can break an active Timer that is using a different
+     * counter, which causes the TCPWM ownership test to hang after a fallback PWM.
+     * Review with a shared usage of the TCPWM0 MMIO slave and implement a reference counting mechanism to avoid
+     * tearing down the TCPWM0 MMIO slave when other instances are still using it.
+     */
+    // pclk_div_slave_deinit(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
     pwm_obj_free(self);
 }
 
