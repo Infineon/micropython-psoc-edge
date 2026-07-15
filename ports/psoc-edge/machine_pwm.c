@@ -28,12 +28,10 @@
 #include "py/mphal.h"
 #include "modmachine.h"
 #include "cy_gpio.h"
-#include "cy_sysclk.h"
 #include "cy_tcpwm_pwm.h"
-#include "cycfg_peripherals.h"
-#include "cycfg_peripheral_clocks.h"
 #include "mphalport.h"
 #include "machine_pin.h"
+#include "clk.h"
 #include "tcpwm.h"
 #include "genhdr/pins_af.h"
 
@@ -51,6 +49,7 @@ typedef struct _machine_pwm_obj_t {
     const machine_pin_af_obj_t *pin_af;      /**< TCPWM alternate function selected for the output pin */
     uint32_t counter_num;                   /**< TCPWM0 counter index assigned to this PWM instance */
     en_clk_dst_t pclk_dst;                  /**< PCLK clock destination for this counter's clock assignment */
+    pclk_div_obj_t *pclk_div;
     uint32_t frequency;                     /**< PWM output frequency in Hz */
     duty_type_t duty_type;                  /**< Indicates whether duty is set as DUTY_U16 or DUTY_NS */
     mp_int_t duty;                          /**< Duty cycle value: 0-65535 if DUTY_U16, nanoseconds if DUTY_NS */
@@ -59,13 +58,7 @@ typedef struct _machine_pwm_obj_t {
 
 // Sentinel value meaning "no trigger"; masked with 0x3U when assigned to 2-bit inputMode fields.
 #define CYBSP_PWM_LED_CTRL_INPUT_DISABLED 0x7U
-
-// TCPWM base clock: PCLK 100 MHz divided to 1 MHz for usable duty resolution at practical
-// frequencies. Divider register value 99 = divisor 100: 100 MHz / 100 = 1 MHz.
-// At 1 MHz a 32-bit counter gives period0 = 1,000,000 at 1 Hz and 1,000 at 1 kHz.
-// Maximum PWM output frequency = PWM_TCPWM_CLK_HZ / 2 = 500 kHz (period0 = 2).
 #define PWM_TCPWM_CLK_HZ        1000000UL
-#define PWM_TCPWM_CLK_DIV_VAL   99U
 #define PWM_GROUP1_PERIOD_MAX   (0xFFFFU)
 
 #define pwm_assert_raise_val(msg, ret)   if (ret != CY_RSLT_SUCCESS) { \
@@ -83,7 +76,6 @@ typedef struct _machine_pwm_obj_t {
  #define pwm_duty_cycle_u16_to_compare(duty_u16, period) ((int)(((float)(duty_u16 + 1) / (float)65536) * (float)period))
 
 static machine_pwm_obj_t *pwm_obj[MICROPY_PY_MACHINE_PWM_MAX_OBJS] = { NULL };
-static bool pwm_clk_configured = false; // true after the shared divider is programmed to PWM_TCPWM_CLK_HZ
 
 static const machine_pin_af_obj_t *pwm_pin_af_find_and_alloc(machine_pwm_obj_t *self) {
     bool has_pwm_af = false;
@@ -196,6 +188,35 @@ static void pwm_config(machine_pwm_obj_t *self) {
     self->pwm_obj.invertPWMOut = self->invert;
 }
 
+
+static void clk_config(machine_pwm_obj_t *self) {
+    // TCPWM base clock: PCLK 100 MHz divided to 1 MHz for usable duty resolution at practical
+    // frequencies. Divider register value 99 = divisor 100: 100 MHz / 100 = 1 MHz.
+    // At 1 MHz a 32-bit counter gives period0 = 1,000,000 at 1 Hz and 1,000 at 1 kHz.
+    // Maximum PWM output frequency = PWM_TCPWM_CLK_HZ / 2 = 500 kHz (period0 = 2).
+
+    /**
+     * TODO: The divider does not need to be fixed, it can be adjusted based on the
+     * required frequency. This will allow for a wider range of frequencies to be
+     * used.
+     */
+
+    pclk_div_slave_init(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+
+    uint32_t clock_freq = pclk_div_get_input_freq(self->pclk_dst);
+    if (clock_freq == 0) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to get clock frequency for PWM(%u)"), self->counter_num);
+    }
+
+    uint32_t divider = (uint32_t)(clock_freq / PWM_TCPWM_CLK_HZ) - 1;
+
+    self->pclk_div = pclk_div_init(self->pclk_dst, divider, 0);
+    if (self->pclk_div == NULL) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to init pclk divider for PWM(%u)"), self->counter_num);
+    }
+
+}
+
 // Parse freq/duty_u16/duty_ns/invert args, configure the hardware, and start the PWM counter.
 static void mp_machine_pwm_init_helper(machine_pwm_obj_t *self, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     enum { ARG_freq, ARG_duty_u16, ARG_duty_ns, ARG_invert};
@@ -245,19 +266,7 @@ static void mp_machine_pwm_init_helper(machine_pwm_obj_t *self, size_t n_args, c
     /* Route the TCPWM output to the configured GPIO pin */
     pwm_pin_config(self);
 
-    /* Program the shared 16-bit divider to PWM_TCPWM_CLK_HZ on the first PWM init, then
-     * connect it to this counter's PCLK input. All channels share divider CYBSP_PWM_LED_CTRL_CLK_DIV_NUM
-     * so the reprogramming only needs to happen once. */
-    if (!pwm_clk_configured) {
-        Cy_SysClk_PeriPclkDisableDivider((en_clk_dst_t)CYBSP_PWM_LED_CTRL_CLK_DIV_GRP_NUM,
-            CY_SYSCLK_DIV_16_BIT, CYBSP_PWM_LED_CTRL_CLK_DIV_NUM);
-        Cy_SysClk_PeriPclkSetDivider((en_clk_dst_t)CYBSP_PWM_LED_CTRL_CLK_DIV_GRP_NUM,
-            CY_SYSCLK_DIV_16_BIT, CYBSP_PWM_LED_CTRL_CLK_DIV_NUM, PWM_TCPWM_CLK_DIV_VAL);
-        Cy_SysClk_PeriPclkEnableDivider((en_clk_dst_t)CYBSP_PWM_LED_CTRL_CLK_DIV_GRP_NUM,
-            CY_SYSCLK_DIV_16_BIT, CYBSP_PWM_LED_CTRL_CLK_DIV_NUM);
-        pwm_clk_configured = true;
-    }
-    Cy_SysClk_PeriPclkAssignDivider(self->pclk_dst, CY_SYSCLK_DIV_16_BIT, CYBSP_PWM_LED_CTRL_CLK_DIV_NUM);
+    clk_config(self);
 
     cy_en_tcpwm_status_t result = Cy_TCPWM_PWM_Init(TCPWM0,
         self->counter_num, &self->pwm_obj);
@@ -382,6 +391,8 @@ static void mp_machine_pwm_deinit(machine_pwm_obj_t *self) {
     Cy_TCPWM_PWM_Disable(TCPWM0, self->counter_num);
     pwm_pin_restore(self->pin);
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
+    pclk_div_deinit(self->pclk_div);
+    pclk_div_slave_deinit(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
     pwm_obj_free(self);
 }
 
