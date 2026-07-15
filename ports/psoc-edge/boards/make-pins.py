@@ -232,7 +232,6 @@ class PSE84PinGenerator(boardgen.PinGenerator):
 
         # ADC tracking: dict of (block, channel) -> (port, pin)
         self._adc_pin_map = {}
-        self._adc_block_caps = {}  # dict of block -> max channel count
 
     @staticmethod
     def parse_adc_label(label):
@@ -262,13 +261,6 @@ class PSE84PinGenerator(boardgen.PinGenerator):
                 )
 
             self._adc_pin_map[key] = pin_loc
-
-            # Track block capacity
-            ch_count = channel_id + 1
-            if block_id not in self._adc_block_caps:
-                self._adc_block_caps[block_id] = ch_count
-            else:
-                self._adc_block_caps[block_id] = max(self._adc_block_caps[block_id], ch_count)
 
     # Collect all unhidden ports from the available
     # pins.
@@ -489,14 +481,6 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         """Generate ADC pin-to-channel mapping macros."""
         if not self._adc_pin_map:
             return
-
-        print(file=out_header)
-        print("// ADC block capabilities (from pse8x_af.csv ADC column).", file=out_header)
-        print("#define MICROPY_HW_ADC_BLOCK_CAPS(X) \\", file=out_header)
-        for i, (block_id, ch_count) in enumerate(sorted(self._adc_block_caps.items())):
-            suffix = " \\" if i < len(self._adc_block_caps) - 1 else ""
-            print(f"    X({block_id}, {ch_count}){suffix}", file=out_header)
-        print(file=out_header)
 
         print("// ADC pin-to-channel mapping: (block_id, channel_id, port, pin).", file=out_header)
         print("#define MICROPY_HW_ADC_PIN_MAP(X) \\", file=out_header)
