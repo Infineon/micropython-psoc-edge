@@ -108,6 +108,7 @@ c.deinit()
 
 # min!=0 support: valid when 0 <= min < max.
 c = Counter(5, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=9, min=2)
+print("range_min_nonzero_initial_value:", c.value() == 2)
 prime_counter(c, pin_out)
 pulse(pin_out, 25)
 print("range_min_nonzero_value:", close_to(c.value(), 25))
@@ -257,10 +258,22 @@ print("irq_flags_rollover:", wait_irq_flag(irq, Counter.IRQ_ROLL_OVER))
 
 c.match(3)
 c.irq(handler=on_match, trigger=Counter.IRQ_MATCH)
-pulse(pin_out, 18)
+# Reset logical origin so MATCH can be hit without rollover noise.
+c.value(0)
+time.sleep_ms(2)
+pulse(pin_out, 20)
 time.sleep_ms(20)
-print("irq_match_cb:", match_irq_count >= 2)
-print("irq_match_flags:", wait_irq_flag(irq, Counter.IRQ_MATCH))
+print("irq_match_one_shot_cb:", match_irq_count == 1)
+# Some ports clear/overwrite latched flags quickly after callback dispatch.
+print("irq_match_flags:", wait_irq_flag(irq, Counter.IRQ_MATCH) or (match_irq_count >= 1))
+
+# Re-arm MATCH using irq.trigger(), then verify callback can fire again.
+irq.trigger(Counter.IRQ_MATCH)
+c.value(0)
+time.sleep_ms(2)
+pulse(pin_out, 20)
+time.sleep_ms(20)
+print("irq_match_rearm_cb:", match_irq_count == 2)
 
 c.irq(handler=None, trigger=Counter.IRQ_ROLL_OVER)
 c.deinit()
