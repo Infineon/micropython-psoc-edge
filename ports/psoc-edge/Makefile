@@ -497,7 +497,6 @@ OBJ += $(addprefix $(BUILD)/, $(PSE_SRC_ASM:.S=.o))
 INC += -I.
 INC += -I$(TOP)
 INC += -I$(BUILD)
-INC += -I$(HEADER_BUILD)
 
 ifeq ($(MICROPY_PSOC_EDGE_LWIP),1)
 INC += -Ilwip_inc
