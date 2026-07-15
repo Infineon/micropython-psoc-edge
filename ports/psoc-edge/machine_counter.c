@@ -253,7 +253,10 @@ static inline int64_t machine_counter_range_span_value(const machine_counter_obj
 }
 
 static inline uint32_t machine_counter_interrupt_mask(const machine_counter_obj_t *self) {
-    return CY_TCPWM_INT_ON_TC | (self->match_enabled ? CY_TCPWM_INT_ON_CC0 : 0U);
+    return CY_TCPWM_INT_ON_TC
+           | ((self->match_enabled && ((self->mp_irq_trigger & MACHINE_COUNTER_IRQ_MATCH) != 0))
+            ? CY_TCPWM_INT_ON_CC0
+            : 0U);
 }
 
 static inline void machine_counter_apply_interrupt_mask(const machine_counter_obj_t *self) {
@@ -279,7 +282,12 @@ static inline void machine_counter_cycles_step(machine_counter_obj_t *self) {
 
 static mp_uint_t machine_counter_irq_trigger(mp_obj_t self_in, mp_uint_t new_trigger) {
     machine_counter_obj_t *self = MP_OBJ_TO_PTR(self_in);
+
+    mp_uint_t irq_state = MICROPY_BEGIN_ATOMIC_SECTION();
     self->mp_irq_trigger = new_trigger;
+    machine_counter_apply_interrupt_mask(self);
+    MICROPY_END_ATOMIC_SECTION(irq_state);
+
     return 0;
 }
 
@@ -307,6 +315,11 @@ static inline void machine_counter_irq_raise(machine_counter_obj_t *self, mp_uin
     self->mp_irq_flags = flags;
     bool call_handler = (self->mp_irq_obj->handler != mp_const_none)
         && ((self->mp_irq_trigger & flags) != 0);
+    // MATCH is one-shot: clear its trigger bit after raising so user must re-arm.
+    self->mp_irq_trigger &= ~(flags & MACHINE_COUNTER_IRQ_MATCH);
+    if ((flags & MACHINE_COUNTER_IRQ_MATCH) != 0) {
+        machine_counter_apply_interrupt_mask(self);
+    }
     MICROPY_END_ATOMIC_SECTION(irq_state);
 
     if (call_handler) {
@@ -494,13 +507,13 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
         ARG_src,
         ARG_edge,
         ARG_direction,
-        ARG_filter_ns,
+        ARG_filter_ns,  // currently not supported
         ARG_max,
         ARG_min,
         ARG_index,
         ARG_reset,
         ARG_match,
-        ARG_match_pin,
+        ARG_match_pin,  // currently not supported
     };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_src, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
@@ -715,7 +728,7 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     self->match_enabled = match_enabled;
     self->match_value = match_value;
     self->cycles_u16 = 0;
-    self->offset = 0;
+    self->offset = min;
     machine_counter_apply_interrupt_mask(self);
     self->configured = true;
 }
@@ -843,7 +856,9 @@ static mp_obj_t machine_counter_deinit(mp_obj_t self_in) {
     }
 
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
-    counter_obj[self->id] = NULL;
+    if (counter_obj[self->id] == self) {
+        counter_obj[self->id] = NULL;
+    }
 
     return mp_const_none;
 }
@@ -876,14 +891,20 @@ static mp_obj_t machine_counter_value(size_t n_args, const mp_obj_t *args) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("not initialised"));
     }
 
+    // Get the span of the counter range.
+    uint64_t span = (uint64_t)machine_counter_range_span_value(self);
+
+    // If a value is provided, freeze counting during read/reset
     if (n_args == 2) {
         // Freeze counting during read/reset so no new edges arrive in this window.
         Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
     }
 
+    mp_uint_t irq_state = MICROPY_BEGIN_ATOMIC_SECTION();
     uint32_t raw = Cy_TCPWM_Counter_GetCounter(TCPWM0, self->counter_num);
-    uint64_t span = (uint64_t)machine_counter_range_span_value(self);
     int16_t cycles = machine_counter_cycles_get(self);
+    MICROPY_END_ATOMIC_SECTION(irq_state);
+
     long long edge_total;
     if (self->direction == COUNTER_DIR_DOWN) {
         edge_total = (long long)(-cycles) * (long long)span + (long long)raw;
@@ -917,15 +938,23 @@ static mp_obj_t machine_counter_cycles(size_t n_args, const mp_obj_t *args) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("not initialised"));
     }
 
-    int16_t prev = machine_counter_cycles_get(self);
-
+    // set cycles value if provided and also returning previous value.
     if (n_args == 2) {
         mp_int_t value = mp_obj_get_int(args[1]);
         if (value < -32768 || value > 32767) {
             mp_raise_ValueError(MP_ERROR_TEXT("cycles out of range"));
         }
+        mp_uint_t irq_state = MICROPY_BEGIN_ATOMIC_SECTION();
+        int16_t prev = machine_counter_cycles_get(self);
         self->cycles_u16 = (uint16_t)(int16_t)value;
+        MICROPY_END_ATOMIC_SECTION(irq_state);
+        return mp_obj_new_int(prev);
     }
+
+    // Return current cycles value when no argument is provided.
+    mp_uint_t irq_state = MICROPY_BEGIN_ATOMIC_SECTION();
+    int16_t prev = machine_counter_cycles_get(self);
+    MICROPY_END_ATOMIC_SECTION(irq_state);
 
     return mp_obj_new_int(prev);
 }
@@ -1023,6 +1052,10 @@ static mp_obj_t machine_counter_irq(size_t n_args, const mp_obj_t *pos_args, mp_
 
         self->mp_irq_flags = 0;
         self->mp_irq_trigger = trigger;
+
+        mp_uint_t irq_state = MICROPY_BEGIN_ATOMIC_SECTION();
+        machine_counter_apply_interrupt_mask(self);
+        MICROPY_END_ATOMIC_SECTION(irq_state);
     }
 
     return MP_OBJ_FROM_PTR(self->mp_irq_obj);
