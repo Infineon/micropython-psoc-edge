@@ -599,9 +599,6 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     if (args[ARG_match].u_obj != mp_const_none) {
         mp_int_t match = mp_obj_get_int(args[ARG_match].u_obj);
         int64_t match_value_num = (int64_t)match;
-        if (match_value_num < min_value || match_value_num > max_value) {
-            mp_raise_ValueError(MP_ERROR_TEXT("match out of range"));
-        }
         match_enabled = true;
         match_value = (uint32_t)(match_value_num - min_value);
     }
@@ -960,53 +957,6 @@ static mp_obj_t machine_counter_cycles(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_counter_cycles_obj, 1, 2, machine_counter_cycles);
 
 // ---------------------------------------------------------------------------
-// counter.match([value])
-// ---------------------------------------------------------------------------
-// Get or set compare-match value; pass None to disable match.
-static mp_obj_t machine_counter_match(size_t n_args, const mp_obj_t *args) {
-    machine_counter_obj_t *self = MP_OBJ_TO_PTR(args[0]);
-
-    if (!self->configured) {
-        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("not initialised"));
-    }
-
-    mp_obj_t prev = self->match_enabled
-        ? mp_obj_new_int_from_ll(machine_counter_range_min_value(self) + (int64_t)self->match_value)
-        : mp_const_none;
-
-    if (n_args == 2) {
-        if (args[1] == mp_const_none) {
-            mp_uint_t irq_state = MICROPY_BEGIN_ATOMIC_SECTION();
-            self->match_enabled = false;
-            self->match_value = 0;
-            machine_counter_apply_interrupt_mask(self);
-            clear_counter_irqs(self, CY_TCPWM_INT_ON_CC0);
-            MICROPY_END_ATOMIC_SECTION(irq_state);
-        } else {
-            mp_int_t match = mp_obj_get_int(args[1]);
-            int64_t match_value_num = (int64_t)match;
-            int64_t range_min_value = machine_counter_range_min_value(self);
-            int64_t range_max_value = machine_counter_range_max_value(self);
-            if (match_value_num < range_min_value || match_value_num > range_max_value) {
-                mp_raise_ValueError(MP_ERROR_TEXT("match out of range"));
-            }
-
-            uint32_t match_value = (uint32_t)(match_value_num - range_min_value);
-            mp_uint_t irq_state = MICROPY_BEGIN_ATOMIC_SECTION();
-            self->match_enabled = true;
-            self->match_value = match_value;
-            Cy_TCPWM_Counter_SetCompare0(TCPWM0, self->counter_num, match_value);
-            machine_counter_apply_interrupt_mask(self);
-            clear_counter_irqs(self, CY_TCPWM_INT_ON_CC0);
-            MICROPY_END_ATOMIC_SECTION(irq_state);
-        }
-    }
-
-    return prev;
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(machine_counter_match_obj, 1, 2, machine_counter_match);
-
-// ---------------------------------------------------------------------------
 // counter.irq(handler=None, trigger=0, hard=False)
 // ---------------------------------------------------------------------------
 // Return or configure a Counter IRQ object for this counter.
@@ -1078,7 +1028,6 @@ static const mp_rom_map_elem_t machine_counter_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&machine_counter_deinit_obj) },
     { MP_ROM_QSTR(MP_QSTR_value), MP_ROM_PTR(&machine_counter_value_obj) },
     { MP_ROM_QSTR(MP_QSTR_cycles), MP_ROM_PTR(&machine_counter_cycles_obj) },
-    { MP_ROM_QSTR(MP_QSTR_match), MP_ROM_PTR(&machine_counter_match_obj) },
     { MP_ROM_QSTR(MP_QSTR_irq), MP_ROM_PTR(&machine_counter_irq_obj) },
 
     { MP_ROM_QSTR(MP_QSTR_IRQ_RESET), MP_ROM_INT(MACHINE_COUNTER_IRQ_RESET) },
