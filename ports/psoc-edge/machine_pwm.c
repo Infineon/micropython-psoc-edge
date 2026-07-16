@@ -189,7 +189,7 @@ static void pwm_config(machine_pwm_obj_t *self) {
 }
 
 
-static void clk_config(machine_pwm_obj_t *self) {
+static void machine_pwm_configure_clock(machine_pwm_obj_t *self) {
     // TCPWM base clock: PCLK 100 MHz divided to 1 MHz for usable duty resolution at practical
     // frequencies. Divider register value 99 = divisor 100: 100 MHz / 100 = 1 MHz.
     // At 1 MHz a 32-bit counter gives period0 = 1,000,000 at 1 Hz and 1,000 at 1 kHz.
@@ -266,7 +266,7 @@ static void mp_machine_pwm_init_helper(machine_pwm_obj_t *self, size_t n_args, c
     /* Route the TCPWM output to the configured GPIO pin */
     pwm_pin_config(self);
 
-    clk_config(self);
+    machine_pwm_configure_clock(self);
 
     cy_en_tcpwm_status_t result = Cy_TCPWM_PWM_Init(TCPWM0,
         self->counter_num, &self->pwm_obj);
@@ -311,6 +311,8 @@ static mp_obj_t mp_machine_pwm_make_new(const mp_obj_type_t *type, size_t n_args
 
     self->pin = pin;
     self->counter_num = UINT32_MAX;
+    self->pclk_div = NULL;
+
     nlr_buf_t nl_af;
     if (nlr_push(&nl_af) == 0) {
         self->pin_af = pwm_pin_af_find_and_alloc(self);
@@ -377,6 +379,7 @@ static mp_obj_t mp_machine_pwm_make_new(const mp_obj_type_t *type, size_t n_args
         mp_machine_pwm_init_helper(self, n_args - 1, args + 1, &kw_args);
         nlr_pop();
     } else {
+        pclk_div_deinit(self->pclk_div);
         machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
         pwm_pin_restore(self->pin);
         pwm_obj_free(self);
