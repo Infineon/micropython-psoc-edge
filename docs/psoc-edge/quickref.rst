@@ -953,7 +953,6 @@ This section lists only PSOC-Edge specifics and deviations.
     - ``max`` and ``match`` must fit the selected counter width/range.
     - ``filter_ns`` is currently not supported.
     - ``match_pin`` is currently not supported.
-    - Under RTOS-aware builds, ``Counter.irq(..., hard=True)`` is forced to soft IRQ callbacks.
 
 Complete example
 ^^^^^^^^^^^^^^^^
