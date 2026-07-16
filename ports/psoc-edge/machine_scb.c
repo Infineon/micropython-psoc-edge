@@ -29,7 +29,7 @@
 #if MICROPY_PY_MACHINE_I2C || MICROPY_PY_MACHINE_I2C_TARGET || MICROPY_PY_MACHINE_SPI || MICROPY_PY_MACHINE_SPI_TARGET || MICROPY_PY_MACHINE_UART
 
 #include "py/runtime.h"
-#include "cy_sysclk.h"
+// #include "cy_sysclk.h"
 #include "genhdr/pins_af.h"
 #include "machine_scb.h"
 
