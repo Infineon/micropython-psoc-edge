@@ -950,7 +950,7 @@ This section lists only PSOC-Edge specifics and deviations.
     - Constructing ``Counter(id)`` again while that instance is active raises ValueError instead of returning/reinitialising the existing instance. Call ``deinit()`` first.
     - ``src`` must be a pin with ``PERI_TR_IO_INPUT`` routing. On KIT_PSE84_AI these are: ``P11_1``, ``P11_3``, ``P7_7``, ``P8_0``.
     - ``min`` must be ``< max``. Both can be negative (e.g., ``min=-100, max=100``).
-    - ``max`` and ``match`` must fit the selected counter width/range.
+    - ``match`` is an init-only parameter. It cannot be changed at runtime.
     - ``filter_ns`` is currently not supported.
     - ``match_pin`` is currently not supported.
 
@@ -983,12 +983,10 @@ Complete example
         match=-25,
     )
 
-    # value()/cycles()/match() read-write API.
+    # value()/cycles() read-write API.
     print("value:", c.value())
     print("cycles:", c.cycles())
-    print("match:", c.match())
     c.cycles(2)
-    c.match(20)
 
     irq_events = 0
 
@@ -1011,9 +1009,6 @@ Complete example
     print("cycles after pulses:", c.cycles())
     print("irq flags:", irq.flags())
     print("irq calls:", irq_events)
-
-    # Disable match dynamically.
-    c.match(None)
 
     c.deinit()
 
