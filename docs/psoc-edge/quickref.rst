@@ -22,6 +22,17 @@ working with this port it may be useful to get an overview of the microcontrolle
    installation.rst
    mpy-usage.rst
 
+General board control
+---------------------
+
+See :ref:`machine <machine>` for more details.
+
+The :mod:`machine` module::
+
+    import machine
+
+    machine.freq()          # get the current frequency of the Core M33
+
 Pins and GPIO
 -------------
 

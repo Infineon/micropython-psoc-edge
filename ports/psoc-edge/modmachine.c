@@ -116,7 +116,7 @@ static mp_obj_t mp_machine_unique_id(void) {
 }
 
 static mp_obj_t mp_machine_get_freq(void) {
-    mp_raise_NotImplementedError(MP_ERROR_TEXT("machine.freq not implemented"));
+    return mp_obj_new_int(SystemCoreClock);
 }
 
 static void mp_machine_set_freq(size_t n_args, const mp_obj_t *args) {
