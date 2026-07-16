@@ -37,10 +37,6 @@
 #include "clk.h"
 #include "cy_tcpwm_counter.h"
 #include "cy_tcpwm.h"
-#include "cy_sysclk.h"
-#include "cycfg_peripheral_clocks.h"
-#include "cycfg_peripherals.h"
-#include "mtb_hal.h"
 #include "tcpwm.h"
 #include "genhdr/pins_af.h"
 
