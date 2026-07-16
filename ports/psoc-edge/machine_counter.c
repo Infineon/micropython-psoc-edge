@@ -51,7 +51,7 @@ extern mp_obj_t machine_pin_irq(size_t n_args, const mp_obj_t *pos_args, mp_map_
 static mp_obj_t machine_counter_deinit(mp_obj_t self_in);
 
 // Number of Counter object slots supported by this port.
-#define MACHINE_COUNTER_NUM_INSTANCES  (32)
+#define MACHINE_COUNTER_NUM_INSTANCES  MICROPY_PY_MACHINE_TCPWM0_NUM_COUNTERS
 // Shared TCPWM source clock frequency used by Counter.
 #define COUNTER_CLK_HZ                 (1000000UL)
 // Value used to disable optional TCPWM trigger inputs.
@@ -84,8 +84,8 @@ typedef struct _machine_counter_obj_t {
     uint32_t counter_num;
     en_clk_dst_t pclk_dst;
     mp_hal_pin_obj_t src_pin;
-    const machine_pin_obj_t *index_pin;
-    const machine_pin_obj_t *reset_pin;
+    mp_hal_pin_obj_t index_pin;
+    mp_hal_pin_obj_t reset_pin;
     uint32_t match_value;
     bool match_enabled;
     uint8_t edge;
@@ -181,9 +181,8 @@ static void machine_counter_restore_src_pin(machine_counter_obj_t *self) {
     if (self->src_pin == NULL) {
         return;
     }
-    GPIO_PRT_Type *port = Cy_GPIO_PortToAddr(self->src_pin->port);
-    Cy_GPIO_SetHSIOM(port, self->src_pin->pin, HSIOM_SEL_GPIO);
-    Cy_GPIO_SetDrivemode(port, self->src_pin->pin, CY_GPIO_DM_HIGHZ);
+    // Use mphalport abstraction to restore pin to input mode (GPIO, high-impedance)
+    mp_hal_pin_input(self->src_pin);
     self->src_pin = NULL;
 }
 
@@ -197,7 +196,7 @@ static void machine_counter_disable_aux_irqs(machine_counter_obj_t *self) {
     // Disable index pin IRQs (if configured) and release pin ownership.
     if (self->index_pin != NULL && self->index_irq_obj != MP_OBJ_NULL) {
         mp_obj_t pos_args[] = {
-            MP_OBJ_FROM_PTR((machine_pin_obj_t *)self->index_pin),
+            MP_OBJ_FROM_PTR(self->index_pin),
             mp_const_none,
         };
         mp_map_t kw_args;
@@ -209,7 +208,7 @@ static void machine_counter_disable_aux_irqs(machine_counter_obj_t *self) {
     if (self->reset_pin != NULL && self->reset_irq_obj != MP_OBJ_NULL
         && self->reset_pin != self->index_pin) {
         mp_obj_t pos_args[] = {
-            MP_OBJ_FROM_PTR((machine_pin_obj_t *)self->reset_pin),
+            MP_OBJ_FROM_PTR(self->reset_pin),
             mp_const_none,
         };
         mp_map_t kw_args;
@@ -483,11 +482,11 @@ static const mp_obj_t machine_counter_index_reset_handler_obj[MACHINE_COUNTER_NU
 // Init Internals
 // ---------------------------------------------------------------------------
 
-static mp_obj_t machine_counter_enable_aux_irq(const machine_pin_obj_t *pin, mp_obj_t handler_obj) {
+static mp_obj_t machine_counter_enable_aux_irq(mp_hal_pin_obj_t pin, mp_obj_t handler_obj) {
     mp_hal_pin_input(pin);
 
     mp_obj_t pos_args[] = {
-        MP_OBJ_FROM_PTR((machine_pin_obj_t *)pin),
+        MP_OBJ_FROM_PTR(pin),
         handler_obj,
     };
     mp_obj_t kw_table[] = {
@@ -553,11 +552,11 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     mp_int_t min = (mp_int_t)args[ARG_min].u_int;
     int64_t min_value = (int64_t)min;
 
-    const machine_pin_obj_t *index_pin = NULL;
+    mp_hal_pin_obj_t index_pin = NULL;
     if (args[ARG_index].u_obj != mp_const_none) {
         index_pin = mp_hal_get_pin_obj(args[ARG_index].u_obj);
     }
-    const machine_pin_obj_t *reset_pin = NULL;
+    mp_hal_pin_obj_t reset_pin = NULL;
     if (args[ARG_reset].u_obj != mp_const_none) {
         reset_pin = mp_hal_get_pin_obj(args[ARG_reset].u_obj);
     }
