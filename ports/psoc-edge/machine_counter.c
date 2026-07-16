@@ -1044,12 +1044,6 @@ static mp_obj_t machine_counter_irq(size_t n_args, const mp_obj_t *pos_args, mp_
         self->mp_irq_obj->handler = handler;
         self->mp_irq_obj->ishard = args[MP_IRQ_ARG_INIT_hard].u_bool;
 
-        #if defined(CY_RTOS_AWARE)
-        if (self->mp_irq_obj->ishard) {
-            self->mp_irq_obj->ishard = false;
-        }
-        #endif
-
         self->mp_irq_flags = 0;
         self->mp_irq_trigger = trigger;
 
