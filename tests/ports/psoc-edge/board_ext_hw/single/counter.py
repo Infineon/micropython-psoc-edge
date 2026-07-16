@@ -319,4 +319,58 @@ try:
     expect_value_error("duplicate_counter_id:", lambda: Counter(6, src=Pin(PIN_IN)))
 finally:
     c_dup.deinit()
-    pin_out(0)
+
+# Test hard parameter: verify hard IRQ callbacks work correctly.
+# Use pre-allocated list to track callback behavior
+hard_callback_flags = [0, 0]  # [hard_count, soft_count]
+hard_alloc_failed = [False]  # Track if hard callback fails on heap allocation
+soft_alloc_failed = [False]  # Track if soft callback fails on heap allocation
+
+
+def on_hard_rollover(_irq):
+    """Hard callback: runs in ISR context, must use pre-allocated data only."""
+    hard_callback_flags[0] += 1
+    # Attempt heap allocation in hard callback (ISR context)
+    # This should fail because we're in ISR context with no scheduler
+    try:
+        temp_list = [1, 2, 3]  # Heap allocation attempt
+    except Exception:
+        hard_alloc_failed[0] = True
+
+
+def on_soft_rollover(_irq):
+    """Soft callback: runs in scheduler context, can allocate memory."""
+    hard_callback_flags[1] += 1
+    # Attempt heap allocation in soft callback (scheduler context)
+    # This should succeed because we're in scheduler context
+    try:
+        temp_list = [1, 2, 3]  # Heap allocation attempt
+    except Exception:
+        soft_alloc_failed[0] = True
+
+
+# Test hard callback - proves it CANNOT allocate heap
+c_hard = Counter(6, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=5)
+prime_counter(c_hard, pin_out)
+c_hard.irq(handler=on_hard_rollover, trigger=Counter.IRQ_ROLL_OVER, hard=True)
+hard_callback_flags[0] = 0
+hard_alloc_failed[0] = False
+pulse(pin_out, 15)  # Will trigger 3 rollovers
+time.sleep_ms(20)
+print("hard_callback_fires:", hard_callback_flags[0] >= 2)
+print("hard_cannot_allocate:", hard_alloc_failed[0])  # Proves hard is ISR context
+c_hard.deinit()
+
+# Test soft callback - proves it CAN allocate heap
+c_soft = Counter(6, src=Pin(PIN_IN), edge=Counter.RISING, direction=Counter.UP, max=5)
+prime_counter(c_soft, pin_out)
+c_soft.irq(handler=on_soft_rollover, trigger=Counter.IRQ_ROLL_OVER, hard=False)
+hard_callback_flags[1] = 0
+soft_alloc_failed[0] = False
+pulse(pin_out, 15)
+time.sleep_ms(20)
+print("soft_callback_fires:", hard_callback_flags[1] >= 2)
+print("soft_can_allocate:", not soft_alloc_failed[0])  # Proves soft is scheduler context
+c_soft.deinit()
+
+pin_out(0)

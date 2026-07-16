@@ -51,3 +51,7 @@ irq_bad_handler: handler must be None or callable
 irq_not_initialised: not initialised
 match_pin_not_supported: match_pin not supported
 duplicate_counter_id: Counter(6) already created.
+hard_callback_fires: True
+hard_cannot_allocate: True
+soft_callback_fires: True
+soft_can_allocate: True
