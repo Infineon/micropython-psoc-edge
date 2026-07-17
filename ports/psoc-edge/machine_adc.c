@@ -24,9 +24,6 @@
  * THE SOFTWARE.
  */
 
-// This file is never compiled standalone, it is included directly from
-// extmod/machine_adc.c via MICROPY_PY_MACHINE_ADC_INCLUDEFILE.
-
 #include "py/mphal.h"
 #include "py/mperrno.h"
 #include "machine_pin.h"
@@ -52,6 +49,8 @@
 static bool adc_autanalog_initialized = false;
 // Bitmask of ADC channels enabled by user-created ADC objects.
 static uint8_t adc_enabled_channels_mask = 0;
+// Per-channel user reference count to support shared ADC objects per channel.
+static uint8_t adc_channel_refcount[PSOC_EDGE_ADC_NUM_CHANNELS] = {0};
 
 // ADC channel object: stores pin mapping
 typedef struct _machine_adc_obj_t {
@@ -189,6 +188,7 @@ static void machine_adc_init_configs(void) {
     machine_adc_init_stt_cfg();
 }
 
+// Reload SAR config after channel mask updates.
 static void machine_adc_reload_config(uint8_t sar_block) {
     uint32_t status = Cy_AutAnalog_SAR_LoadConfig(sar_block, &CYBSP_SAR_ADC_cfg);
     if (status != CY_AUTANALOG_SUCCESS) {
@@ -197,9 +197,14 @@ static void machine_adc_reload_config(uint8_t sar_block) {
     Cy_AutAnalog_StartAutonomousControl();
 }
 
+// Increase channel refcount and enable HW on first user.
 static bool machine_adc_enable_channel(uint8_t channel) {
     if (channel >= PSOC_EDGE_ADC_NUM_CHANNELS) {
         return false;
+    }
+
+    if (adc_channel_refcount[channel] < UINT8_MAX) {
+        adc_channel_refcount[channel]++;
     }
 
     uint8_t channel_mask = (uint8_t)(1u << channel);
@@ -212,6 +217,34 @@ static bool machine_adc_enable_channel(uint8_t channel) {
     machine_adc_init_gpio_channel(channel);
     CYBSP_SAR_ADC_sta_hs_cfg.hsGpioChan[channel] = &CYBSP_SAR_ADC_gpio_ch_cfg[channel];
     adc_enabled_channels_mask |= channel_mask;
+    CYBSP_SAR_ADC_sta_hs_cfg.hsGpioResultMask = adc_enabled_channels_mask;
+    CYBSP_SAR_ADC_seq_hs_cfg[0].chanEn = adc_enabled_channels_mask;
+    CYBSP_SAR_ADC_seq_hs_cfg[1].chanEn = adc_enabled_channels_mask;
+    return true;
+}
+
+// Decrease channel refcount and disable HW when the last user releases it.
+static bool machine_adc_disable_channel(uint8_t channel) {
+    if (channel >= PSOC_EDGE_ADC_NUM_CHANNELS) {
+        return false;
+    }
+
+    if (adc_channel_refcount[channel] == 0u) {
+        return false;
+    }
+
+    adc_channel_refcount[channel]--;
+    if (adc_channel_refcount[channel] != 0u) {
+        return false;
+    }
+
+    uint8_t channel_mask = (uint8_t)(1u << channel);
+    if ((adc_enabled_channels_mask & channel_mask) == 0u) {
+        return false;
+    }
+
+    adc_enabled_channels_mask &= (uint8_t) ~channel_mask;
+    CYBSP_SAR_ADC_sta_hs_cfg.hsGpioChan[channel] = NULL;
     CYBSP_SAR_ADC_sta_hs_cfg.hsGpioResultMask = adc_enabled_channels_mask;
     CYBSP_SAR_ADC_seq_hs_cfg[0].chanEn = adc_enabled_channels_mask;
     CYBSP_SAR_ADC_seq_hs_cfg[1].chanEn = adc_enabled_channels_mask;
@@ -318,13 +351,16 @@ static mp_int_t mp_machine_adc_read_uv(machine_adc_obj_t *self) {
     return (mp_int_t)(((uint64_t)raw_12b * ((uint64_t)PSOC_EDGE_ADC_VDDA_MV * 1000u)) / 4095u);
 }
 
-// ADC.deinit() - no-op on PSE84
+// ADC.deinit() - release this ADC user's channel reference.
 static void mp_machine_adc_deinit(machine_adc_obj_t *self) {
-    (void)self;
+    if (machine_adc_disable_channel(self->gpio_channel)) {
+        machine_adc_reload_config(self->sar_block);
+    }
 }
 
-// ADC.block() -> ADCBlock or None
+// ADC.block() -> ADCBlock(0)
 static mp_obj_t mp_machine_adc_block(machine_adc_obj_t *self) {
     (void)self;
-    return mp_const_none;
+    mp_obj_t block_id = MP_OBJ_NEW_SMALL_INT(0);
+    return MP_OBJ_TYPE_GET_SLOT(&machine_adc_block_type, make_new)(&machine_adc_block_type, 1, 0, &block_id);
 }
