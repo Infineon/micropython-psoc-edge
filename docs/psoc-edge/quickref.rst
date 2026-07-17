@@ -25,7 +25,7 @@ working with this port it may be useful to get an overview of the microcontrolle
 General board control
 ---------------------
 
-See :ref:`machine <machine>` for more details.
+See the :mod:`machine` module for more details.
 
 The :mod:`machine` module::
 
