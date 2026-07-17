@@ -200,6 +200,10 @@ static void machine_pwm_configure_clock(machine_pwm_obj_t *self) {
      * required frequency. This will allow for a wider range of frequencies to be
      * used.
      */
+    if (self->pclk_div != NULL) {
+        pclk_div_deinit(self->pclk_div);
+        self->pclk_div = NULL;
+    }
 
     pclk_div_slave_init(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
 
