@@ -807,11 +807,9 @@ static mp_obj_t machine_counter_make_new(const mp_obj_type_t *type,
         nlr_jump(nl.ret_val);
     }
 
-    if (n_args > 1 || n_kw > 0) {
-        mp_map_t kw_map;
-        mp_map_init_fixed_table(&kw_map, n_kw, args + n_args);
-        machine_counter_init_helper(self, n_args - 1, args + 1, &kw_map);
-    }
+    mp_map_t kw_map;
+    mp_map_init_fixed_table(&kw_map, n_kw, args + n_args);
+    machine_counter_init_helper(self, n_args - 1, args + 1, &kw_map);
 
     return MP_OBJ_FROM_PTR(self);
 }
