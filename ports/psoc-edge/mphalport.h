@@ -88,7 +88,7 @@ void mp_hal_set_interrupt_char(int c); // -1 to disable
 #define mp_hal_pin_obj_t        const machine_pin_obj_t *
 #define mp_hal_get_pin_obj(o)   machine_pin_get_pin_obj(o)
 #define mp_hal_pin_name(p)      ((p)->name)
-#define mp_hal_pin_input(p)     mp_hal_pin_config((p), GPIO_MODE_IN, GPIO_PULL_NONE, 0)
+#define mp_hal_pin_input(p)     mp_hal_pin_config((p), GPIO_MODE_IN, GPIO_PULL_NONE, MACHINE_PIN_OUT_VAL_UNDEF)
 #define mp_hal_pin_output(p)    mp_hal_pin_config((p), GPIO_MODE_OUT, GPIO_PULL_NONE, 0)
 #define mp_hal_pin_open_drain(p) mp_hal_pin_config((p), GPIO_MODE_OPEN_DRAIN, GPIO_PULL_NONE, 0)
 #define mp_hal_pin_high(p)      mp_hal_pin_write((p), 1)
