@@ -30,10 +30,10 @@
 #include "machine_pin.h"
 #include "genhdr/pins_af.h"
 
-// PSoC Edge SAR ADC: 1 block, fixed 12-bit resolution
-#define PSOC_EDGE_ADC_BLOCK_ID      (0)
-#define PSOC_EDGE_ADC_BLOCK_BITS    (12)
-#define PSOC_EDGE_ADC_NUM_CHANNELS  (8)
+// SAR ADC: 1 block, fixed 12-bit resolution
+#define ADC_BLOCK_ID (0)
+#define ADC_BLOCK_BITS (12)
+#define MAX_CHANNELS (8)
 
 // ADCBlock object: unit and bits fields
 typedef struct _machine_adc_block_obj_t {
@@ -45,8 +45,8 @@ typedef struct _machine_adc_block_obj_t {
 // ADCBlock(0) singleton instance
 static machine_adc_block_obj_t machine_adc_block_obj = {
     .base = {&machine_adc_block_type},
-    .unit = PSOC_EDGE_ADC_BLOCK_ID,
-    .bits = PSOC_EDGE_ADC_BLOCK_BITS,
+    .unit = ADC_BLOCK_ID,
+    .bits = ADC_BLOCK_BITS,
 };
 
 // ADCBlock.__repr__ -> <ADCBlock 0 bits=12>
@@ -56,7 +56,7 @@ static void mp_machine_adc_block_print(const mp_print_t *print, machine_adc_bloc
 
 // ADCBlock(id) -> machine_adc_block_obj_t or NULL; only id=0 valid
 static machine_adc_block_obj_t *mp_machine_adc_block_get(mp_int_t unit) {
-    if (unit == PSOC_EDGE_ADC_BLOCK_ID) {
+    if (unit == ADC_BLOCK_ID) {
         return &machine_adc_block_obj;
     }
     return NULL;
@@ -67,7 +67,7 @@ static void mp_machine_adc_block_bits_set(machine_adc_block_obj_t *self, mp_int_
     if (bits == -1) {
         return;              // No-op
     }
-    if (bits != PSOC_EDGE_ADC_BLOCK_BITS) {
+    if (bits != ADC_BLOCK_BITS) {
         mp_raise_ValueError(MP_ERROR_TEXT("invalid bits"));
     }
     (void)self;
@@ -128,7 +128,7 @@ static machine_adc_obj_t *mp_machine_adc_block_connect(machine_adc_block_obj_t *
         mp_raise_TypeError(MP_ERROR_TEXT("keyword args not supported"));
     }
 
-    if (self->unit != PSOC_EDGE_ADC_BLOCK_ID) {
+    if (self->unit != ADC_BLOCK_ID) {
         return NULL;
     }
 
@@ -147,7 +147,7 @@ static machine_adc_obj_t *mp_machine_adc_block_connect(machine_adc_block_obj_t *
     }
 
     if (channel_id >= 0) {
-        if ((uint8_t)channel_id >= PSOC_EDGE_ADC_NUM_CHANNELS) {
+        if ((uint8_t)channel_id >= MAX_CHANNELS) {
             return NULL;
         }
         if (resolved_pin == NULL) {
