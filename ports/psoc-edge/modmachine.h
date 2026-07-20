@@ -43,6 +43,7 @@ void machine_spi_deinit_all(void);
 #if MICROPY_PY_MACHINE_SPI_TARGET
 void machine_spi_target_deinit_all(void);
 #endif
+void machine_adc_deinit_all(void);
 void machine_pdm_pcm_deinit_all(void);
 void machine_ipc_deinit_all(void);
 void machine_timer_deinit_all(void);
