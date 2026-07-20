@@ -33,9 +33,13 @@
 #include "cy_autanalog_sar.h"
 #include "genhdr/pins_af.h"
 
-// PSoC Edge SAR ADC: 1 block, 8 GPIO channels (P15_0 to P15_7)
-#define ADC_NUM_CHANNELS (8)
+// PSoC Edge SAR ADC channel count is generated from board pin metadata.
+#define ADC_NUM_CHANNELS (MICROPY_HW_ADC_MAX_CHANNELS)
 #define ADC_READ_TIMEOUT_US (1000)
+
+#if ADC_NUM_CHANNELS > 8
+#error "ADC_NUM_CHANNELS exceeds 8-bit channel mask support"
+#endif
 
 #define ADC_VDDA_MV (CY_CFG_PWR_VDDA_MV)
 
@@ -248,17 +252,22 @@ static bool machine_adc_disable_channel(uint8_t channel) {
     return true;
 }
 
-// Map pin to (SAR block, channel) using MICROPY_HW_ADC_PIN_MAP from pins_af.h.
+// Map pin to (SAR block, channel) using generated ADC lookup table.
 static bool machine_adc_get_block_channel_from_pin(
     const machine_pin_obj_t *pin, uint8_t *sar_block, uint8_t *gpio_channel) {
-    #define MICROPY_HW_ADC_PIN_MAP_ENTRY(b, c, p, pn) \
-    if (pin->port == p && pin->pin == pn) { \
-        *sar_block = (uint8_t)(b); \
-        *gpio_channel = (uint8_t)(c); \
-        return true; \
+    for (size_t block = 0; block < MICROPY_HW_ADC_MAX_BLOCKS; block++) {
+        for (size_t channel = 0; channel < MICROPY_HW_ADC_MAX_CHANNELS; channel++) {
+            const machine_pin_obj_t *adc_pin = machine_adc_block_pins[block][channel];
+            if (adc_pin == NULL) {
+                continue;
+            }
+            if (pin->port == adc_pin->port && pin->pin == adc_pin->pin) {
+                *sar_block = (uint8_t)block;
+                *gpio_channel = (uint8_t)channel;
+                return true;
+            }
+        }
     }
-    MICROPY_HW_ADC_PIN_MAP(MICROPY_HW_ADC_PIN_MAP_ENTRY)
-#undef MICROPY_HW_ADC_PIN_MAP_ENTRY
     return false;
 }
 
