@@ -263,7 +263,7 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self._peri1_tr_io_input_max_index = 0
         self._peri1_tr_io_output_max_index = 0
 
-        # ADC tracking: dict of (block, channel) -> (port, pin)
+        # ADC tracking: dict of (block, channel) -> pin object
         self._adc_pin_map = {}
 
     @staticmethod
@@ -287,13 +287,57 @@ class PSE84PinGenerator(boardgen.PinGenerator):
             pin_loc = (pin._port, pin._pin)
 
             # Check for conflicts
-            if key in self._adc_pin_map and self._adc_pin_map[key] != pin_loc:
-                raise boardgen.PinGeneratorError(
-                    f"ADC conflict: block {block_id} ch {channel_id} assigned to "
-                    f"multiple pins ({self._adc_pin_map[key]} and {pin_loc})"
-                )
+            if key in self._adc_pin_map:
+                old_pin = self._adc_pin_map[key]
+                old_loc = (old_pin._port, old_pin._pin)
+                if old_loc != pin_loc:
+                    raise boardgen.PinGeneratorError(
+                        f"ADC conflict: block {block_id} ch {channel_id} assigned to "
+                        f"multiple pins ({old_loc} and {pin_loc})"
+                    )
 
-            self._adc_pin_map[key] = pin_loc
+            self._adc_pin_map[key] = pin
+
+    def _adc_dims(self):
+        if not self._adc_pin_map:
+            return (1, 1)
+
+        max_block = max(block_id for block_id, _ in self._adc_pin_map.keys())
+        max_channel = max(channel_id for _, channel_id in self._adc_pin_map.keys())
+        return (max_block + 1, max_channel + 1)
+
+    def print_adc_tables_source(self, out_source):
+        max_blocks, max_channels = self._adc_dims()
+
+        print(file=out_source)
+        print("// ADC block/channel lookup table generated from board pin map.", file=out_source)
+        print(
+            "const machine_pin_obj_t *const "
+            f"machine_adc_block_pins[{max_blocks}][{max_channels}] = {{",
+            file=out_source,
+        )
+
+        if self._adc_pin_map:
+            by_block = defaultdict(dict)
+            for (block_id, channel_id), pin in self._adc_pin_map.items():
+                by_block[block_id][channel_id] = pin
+
+            for block_id in sorted(by_block.keys()):
+                print(f"    [{block_id}] = {{", file=out_source)
+                for channel_id in sorted(by_block[block_id].keys()):
+                    pin = by_block[block_id][channel_id]
+                    print(f"        [{channel_id}] = &pin_{pin.name()}_obj,", file=out_source)
+                print("    },", file=out_source)
+        else:
+            print("    [0] = {", file=out_source)
+            print("        [0] = NULL,", file=out_source)
+            print("    },", file=out_source)
+
+        print("};", file=out_source)
+
+    def print_source(self, out_source):
+        super().print_source(out_source)
+        self.print_adc_tables_source(out_source)
 
     # Collect all unhidden ports from the available
     # pins.
@@ -595,16 +639,18 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         print(file=out_header)
 
     def print_adc_defines(self, out_header):
-        """Generate ADC pin-to-channel mapping macros."""
-        if not self._adc_pin_map:
-            return
+        """Generate ADC lookup table declarations and dimensions."""
+        max_blocks, max_channels = self._adc_dims()
 
-        print("// ADC pin-to-channel mapping: (block_id, channel_id, port, pin).", file=out_header)
-        print("#define MICROPY_HW_ADC_PIN_MAP(X) \\", file=out_header)
-        sorted_entries = sorted(self._adc_pin_map.items())
-        for i, ((block_id, channel_id), (port, pin)) in enumerate(sorted_entries):
-            suffix = " \\" if i < len(sorted_entries) - 1 else ""
-            print(f"    X({block_id}, {channel_id}, {port}, {pin}){suffix}", file=out_header)
+        print("// ADC block/channel lookup dimensions and extern table.", file=out_header)
+        print("typedef struct _machine_pin_obj_t machine_pin_obj_t;", file=out_header)
+        print(f"#define MICROPY_HW_ADC_MAX_BLOCKS ({max_blocks})", file=out_header)
+        print(f"#define MICROPY_HW_ADC_MAX_CHANNELS ({max_channels})", file=out_header)
+        print(
+            "extern const machine_pin_obj_t *const "
+            "machine_adc_block_pins[MICROPY_HW_ADC_MAX_BLOCKS][MICROPY_HW_ADC_MAX_CHANNELS];",
+            file=out_header,
+        )
         print(file=out_header)
 
     def print_af_header(self, out_af_header):

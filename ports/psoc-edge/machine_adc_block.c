@@ -30,10 +30,8 @@
 #include "machine_pin.h"
 #include "genhdr/pins_af.h"
 
-// SAR ADC: 1 block, fixed 12-bit resolution
-#define ADC_BLOCK_ID (0)
+// SAR ADC: fixed 12-bit resolution
 #define ADC_BLOCK_BITS (12)
-#define MAX_CHANNELS (8)
 
 // ADCBlock object: unit and bits fields
 typedef struct _machine_adc_block_obj_t {
@@ -45,7 +43,7 @@ typedef struct _machine_adc_block_obj_t {
 // ADCBlock(0) singleton instance
 static machine_adc_block_obj_t machine_adc_block_obj = {
     .base = {&machine_adc_block_type},
-    .unit = ADC_BLOCK_ID,
+    .unit = 0,
     .bits = ADC_BLOCK_BITS,
 };
 
@@ -54,12 +52,31 @@ static void mp_machine_adc_block_print(const mp_print_t *print, machine_adc_bloc
     mp_printf(print, "<ADCBlock %u bits=%u>", self->unit, self->bits);
 }
 
-// ADCBlock(id) -> machine_adc_block_obj_t or NULL; only id=0 valid
-static machine_adc_block_obj_t *mp_machine_adc_block_get(mp_int_t unit) {
-    if (unit == ADC_BLOCK_ID) {
-        return &machine_adc_block_obj;
+// ADCBlock(id) -> machine_adc_block_obj_t or NULL; id must exist in pin map
+static bool machine_adc_block_has_block(uint8_t block) {
+    if (block >= MICROPY_HW_ADC_MAX_BLOCKS) {
+        return false;
     }
-    return NULL;
+
+    for (size_t channel = 0; channel < MICROPY_HW_ADC_MAX_CHANNELS; channel++) {
+        if (machine_adc_block_pins[block][channel] != NULL) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static machine_adc_block_obj_t *mp_machine_adc_block_get(mp_int_t unit) {
+    if (unit < 0 || unit > 0xff) {
+        return NULL;
+    }
+    uint8_t block = (uint8_t)unit;
+    if (!machine_adc_block_has_block(block)) {
+        return NULL;
+    }
+    machine_adc_block_obj.unit = block;
+    return &machine_adc_block_obj;
 }
 
 // ADCBlock.init(bits=N) -> validate bits==12, ignore -1
@@ -76,49 +93,29 @@ static void mp_machine_adc_block_bits_set(machine_adc_block_obj_t *self, mp_int_
 // Map pin object to ADC block/channel.
 static bool machine_adc_block_get_block_channel_from_pin(
     const machine_pin_obj_t *pin, uint8_t *sar_block, uint8_t *gpio_channel) {
-    #define MICROPY_HW_ADC_PIN_MAP_ENTRY(b, c, p, pn) \
-    if (pin->port == p && pin->pin == pn) { \
-        *sar_block = (uint8_t)(b); \
-        *gpio_channel = (uint8_t)(c); \
-        return true; \
+    for (size_t block = 0; block < MICROPY_HW_ADC_MAX_BLOCKS; block++) {
+        for (size_t channel = 0; channel < MICROPY_HW_ADC_MAX_CHANNELS; channel++) {
+            const machine_pin_obj_t *adc_pin = machine_adc_block_pins[block][channel];
+            if (adc_pin == NULL) {
+                continue;
+            }
+            if (pin->port == adc_pin->port && pin->pin == adc_pin->pin) {
+                *sar_block = (uint8_t)block;
+                *gpio_channel = (uint8_t)channel;
+                return true;
+            }
+        }
     }
-    MICROPY_HW_ADC_PIN_MAP(MICROPY_HW_ADC_PIN_MAP_ENTRY)
-#undef MICROPY_HW_ADC_PIN_MAP_ENTRY
+
     return false;
 }
 
 // Map ADC block/channel to pin object.
 static const machine_pin_obj_t *machine_adc_block_get_pin_from_channel(uint8_t block, uint8_t channel) {
-    uint8_t adc_port;
-    uint8_t adc_pin;
-    bool found = false;
-
-    #define MICROPY_HW_ADC_PIN_MAP_ENTRY(b, c, p, pn) \
-    if ((uint8_t)(b) == block && (uint8_t)(c) == channel) { \
-        adc_port = (uint8_t)(p); \
-        adc_pin = (uint8_t)(pn); \
-        found = true; \
-    }
-    MICROPY_HW_ADC_PIN_MAP(MICROPY_HW_ADC_PIN_MAP_ENTRY)
-#undef MICROPY_HW_ADC_PIN_MAP_ENTRY
-
-    if (!found) {
+    if (block >= MICROPY_HW_ADC_MAX_BLOCKS || channel >= MICROPY_HW_ADC_MAX_CHANNELS) {
         return NULL;
     }
-
-    const mp_map_t *cpu_map = &machine_pin_cpu_pins_locals_dict.map;
-    for (size_t i = 0; i < cpu_map->alloc; i++) {
-        const mp_map_elem_t *elem = &cpu_map->table[i];
-        if (elem->value == MP_OBJ_NULL) {
-            continue;
-        }
-        const machine_pin_obj_t *pin = MP_OBJ_TO_PTR(elem->value);
-        if (pin->port == adc_port && pin->pin == adc_pin) {
-            return pin;
-        }
-    }
-
-    return NULL;
+    return machine_adc_block_pins[block][channel];
 }
 
 // ADCBlock.connect(channel, pin) -> machine_adc_obj_t or NULL
@@ -128,7 +125,7 @@ static machine_adc_obj_t *mp_machine_adc_block_connect(machine_adc_block_obj_t *
         mp_raise_TypeError(MP_ERROR_TEXT("keyword args not supported"));
     }
 
-    if (self->unit != ADC_BLOCK_ID) {
+    if (!machine_adc_block_has_block(self->unit)) {
         return NULL;
     }
 
@@ -147,7 +144,7 @@ static machine_adc_obj_t *mp_machine_adc_block_connect(machine_adc_block_obj_t *
     }
 
     if (channel_id >= 0) {
-        if ((uint8_t)channel_id >= MAX_CHANNELS) {
+        if (channel_id > 0xff) {
             return NULL;
         }
         if (resolved_pin == NULL) {
