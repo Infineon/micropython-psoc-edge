@@ -34,14 +34,10 @@
 #include "genhdr/pins_af.h"
 
 // PSoC Edge SAR ADC: 1 block, 8 GPIO channels (P15_0 to P15_7)
-#define PSOC_EDGE_ADC_NUM_CHANNELS (8)
-#define PSOC_EDGE_ADC_READ_TIMEOUT_US (1000)
+#define ADC_NUM_CHANNELS (8)
+#define ADC_READ_TIMEOUT_US (1000)
 
-#ifdef CY_CFG_PWR_VDDA_MV
-#define PSOC_EDGE_ADC_VDDA_MV    (CY_CFG_PWR_VDDA_MV)
-#else
-#define PSOC_EDGE_ADC_VDDA_MV    (3300)
-#endif
+#define ADC_VDDA_MV (CY_CFG_PWR_VDDA_MV)
 
 #define MICROPY_PY_MACHINE_ADC_CLASS_CONSTANTS
 
@@ -50,7 +46,7 @@ static bool adc_autanalog_initialized = false;
 // Bitmask of ADC channels enabled by user-created ADC objects.
 static uint8_t adc_enabled_channels_mask = 0;
 // Per-channel user reference count to support shared ADC objects per channel.
-static uint8_t adc_channel_refcount[PSOC_EDGE_ADC_NUM_CHANNELS] = {0};
+static uint8_t adc_channel_refcount[ADC_NUM_CHANNELS] = {0};
 
 // ADC channel object: stores pin mapping
 typedef struct _machine_adc_obj_t {
@@ -58,6 +54,7 @@ typedef struct _machine_adc_obj_t {
     const machine_pin_obj_t *pin;      // GPIO pin used as the ADC input
     uint8_t sar_block;                 // SAR block index (always 0 on PSE84)
     uint8_t gpio_channel;              // GPIO channel index (0-7 for P15_0-P15_7)
+    bool active;                       // Tracks whether this object still owns a channel reference.
 } machine_adc_obj_t;
 
 // ADC.__repr__ -> <ADC pin='P15_0' ch=0>
@@ -68,7 +65,7 @@ static void mp_machine_adc_print(const mp_print_t *print, mp_obj_t self_in, mp_p
 
 // Initialize BSP-generated CYBSP_SAR_ADC_* structures for one requested GPIO channel.
 static void machine_adc_init_gpio_channel(uint8_t channel) {
-    if (channel >= PSOC_EDGE_ADC_NUM_CHANNELS) {
+    if (channel >= ADC_NUM_CHANNELS) {
         return;
     }
 
@@ -98,7 +95,7 @@ static void machine_adc_init_sta_hs_cfg(void) {
     }
 
     // Start with no enabled GPIO channels. Channels are enabled on ADC(pin) creation.
-    for (size_t i = 0; i < PSOC_EDGE_ADC_NUM_CHANNELS; i++) {
+    for (size_t i = 0; i < ADC_NUM_CHANNELS; i++) {
         CYBSP_SAR_ADC_sta_hs_cfg.hsGpioChan[i] = NULL;
     }
 
@@ -199,7 +196,7 @@ static void machine_adc_reload_config(uint8_t sar_block) {
 
 // Increase channel refcount and enable HW on first user.
 static bool machine_adc_enable_channel(uint8_t channel) {
-    if (channel >= PSOC_EDGE_ADC_NUM_CHANNELS) {
+    if (channel >= ADC_NUM_CHANNELS) {
         return false;
     }
 
@@ -225,7 +222,7 @@ static bool machine_adc_enable_channel(uint8_t channel) {
 
 // Decrease channel refcount and disable HW when the last user releases it.
 static bool machine_adc_disable_channel(uint8_t channel) {
-    if (channel >= PSOC_EDGE_ADC_NUM_CHANNELS) {
+    if (channel >= ADC_NUM_CHANNELS) {
         return false;
     }
 
@@ -285,6 +282,22 @@ static void machine_adc_init_autanalog(void) {
     adc_autanalog_initialized = true;
 }
 
+void machine_adc_deinit_all(void) {
+    if (adc_autanalog_initialized) {
+        Cy_AutAnalog_Disable();
+    }
+
+    adc_autanalog_initialized = false;
+    adc_enabled_channels_mask = 0;
+    for (size_t i = 0; i < ADC_NUM_CHANNELS; i++) {
+        adc_channel_refcount[i] = 0;
+    }
+
+    // Rebuild the cached config structures so the next ADC creation starts from
+    // a clean software state after the hardware MMIO/STT contents are dropped.
+    machine_adc_init_configs();
+}
+
 // ADC(pin) -> machine_adc_obj_t *; validates pin
 static mp_obj_t mp_machine_adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     mp_arg_check_num(n_args, n_kw, 1, 1, false);
@@ -300,6 +313,7 @@ static mp_obj_t mp_machine_adc_make_new(const mp_obj_type_t *type, size_t n_args
     o->pin = pin;
     o->sar_block = sar_block;
     o->gpio_channel = channel;
+    o->active = true;
 
     // Initialize autonomous analog once and enable only the requested channel.
     machine_adc_init_autanalog();
@@ -315,8 +329,12 @@ static mp_obj_t mp_machine_adc_make_new(const mp_obj_type_t *type, size_t n_args
 
 // Read one ADC conversion as raw 12-bit value (0-4095).
 static uint16_t machine_adc_read_raw_12b(machine_adc_obj_t *self) {
+    if (!self->active) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("ADC is deinitialized"));
+    }
+
     uint8_t channel_mask = (uint8_t)(1u << self->gpio_channel);
-    uint32_t timeout = PSOC_EDGE_ADC_READ_TIMEOUT_US;
+    uint32_t timeout = ADC_READ_TIMEOUT_US;
 
     // Clear result status and wait for new result
     Cy_AutAnalog_SAR_ClearHSchanResultStatus(self->sar_block, channel_mask);
@@ -348,11 +366,16 @@ static mp_int_t mp_machine_adc_read_u16(machine_adc_obj_t *self) {
 static mp_int_t mp_machine_adc_read_uv(machine_adc_obj_t *self) {
     uint16_t raw_12b = machine_adc_read_raw_12b(self);
     // Use raw SAR code for better precision than converting from quantized read_u16().
-    return (mp_int_t)(((uint64_t)raw_12b * ((uint64_t)PSOC_EDGE_ADC_VDDA_MV * 1000u)) / 4095u);
+    return (mp_int_t)(((uint64_t)raw_12b * ((uint64_t)ADC_VDDA_MV * 1000u)) / 4095u);
 }
 
 // ADC.deinit() - release this ADC user's channel reference.
 static void mp_machine_adc_deinit(machine_adc_obj_t *self) {
+    if (!self->active) {
+        return;
+    }
+
+    self->active = false;
     if (machine_adc_disable_channel(self->gpio_channel)) {
         machine_adc_reload_config(self->sar_block);
     }
