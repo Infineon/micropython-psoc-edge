@@ -9,6 +9,7 @@ Setup: Connect P16_7 -> P11_1
 
 PIN_OUT = "P16_7"
 PIN_IN = "P11_1"
+PIN_INVALID = Pin.cpu.P20_5
 
 
 # Helper function to generate pulses on a pin.
@@ -143,7 +144,7 @@ expect_value_error("invalid_id_-1:", lambda: Counter(-1, src=Pin(PIN_IN)))
 expect_value_error("invalid_id_32:", lambda: Counter(32, src=Pin(PIN_IN)))
 expect_value_error("invalid_edge:", lambda: Counter(3, src=Pin(PIN_IN), edge=3))
 expect_value_error("invalid_direction:", lambda: Counter(4, src=Pin(PIN_IN), direction=3))
-expect_value_error("invalid_src_pin:", lambda: Counter(5, src=Pin(PIN_OUT)))
+expect_value_error("invalid_src_pin:", lambda: Counter(5, src=Pin(PIN_INVALID)))
 expect_value_error("invalid_min_ge_max:", lambda: Counter(7, src=Pin(PIN_IN), max=10, min=10))
 expect_value_error(
     "range_span_out_of_range:",
@@ -262,7 +263,7 @@ c.deinit()
 expect_runtime_error("irq_not_initialised:", lambda: c.irq())
 
 expect_not_implemented_error(
-    "match_pin_not_supported:", lambda: Counter(7, src=Pin(PIN_IN), match_pin=Pin(PIN_OUT))
+    "match_pin_not_supported:", lambda: Counter(7, src=Pin(PIN_IN), match_pin=Pin(PIN_INVALID))
 )
 
 # Test duplicate counter ID. The second instantiation should raise a ValueError.
