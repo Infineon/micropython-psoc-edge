@@ -387,7 +387,6 @@ static void machine_spi_print(const mp_print_t *print,
 mp_obj_t mp_machine_spi_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
     mp_arg_check_num(n_args, n_kw, 0, 9, true);
 
-    // Allocate a SPI object from static pool (each slot has a unique clock divider index)
     machine_spi_obj_t *self = machine_hw_spi_obj_alloc();
     if (self == NULL) {
         mp_raise_ValueError(MP_ERROR_TEXT("machine.SPI: Maximum number of SPI instances reached"));
