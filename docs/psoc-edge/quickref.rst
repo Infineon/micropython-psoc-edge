@@ -947,8 +947,8 @@ This section lists only PSOC-Edge specifics and deviations.
 .. note::
 
     - IDs ``0`` to ``31`` are available (same TCPWM mapping as ``Timer``: 32-bit IDs ``0-7``, 16-bit IDs ``8-31``).
-    - Constructing ``Counter(id)`` again while that instance is active raises ValueError instead of returning/reinitialising the existing instance. Call ``deinit()`` first.
-    - ``src`` must be a pin with ``PERI_TR_IO_INPUT`` routing.
+    - ``src`` must be a pin with ``PERI_TR_IO_INPUT`` routing. This is a mandatory parameter for the constructor.
+    - Constructing ``Counter(id, src)`` again while that instance is active raises ValueError instead of returning/reinitialising the existing instance. Call ``deinit()`` first.
     - ``min`` must be ``< max``. Both can be negative (e.g., ``min=-100, max=100``).
     - ``match`` is an init-only parameter. It cannot be changed at runtime.
     - ``filter_ns`` is currently not supported.
