@@ -30,6 +30,10 @@
 #include "machine_pin.h"
 #include "genhdr/pins_af.h"
 
+// Shared pin lookup function from machine_adc.c
+extern bool machine_adc_get_block_channel_from_pin(
+    const machine_pin_obj_t *pin, uint8_t *sar_block, uint8_t *gpio_channel);
+
 // SAR ADC: fixed 12-bit resolution
 #define ADC_BLOCK_BITS (12)
 
@@ -67,6 +71,7 @@ static bool machine_adc_block_has_block(uint8_t block) {
     return false;
 }
 
+// Get ADC block object by unit ID, validating it exists in pin map
 static machine_adc_block_obj_t *mp_machine_adc_block_get(mp_int_t unit) {
     if (unit < 0 || unit > 0xff) {
         return NULL;
@@ -90,24 +95,10 @@ static void mp_machine_adc_block_bits_set(machine_adc_block_obj_t *self, mp_int_
     (void)self;
 }
 
-// Map pin object to ADC block/channel.
+// Wrapper to use shared machine_adc_get_block_channel_from_pin().
 static bool machine_adc_block_get_block_channel_from_pin(
     const machine_pin_obj_t *pin, uint8_t *sar_block, uint8_t *gpio_channel) {
-    for (size_t block = 0; block < MICROPY_HW_ADC_MAX_BLOCKS; block++) {
-        for (size_t channel = 0; channel < MICROPY_HW_ADC_MAX_CHANNELS; channel++) {
-            const machine_pin_obj_t *adc_pin = machine_adc_block_pins[block][channel];
-            if (adc_pin == NULL) {
-                continue;
-            }
-            if (pin->port == adc_pin->port && pin->pin == adc_pin->pin) {
-                *sar_block = (uint8_t)block;
-                *gpio_channel = (uint8_t)channel;
-                return true;
-            }
-        }
-    }
-
-    return false;
+    return machine_adc_get_block_channel_from_pin(pin, sar_block, gpio_channel);
 }
 
 // Map ADC block/channel to pin object.
