@@ -93,7 +93,7 @@ static void machine_adc_init_gpio_channel(uint8_t channel) {
 static void machine_adc_init_sta_hs_cfg(void) {
     CYBSP_SAR_ADC_sta_hs_cfg.hsVref = CY_AUTANALOG_SAR_VREF_VDDA;
 
-    // All channels use same sample time
+    // All channels use fixed sample time (31U optimal for GPIO-only, high-speed mode)
     for (size_t i = 0; i < 4; i++) {
         CYBSP_SAR_ADC_sta_hs_cfg.hsSampleTime[i] = 31U;
     }
@@ -204,6 +204,8 @@ static bool machine_adc_enable_channel(uint8_t channel) {
         return false;
     }
 
+    mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
+
     if (adc_channel_refcount[channel] < UINT8_MAX) {
         adc_channel_refcount[channel]++;
     }
@@ -211,6 +213,7 @@ static bool machine_adc_enable_channel(uint8_t channel) {
     uint8_t channel_mask = (uint8_t)(1u << channel);
     // Channel already configured; nothing else to do.
     if ((adc_enabled_channels_mask & channel_mask) != 0u) {
+        MICROPY_END_ATOMIC_SECTION(atomic_state);
         return false;
     }
 
@@ -221,6 +224,8 @@ static bool machine_adc_enable_channel(uint8_t channel) {
     CYBSP_SAR_ADC_sta_hs_cfg.hsGpioResultMask = adc_enabled_channels_mask;
     CYBSP_SAR_ADC_seq_hs_cfg[0].chanEn = adc_enabled_channels_mask;
     CYBSP_SAR_ADC_seq_hs_cfg[1].chanEn = adc_enabled_channels_mask;
+
+    MICROPY_END_ATOMIC_SECTION(atomic_state);
     return true;
 }
 
@@ -230,17 +235,22 @@ static bool machine_adc_disable_channel(uint8_t channel) {
         return false;
     }
 
+    mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
+
     if (adc_channel_refcount[channel] == 0u) {
+        MICROPY_END_ATOMIC_SECTION(atomic_state);
         return false;
     }
 
     adc_channel_refcount[channel]--;
     if (adc_channel_refcount[channel] != 0u) {
+        MICROPY_END_ATOMIC_SECTION(atomic_state);
         return false;
     }
 
     uint8_t channel_mask = (uint8_t)(1u << channel);
     if ((adc_enabled_channels_mask & channel_mask) == 0u) {
+        MICROPY_END_ATOMIC_SECTION(atomic_state);
         return false;
     }
 
@@ -249,11 +259,13 @@ static bool machine_adc_disable_channel(uint8_t channel) {
     CYBSP_SAR_ADC_sta_hs_cfg.hsGpioResultMask = adc_enabled_channels_mask;
     CYBSP_SAR_ADC_seq_hs_cfg[0].chanEn = adc_enabled_channels_mask;
     CYBSP_SAR_ADC_seq_hs_cfg[1].chanEn = adc_enabled_channels_mask;
+
+    MICROPY_END_ATOMIC_SECTION(atomic_state);
     return true;
 }
 
-// Map pin to (SAR block, channel) using generated ADC lookup table.
-static bool machine_adc_get_block_channel_from_pin(
+// Map pin to (SAR block, channel); shared with machine_adc_block.c
+bool machine_adc_get_block_channel_from_pin(
     const machine_pin_obj_t *pin, uint8_t *sar_block, uint8_t *gpio_channel) {
     for (size_t block = 0; block < MICROPY_HW_ADC_MAX_BLOCKS; block++) {
         for (size_t channel = 0; channel < MICROPY_HW_ADC_MAX_CHANNELS; channel++) {
@@ -302,8 +314,7 @@ void machine_adc_deinit_all(void) {
         adc_channel_refcount[i] = 0;
     }
 
-    // Rebuild the cached config structures so the next ADC creation starts from
-    // a clean software state after the hardware MMIO/STT contents are dropped.
+    // Reset cached ADC config so the next ADC creation starts clean.
     machine_adc_init_configs();
 }
 
@@ -367,8 +378,8 @@ static uint16_t machine_adc_read_raw_12b(machine_adc_obj_t *self) {
 // ADC.read_u16() -> int (0-65535, 0=0V, 65535=VDDA)
 static mp_int_t mp_machine_adc_read_u16(machine_adc_obj_t *self) {
     uint16_t raw_12b = machine_adc_read_raw_12b(self);
-    // Scale 12-bit (0-4095) to 16-bit (0-65535)
-    return (mp_int_t)(((uint32_t)raw_12b * 65535u) / 4095u);
+    // Expand 12-bit (0-4095) to full 16-bit range (0-65535) via bit replication.
+    return (mp_int_t)((raw_12b << 4) | (raw_12b >> 8));
 }
 
 // ADC.read_uv() -> int (0-VDDA microvolts)
