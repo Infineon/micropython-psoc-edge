@@ -200,6 +200,35 @@ Use :func:`machine.bitstream` directly for timing-sensitive one-wire protocols::
     - Each timing value must be at least 300 ns; smaller values raise ``ValueError``.
     - If the runtime core clock is invalid (0 Hz), transmission raises ``ValueError``.
 
+Memory access
+-------------
+
+See :mod:`machine` (``mem8``, ``mem16``, ``mem32``) for the full API.
+
+These objects allow direct read/write access to memory-mapped addresses using
+subscript notation::
+
+    from machine import mem8, mem16, mem32
+
+    # Read ARM Cortex-M33 CPUID register (read-only, always safe)
+    cpuid = mem32[0xE000ED00]
+
+    # Read SysTick reload value to derive CPU clock
+    # reload = 200000 counts at 1 kHz tick -> 200 MHz
+    reload = mem32[0xE000E014]
+
+    # Toggle two GPIO pins atomically in a single write
+    GPIO_PRT10 = 0x42810500
+    OUT_SET    = GPIO_PRT10 + 0x08   # drive HIGH
+    OUT_CLR    = GPIO_PRT10 + 0x04   # drive LOW
+    mem32[OUT_SET] = (1 << 7) | (1 << 5)  # P10_7 and P10_5 simultaneously
+
+.. note::
+    ``mem32`` returns a signed integer. For values with bit 31 set, mask with
+    ``0xFFFFFFFF`` to get the unsigned representation::
+
+        value = mem32[addr] & 0xFFFFFFFF
+
 Real time clock (RTC)
 ---------------------
 
