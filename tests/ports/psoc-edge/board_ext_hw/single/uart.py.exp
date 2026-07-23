@@ -19,3 +19,6 @@ IRQ TXIDLE handler called
 IRQ TXIDLE detected:  True
 IRQ RXIDLE handler called
 IRQ RXIDLE detected:  True
+Flow CTS: True
+Flow RTS: True
+Flow CTS|RTS: True
