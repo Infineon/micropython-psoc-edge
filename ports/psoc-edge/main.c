@@ -194,9 +194,6 @@ void micropython_task(void *arg) {
 
     mp_hal_ticks_init();
     machine_init();
-    #if MICROPY_PY_NETWORK
-    network_hw_init();
-    #endif
 
 soft_reset:
     machine_rtc_init_all();
@@ -205,7 +202,6 @@ soft_reset:
     readline_init0();
 
     #if MICROPY_PY_NETWORK
-    network_init();
     mod_network_init();
     #endif
 

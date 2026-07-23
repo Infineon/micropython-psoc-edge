@@ -167,13 +167,15 @@ static void wifi_sdio_init(void) {
     NVIC_EnableIRQ(CYBSP_WIFI_HOST_WAKE_IRQ);
 }
 
-// ---------------------------------------------------------------------------
-// network_hw_init  — one-time HW bring-up, called before the soft_reset loop
-// network_init / network_deinit — called every soft reset from main.c
-// ---------------------------------------------------------------------------
 #define wcm_assert_raise(msg, ret)   if (ret != CY_RSLT_SUCCESS) { \
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT(msg), ret); \
 }
+
+// Guards to allow lazy initialisation.
+// network_hw_initialized: SDIO/GPIO hardware — one-time, never reset.
+// network_wcm_initialized: WCM stack (cy_wcm_init) — cleared after each deinit.
+static bool network_hw_initialized = false;
+static bool network_wcm_initialized = false;
 
 // Network Access Point initialization with default network parameters
 void network_ap_init() {
@@ -204,7 +206,7 @@ void network_sta_init() {
     sta_conf->connect_retries = 3; // Default connect retries
 }
 
-void network_hw_init(void) {
+static void network_hw_init(void) {
     wifi_sdio_init();
     #if (CY_CFG_PWR_SYS_IDLE_MODE == CY_CFG_PWR_MODE_DEEPSLEEP)
     Cy_SysPm_RegisterCallback(&sdhc_ds_cb);
@@ -213,17 +215,30 @@ void network_hw_init(void) {
     wcm_config.wifi_interface_instance = &sdio_obj;
 }
 
-void network_init(void) {
-    cy_rslt_t ret = cy_wcm_init(&wcm_config);
-    wcm_assert_raise("network init error (code: %d)", ret);
-
-    network_ap_init();
-    network_sta_init();
+// Called on first network.WLAN() construction. Safe to call multiple times —
+// each guard is checked independently so a soft-reset that cleared
+// network_wcm_initialized will re-run only the WCM layer, not the HW setup.
+static void network_ensure_initialized(void) {
+    if (!network_hw_initialized) {
+        network_hw_init();
+        network_hw_initialized = true;
+    }
+    if (!network_wcm_initialized) {
+        cy_rslt_t ret = cy_wcm_init(&wcm_config);
+        wcm_assert_raise("network init error (code: %d)", ret);
+        network_ap_init();
+        network_sta_init();
+        network_wcm_initialized = true;
+    }
 }
 
 void network_deinit(void) {
+    if (!network_wcm_initialized) {
+        return;
+    }
     cy_rslt_t ret = cy_wcm_deinit();
     wcm_assert_raise("network deinit error (code: %d)", ret);
+    network_wcm_initialized = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +247,8 @@ void network_deinit(void) {
 
 static mp_obj_t network_ifx_wcm_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     mp_arg_check_num(n_args, n_kw, 0, 1, false);
+
+    network_ensure_initialized();
 
     if (n_args == 0 || mp_obj_get_int(args[0]) == MOD_NETWORK_STA_IF) {
         return MP_OBJ_FROM_PTR(&network_ifx_wcm_wl_sta);
