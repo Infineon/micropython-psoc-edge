@@ -68,6 +68,8 @@
 #define UART_FLOW_CONTROL_NONE    (0)
 #define UART_FLOW_CONTROL_RTS     (1)
 #define UART_FLOW_CONTROL_CTS     (2)
+#define UART_FLOW_CONTROL_MASK    (UART_FLOW_CONTROL_RTS | UART_FLOW_CONTROL_CTS)
+#define UART_RTS_RX_FIFO_LEVEL    (8UL)
 #define UART_IRQ_RXIDLE           (CY_SCB_RX_INTR_NOT_EMPTY)
 
 // Class-level constants exposed to Python
@@ -152,15 +154,31 @@ static void machine_uart_irq_rx_break(machine_uart_obj_t *self);
 static void machine_uart_irq_tx_idle(machine_uart_obj_t *self);
 #endif
 
+static inline void machine_uart_set_rx_not_empty_irq(machine_uart_obj_t *self, bool enable) {
+    uint32_t mask = Cy_SCB_GetRxInterruptMask(self->scb_obj->scb);
+    if (enable) {
+        mask |= CY_SCB_RX_INTR_NOT_EMPTY;
+    } else {
+        mask &= ~CY_SCB_RX_INTR_NOT_EMPTY;
+    }
+    Cy_SCB_SetRxInterruptMask(self->scb_obj->scb, mask);
+}
+
+static inline void machine_uart_resume_rx_not_empty_irq(machine_uart_obj_t *self) {
+    if ((Cy_SCB_GetRxInterruptMask(self->scb_obj->scb) & CY_SCB_RX_INTR_NOT_EMPTY) == 0U) {
+        machine_uart_set_rx_not_empty_irq(self, true);
+    }
+}
+
 static void machine_uart_fill_rx_ring_buff(machine_uart_obj_t *self) {
     uint32_t available_rx_frames = Cy_SCB_UART_GetNumInRxFifo(self->scb_obj->scb);
     for (uint32_t i = 0; i < available_rx_frames; i++) {
         if (!ringbuf_put(&self->rx_ringbuf, (uint8_t)Cy_SCB_UART_Get(self->scb_obj->scb))) {
             /**
-             * No overflow handling.
-             * Just return and wait for next interrupt
-             * to read the remaining data.
+             * Pause software draining when the ring buffer is full so RX FIFO
+             * can back up and hardware RTS can deassert to throttle sender.
              */
+            machine_uart_set_rx_not_empty_irq(self, false);
             return;
         }
     }
@@ -340,12 +358,9 @@ static void machine_uart_hw_init(machine_uart_obj_t *self) {
         .receiverAddressMask = 0UL,
         .acceptAddrInFifo = false,
 
-        /**
-         * TODO: Enable CTS/RTS based on user config.
-         */
-        .enableCts = false,
+        .enableCts = (self->flow & UART_FLOW_CONTROL_CTS) != 0,
         .ctsPolarity = CY_SCB_UART_ACTIVE_LOW,
-        .rtsRxFifoLevel = 0UL,
+        .rtsRxFifoLevel = (self->flow & UART_FLOW_CONTROL_RTS) ? UART_RTS_RX_FIFO_LEVEL : 0UL,
         .rtsPolarity = CY_SCB_UART_ACTIVE_LOW,
 
         .rxFifoTriggerLevel = 0UL,
@@ -498,14 +513,17 @@ static void machine_uart_init_impl(machine_uart_obj_t **self_ptr, int uart_id, s
     /* -- Flow control pins -- */
     uint32_t flow = (uint32_t)args[ARG_flow].u_int;
 
-    /** TODO: Currently throw error if flow is not NONE.
-     * This needs to be implemented
-     * {
-     */
-    if (flow != UART_FLOW_CONTROL_NONE) {
-        mp_raise_ValueError(MP_ERROR_TEXT("flow control not supported yet. Keep flow=0"));
+    if ((flow & ~UART_FLOW_CONTROL_MASK) != 0U) {
+        mp_raise_ValueError(MP_ERROR_TEXT("flow must be UART.RTS, UART.CTS or both"));
     }
-    /** } */
+
+    if ((args[ARG_rts].u_obj != mp_const_none) && ((flow & UART_FLOW_CONTROL_RTS) == 0U)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("flow must include UART.RTS when rts pin is provided"));
+    }
+
+    if ((args[ARG_cts].u_obj != mp_const_none) && ((flow & UART_FLOW_CONTROL_CTS) == 0U)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("flow must include UART.CTS when cts pin is provided"));
+    }
 
     #define PIN_AF_CONFIG_INDEX_NONE (0xFF)
     uint8_t pin_af_conf_rts_index = PIN_AF_CONFIG_INDEX_NONE;
@@ -696,7 +714,9 @@ static void mp_machine_uart_sendbreak(machine_uart_obj_t *self) {
 #if MICROPY_PY_MACHINE_UART_READCHAR_WRITECHAR
 static mp_int_t mp_machine_uart_readchar(machine_uart_obj_t *self) {
     if (machine_uart_rx_wait(self, self->timeout_ms)) {
-        return (uint8_t)ringbuf_get(&self->rx_ringbuf);
+        uint8_t data = (uint8_t)ringbuf_get(&self->rx_ringbuf);
+        machine_uart_resume_rx_not_empty_irq(self);
+        return data;
     }
 
     return MP_STREAM_ERROR;
@@ -732,6 +752,7 @@ static mp_uint_t mp_machine_uart_read(mp_obj_t self_in, void *buf_in, mp_uint_t 
         ringbuf_memcpy_get_internal(&self->rx_ringbuf, (uint8_t *)buf_in + read_count, to_read);
         read_count += to_read;
         size -= to_read;
+        machine_uart_resume_rx_not_empty_irq(self);
     } while (size > 0 && machine_uart_rx_wait(self, self->timeout_char_ms));
 
     return read_count;
@@ -739,21 +760,26 @@ static mp_uint_t mp_machine_uart_read(mp_obj_t self_in, void *buf_in, mp_uint_t 
 
 static mp_uint_t mp_machine_uart_write(mp_obj_t self_in, const void *buf_in, mp_uint_t size, int *errcode) {
     machine_uart_obj_t *self = MP_OBJ_TO_PTR(self_in);
-
-    /* wait to be able to write the first character. */
-    if (!machine_uart_tx_wait(self, self->timeout_ms)) {
-        /* EAGAIN causes write to return None */
-        *errcode = MP_EAGAIN;
-        return MP_STREAM_ERROR;
-    }
-
+    const uint8_t *src = (const uint8_t *)buf_in;
     uint32_t write_count = 0;
-    do {
-        uint32_t written = Cy_SCB_UART_PutArray(self->scb_obj->scb, (void *)buf_in, size);
-        buf_in = (const uint8_t *)buf_in + written;
-        size -= written;
-        write_count += written;
-    } while (size > 0 && machine_uart_tx_wait(self, self->timeout_char_ms));
+
+    while (size > 0) {
+        uint32_t timeout = (write_count == 0) ? self->timeout_ms : self->timeout_char_ms;
+        if (!machine_uart_tx_wait(self, timeout)) {
+            /* First byte timeout should map to EAGAIN (write returns None). */
+            if (write_count == 0) {
+                *errcode = MP_EAGAIN;
+                return MP_STREAM_ERROR;
+            }
+            /* Partial write on timeout after some progress. */
+            break;
+        }
+
+        Cy_SCB_UART_Put(self->scb_obj->scb, (uint32_t)(*src));
+        src++;
+        size--;
+        write_count++;
+    }
 
     return write_count;
 }

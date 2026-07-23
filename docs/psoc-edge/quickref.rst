@@ -801,11 +801,36 @@ Constructor
    
    - ``bits``. Only 8 bits.
 
-   These are planned for future implementation, but yet unavailable:
+   Flow-control pin rules:
 
-   - ``rts``
-   - ``cts``
-   - ``flow``
+   - if ``rts`` is provided, ``flow`` must include ``UART.RTS``
+   - if ``cts`` is provided, ``flow`` must include ``UART.CTS``
+
+   Example::
+
+      from machine import UART
+
+      TX = "P17_1"
+      RX = "P17_0"
+      RTS = "P16_6"
+      CTS = "P16_5"
+
+      # RTS only
+      uart = UART(5, baudrate=115200, tx=TX, rx=RX, rts=RTS, flow=UART.RTS)
+
+      # CTS only
+      uart = UART(5, baudrate=115200, tx=TX, rx=RX, cts=CTS, flow=UART.CTS)
+
+      # RTS + CTS
+      uart = UART(
+          5,
+          baudrate=115200,
+          tx=TX,
+          rx=RX,
+          rts=RTS,
+          cts=CTS,
+          flow=UART.RTS | UART.CTS,
+      )
        
 .. Note::
 
