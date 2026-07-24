@@ -116,10 +116,6 @@ static machine_adc_obj_t *mp_machine_adc_block_connect(machine_adc_block_obj_t *
         mp_raise_TypeError(MP_ERROR_TEXT("keyword args not supported"));
     }
 
-    if (!machine_adc_block_has_block(self->unit)) {
-        return NULL;
-    }
-
     const machine_pin_obj_t *resolved_pin = NULL;
     uint8_t pin_block = 0;
     uint8_t pin_channel = 0;
@@ -127,24 +123,28 @@ static machine_adc_obj_t *mp_machine_adc_block_connect(machine_adc_block_obj_t *
     if (pin != MP_HAL_PIN_OBJ_NULL) {
         resolved_pin = pin;
         if (!machine_adc_block_get_block_channel_from_pin(resolved_pin, &pin_block, &pin_channel)) {
-            return NULL;
+            mp_raise_ValueError(MP_ERROR_TEXT("pin has no ADC capabilities"));
         }
         if (pin_block != self->unit) {
-            return NULL;
+            mp_raise_ValueError(MP_ERROR_TEXT("pin not on this ADC block"));
         }
+    }
+
+    if (channel_id < -1) {
+        mp_raise_ValueError(MP_ERROR_TEXT("invalid channel id"));
     }
 
     if (channel_id >= 0) {
         if (channel_id > 0xff) {
-            return NULL;
+            mp_raise_ValueError(MP_ERROR_TEXT("invalid channel id"));
         }
         if (resolved_pin == NULL) {
             resolved_pin = machine_adc_block_get_pin_from_channel((uint8_t)self->unit, (uint8_t)channel_id);
             if (resolved_pin == NULL) {
-                return NULL;
+                mp_raise_ValueError(MP_ERROR_TEXT("no pin for ADC channel"));
             }
         } else if (pin_channel != (uint8_t)channel_id) {
-            return NULL;
+            mp_raise_ValueError(MP_ERROR_TEXT("pin does not match channel"));
         }
     }
 
