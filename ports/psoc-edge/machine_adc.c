@@ -50,7 +50,7 @@ static bool adc_autanalog_initialized = false;
 // Bitmask of ADC channels enabled by user-created ADC objects.
 static uint8_t adc_enabled_channels_mask = 0;
 // Per-channel user reference count to support shared ADC objects per channel.
-static uint8_t adc_channel_refcount[ADC_NUM_CHANNELS] = {0};
+static uint16_t adc_channel_refcount[ADC_NUM_CHANNELS] = {0};
 
 // ADC channel object: stores pin mapping
 typedef struct _machine_adc_obj_t {
@@ -206,7 +206,7 @@ static bool machine_adc_enable_channel(uint8_t channel) {
 
     mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
 
-    if (adc_channel_refcount[channel] < UINT8_MAX) {
+    if (adc_channel_refcount[channel] < UINT16_MAX) {
         adc_channel_refcount[channel]++;
     }
 
@@ -370,7 +370,7 @@ static uint16_t machine_adc_read_raw_12b(machine_adc_obj_t *self) {
     // Read 12-bit result
     int32_t raw = Cy_AutAnalog_SAR_ReadResult(self->sar_block, CY_AUTANALOG_SAR_INPUT_GPIO, self->gpio_channel);
     if (raw < 0) {
-        raw = 0;
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("ADC read failed"));
     }
     return (uint16_t)((uint32_t)raw & 0x0FFFu);
 }
