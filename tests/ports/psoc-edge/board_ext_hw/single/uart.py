@@ -89,30 +89,11 @@ def uart_tests():
     # write()/read() large data
     uart_rx_buf = bytearray(512)
     tx_data = bytes([x % 256 for x in range(512)])
-    uart_rx_view = memoryview(uart_rx_buf)
-    tx_written = 0
-    read_num = 0
-    chunk_size = 64
-    for offset in range(0, len(tx_data), chunk_size):
-        chunk = tx_data[offset : offset + chunk_size]
-        tx_written += uart.write(chunk)
-        uart.flush()
-
-        chunk_end = offset + len(chunk)
-        start = time.ticks_ms()
-        while read_num < chunk_end and time.ticks_diff(time.ticks_ms(), start) < 500:
-            written = uart.readinto(uart_rx_view[read_num:chunk_end])
-            if written is None:
-                written = 0
-            read_num += written
-            if read_num < chunk_end:
-                time.sleep_ms(5)
-
+    tx_written = uart.write(tx_data)
     print("Tx written bytes by write(): ", tx_written)
-    print(
-        "Tx is received by Rx(readinto(buf)) for large data: ",
-        (read_num == len(tx_data)) and (uart_rx_buf == tx_data),
-    )
+    # An added sleep here makes the last bytes to be lost.
+    read_num = uart.readinto(uart_rx_buf)
+    print("Tx is received by Rx(readinto(buf)) for large data: ", uart_rx_buf == tx_data)
     if uart_rx_buf != tx_data:
         print("Received data:", uart_rx_buf)
         print("Num of bytes read:", read_num)
@@ -138,41 +119,34 @@ def uart_irq():
         handler_irq_flag = True
         print(f"IRQ {event} handler called")
 
-    def wait_for_irq_handler(timeout_ms=200):
+    def wait_for_irq_handler():
         global handler_irq_flag
-        start = time.ticks_ms()
         while not handler_irq_flag:
-            if time.ticks_diff(time.ticks_ms(), start) >= timeout_ms:
-                return False
             time.sleep_ms(10)
         handler_irq_flag = False
-        return True
 
     # BREAK Received check
     event = "BREAK"
     irq = uart.irq(handler=uart_irq_handler, trigger=(UART.IRQ_BREAK))
     uart.sendbreak()
-    break_seen = wait_for_irq_handler()
-    print("IRQ BREAK detected: ", break_seen and (irq.flags() & UART.IRQ_BREAK == UART.IRQ_BREAK))
+    wait_for_irq_handler()
+    print("IRQ BREAK detected: ", irq.flags() & UART.IRQ_BREAK == UART.IRQ_BREAK)
 
     # TXIDLE check
     event = "TXIDLE"
     uart.irq(handler=uart_irq_handler, trigger=(UART.IRQ_TXIDLE))
     uart.write("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-    txidle_seen = wait_for_irq_handler()
-    print(
-        "IRQ TXIDLE detected: ", txidle_seen and (irq.flags() & UART.IRQ_TXIDLE == UART.IRQ_TXIDLE)
-    )
+    wait_for_irq_handler()
+    print("IRQ TXIDLE detected: ", irq.flags() & UART.IRQ_TXIDLE == UART.IRQ_TXIDLE)
+    # prevent the TXIDLE IRQ from being triggered again by reading all data available in the RX FIFO.
     uart.read()
 
     # RXIDLE check
     event = "RXIDLE"
     uart.irq(handler=uart_irq_handler, trigger=(UART.IRQ_RXIDLE))
     uart.write("1")
-    rxidle_seen = wait_for_irq_handler()
-    print(
-        "IRQ RXIDLE detected: ", rxidle_seen and (irq.flags() & UART.IRQ_RXIDLE == UART.IRQ_RXIDLE)
-    )
+    wait_for_irq_handler()
+    print("IRQ RXIDLE detected: ", irq.flags() & UART.IRQ_RXIDLE == UART.IRQ_RXIDLE)
 
     # Clear the test IRQ handler so later UART traffic does not add extra output.
     uart.irq(handler=None, trigger=0)
