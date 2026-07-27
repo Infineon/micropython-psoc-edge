@@ -29,7 +29,6 @@ def avg_read(adc_obj, count=8):
     for _ in range(count):
         sum_uv += adc_obj.read_uv()
         sum_raw += adc_obj.read_u16()
-        time.sleep_ms(5)
     return sum_uv // count, sum_raw // count
 
 
@@ -62,7 +61,7 @@ g_uv, g_raw = avg_read(adc_gnd)
 m_uv, m_raw = avg_read(adc_mid)
 x_uv, x_raw = avg_read(adc_max)
 
-# Keep tolerances broad enough for board-to-board variation.
+# Broad tolerances account for leakage current and reference voltage variation across boards
 gnd_uv_ok = g_uv <= 200000
 gnd_raw_ok = g_raw <= 5000
 
