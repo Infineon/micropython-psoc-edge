@@ -57,30 +57,11 @@ static void mp_machine_adc_block_print(const mp_print_t *print, machine_adc_bloc
 }
 
 // ADCBlock(id) -> machine_adc_block_obj_t or NULL; id must exist in pin map
-static bool machine_adc_block_has_block(uint8_t block) {
-    if (block >= MICROPY_HW_ADC_MAX_BLOCKS) {
-        return false;
-    }
-
-    for (size_t channel = 0; channel < MICROPY_HW_ADC_MAX_CHANNELS; channel++) {
-        if (machine_adc_block_pins[block][channel] != NULL) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-// Get ADC block object by unit ID, validating it exists in pin map
+// Get ADC block singleton by unit ID.
 static machine_adc_block_obj_t *mp_machine_adc_block_get(mp_int_t unit) {
-    if (unit < 0 || unit > 0xff) {
+    if (unit < 0 || unit >= MICROPY_HW_ADC_MAX_BLOCKS) {
         return NULL;
     }
-    uint8_t block = (uint8_t)unit;
-    if (!machine_adc_block_has_block(block)) {
-        return NULL;
-    }
-    machine_adc_block_obj.unit = block;
     return &machine_adc_block_obj;
 }
 
@@ -93,12 +74,6 @@ static void mp_machine_adc_block_bits_set(machine_adc_block_obj_t *self, mp_int_
         mp_raise_ValueError(MP_ERROR_TEXT("invalid bits"));
     }
     (void)self;
-}
-
-// Wrapper to use shared machine_adc_get_block_channel_from_pin().
-static bool machine_adc_block_get_block_channel_from_pin(
-    const machine_pin_obj_t *pin, uint8_t *sar_block, uint8_t *gpio_channel) {
-    return machine_adc_get_block_channel_from_pin(pin, sar_block, gpio_channel);
 }
 
 // Map ADC block/channel to pin object.
@@ -122,7 +97,7 @@ static machine_adc_obj_t *mp_machine_adc_block_connect(machine_adc_block_obj_t *
 
     if (pin != MP_HAL_PIN_OBJ_NULL) {
         resolved_pin = pin;
-        if (!machine_adc_block_get_block_channel_from_pin(resolved_pin, &pin_block, &pin_channel)) {
+        if (!machine_adc_get_block_channel_from_pin(resolved_pin, &pin_block, &pin_channel)) {
             mp_raise_ValueError(MP_ERROR_TEXT("pin has no ADC capabilities"));
         }
         if (pin_block != self->unit) {
@@ -135,7 +110,7 @@ static machine_adc_obj_t *mp_machine_adc_block_connect(machine_adc_block_obj_t *
     }
 
     if (channel_id >= 0) {
-        if (channel_id > 0xff) {
+        if (channel_id >= MICROPY_HW_ADC_MAX_CHANNELS) {
             mp_raise_ValueError(MP_ERROR_TEXT("invalid channel id"));
         }
         if (resolved_pin == NULL) {

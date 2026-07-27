@@ -37,10 +37,6 @@
 #define ADC_NUM_CHANNELS (MICROPY_HW_ADC_MAX_CHANNELS)
 #define ADC_READ_TIMEOUT_US (1000)
 
-#if ADC_NUM_CHANNELS > 8
-#error "ADC_NUM_CHANNELS exceeds 8-bit channel mask support"
-#endif
-
 #define ADC_VDDA_MV (CY_CFG_PWR_VDDA_MV)
 
 #define MICROPY_PY_MACHINE_ADC_CLASS_CONSTANTS
@@ -49,8 +45,6 @@
 static bool adc_autanalog_initialized = false;
 // Bitmask of ADC channels enabled by user-created ADC objects.
 static uint8_t adc_enabled_channels_mask = 0;
-// Per-channel user reference count to support shared ADC objects per channel.
-static uint16_t adc_channel_refcount[ADC_NUM_CHANNELS] = {0};
 
 // ADC channel object: stores pin mapping
 typedef struct _machine_adc_obj_t {
@@ -58,8 +52,24 @@ typedef struct _machine_adc_obj_t {
     const machine_pin_obj_t *pin;      // GPIO pin used as the ADC input
     uint8_t sar_block;                 // SAR block index (always 0 on PSE84)
     uint8_t gpio_channel;              // GPIO channel index (0-7 for P15_0-P15_7)
-    bool active;                       // Tracks whether this object still owns a channel reference.
+    bool active;                       // Tracks whether this object is currently active.
 } machine_adc_obj_t;
+
+MP_REGISTER_ROOT_POINTER(struct _machine_adc_obj_t *machine_adc_obj[ADC_NUM_CHANNELS]);
+
+static machine_adc_obj_t *machine_adc_obj_get(uint8_t channel) {
+    if (channel >= ADC_NUM_CHANNELS) {
+        return NULL;
+    }
+    return MP_STATE_PORT(machine_adc_obj[channel]);
+}
+
+static void machine_adc_obj_set(uint8_t channel, machine_adc_obj_t *obj) {
+    if (channel >= ADC_NUM_CHANNELS) {
+        return;
+    }
+    MP_STATE_PORT(machine_adc_obj[channel]) = obj;
+}
 
 // ADC.__repr__ -> <ADC pin='P15_0' ch=0>
 static void mp_machine_adc_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
@@ -198,22 +208,15 @@ static void machine_adc_reload_config(uint8_t sar_block) {
     Cy_AutAnalog_StartAutonomousControl();
 }
 
-// Increase channel refcount and enable HW on first user.
+// Enable channel HW if not already enabled.
 static bool machine_adc_enable_channel(uint8_t channel) {
     if (channel >= ADC_NUM_CHANNELS) {
         return false;
     }
 
-    mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
-
-    if (adc_channel_refcount[channel] < UINT16_MAX) {
-        adc_channel_refcount[channel]++;
-    }
-
     uint8_t channel_mask = (uint8_t)(1u << channel);
     // Channel already configured; nothing else to do.
     if ((adc_enabled_channels_mask & channel_mask) != 0u) {
-        MICROPY_END_ATOMIC_SECTION(atomic_state);
         return false;
     }
 
@@ -224,33 +227,17 @@ static bool machine_adc_enable_channel(uint8_t channel) {
     CYBSP_SAR_ADC_sta_hs_cfg.hsGpioResultMask = adc_enabled_channels_mask;
     CYBSP_SAR_ADC_seq_hs_cfg[0].chanEn = adc_enabled_channels_mask;
     CYBSP_SAR_ADC_seq_hs_cfg[1].chanEn = adc_enabled_channels_mask;
-
-    MICROPY_END_ATOMIC_SECTION(atomic_state);
     return true;
 }
 
-// Decrease channel refcount and disable HW when the last user releases it.
+// Disable channel HW if currently enabled.
 static bool machine_adc_disable_channel(uint8_t channel) {
     if (channel >= ADC_NUM_CHANNELS) {
         return false;
     }
 
-    mp_uint_t atomic_state = MICROPY_BEGIN_ATOMIC_SECTION();
-
-    if (adc_channel_refcount[channel] == 0u) {
-        MICROPY_END_ATOMIC_SECTION(atomic_state);
-        return false;
-    }
-
-    adc_channel_refcount[channel]--;
-    if (adc_channel_refcount[channel] != 0u) {
-        MICROPY_END_ATOMIC_SECTION(atomic_state);
-        return false;
-    }
-
     uint8_t channel_mask = (uint8_t)(1u << channel);
     if ((adc_enabled_channels_mask & channel_mask) == 0u) {
-        MICROPY_END_ATOMIC_SECTION(atomic_state);
         return false;
     }
 
@@ -259,8 +246,6 @@ static bool machine_adc_disable_channel(uint8_t channel) {
     CYBSP_SAR_ADC_sta_hs_cfg.hsGpioResultMask = adc_enabled_channels_mask;
     CYBSP_SAR_ADC_seq_hs_cfg[0].chanEn = adc_enabled_channels_mask;
     CYBSP_SAR_ADC_seq_hs_cfg[1].chanEn = adc_enabled_channels_mask;
-
-    MICROPY_END_ATOMIC_SECTION(atomic_state);
     return true;
 }
 
@@ -311,7 +296,10 @@ void machine_adc_deinit_all(void) {
     adc_autanalog_initialized = false;
     adc_enabled_channels_mask = 0;
     for (size_t i = 0; i < ADC_NUM_CHANNELS; i++) {
-        adc_channel_refcount[i] = 0;
+        if (MP_STATE_PORT(machine_adc_obj[i]) != NULL) {
+            MP_STATE_PORT(machine_adc_obj[i])->active = false;
+            MP_STATE_PORT(machine_adc_obj[i]) = NULL;
+        }
     }
 
     // Reset cached ADC config so the next ADC creation starts clean.
@@ -329,15 +317,21 @@ static mp_obj_t mp_machine_adc_make_new(const mp_obj_type_t *type, size_t n_args
         mp_raise_ValueError(MP_ERROR_TEXT("Pin doesn't have ADC capabilities"));
     }
 
+    machine_adc_obj_t *existing = machine_adc_obj_get(channel);
+    if (existing != NULL && existing->active) {
+        return MP_OBJ_FROM_PTR(existing);
+    }
+
     machine_adc_obj_t *o = mp_obj_malloc(machine_adc_obj_t, &machine_adc_type);
     o->pin = pin;
     o->sar_block = sar_block;
     o->gpio_channel = channel;
     o->active = true;
+    machine_adc_obj_set(channel, o);
 
     // Initialize autonomous analog once and enable only the requested channel.
     machine_adc_init_autanalog();
-    // Per-user pin enable: this avoids pre-enabling all ADC-capable channels.
+    // Per-channel enable: this avoids pre-enabling all ADC-capable channels.
     bool channel_enabled = machine_adc_enable_channel(channel);
 
     // Apply updated channel selection once when configuration changes.
@@ -389,13 +383,16 @@ static mp_int_t mp_machine_adc_read_uv(machine_adc_obj_t *self) {
     return (mp_int_t)(((uint64_t)raw_12b * ((uint64_t)ADC_VDDA_MV * 1000u)) / 4095u);
 }
 
-// ADC.deinit() - release this ADC user's channel reference.
+// ADC.deinit() - disable this channel and release the cached ADC instance.
 static void mp_machine_adc_deinit(machine_adc_obj_t *self) {
     if (!self->active) {
         return;
     }
 
     self->active = false;
+    if (machine_adc_obj_get(self->gpio_channel) == self) {
+        machine_adc_obj_set(self->gpio_channel, NULL);
+    }
     if (machine_adc_disable_channel(self->gpio_channel)) {
         machine_adc_reload_config(self->sar_block);
     }
