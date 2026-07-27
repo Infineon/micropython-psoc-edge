@@ -403,17 +403,7 @@ function ci_psoc_edge_build_hil {
     docker exec mpy-ci make BOARD=${board}
 }
 
-function ci_psoc_edge_deploy_cm55_hil {
-    board=$1
-    devs_file=$2
-    uids=$(etdevs-query uid --filter name=${board} --devs-yml ${devs_file})
-    for uid in $uids; do
-        echo "Deploying CM55 firmware to device with UID: ${uid}"
-        docker exec mpy-ci make deploy_cm55 BOARD=${board} DEV_SERIAL_NUMBER=${uid}
-    done
-}
-
-function ci_psoc_edge_deploy_hil {
+function ci_psoc_edge_deploy_mpy_hil {
     board=$1
     # hex file including path with respect to micropython root
     hex_file=$2
@@ -425,8 +415,53 @@ function ci_psoc_edge_deploy_hil {
     else
         dev_files_arg="--devs-file ../../${devs_file}"
     fi
-    
+
     docker exec mpy-ci /bin/bash -c "cd ../../tools/psoc-edge && python3 mpy-pse.py device-setup --board ${board} --hex-file ${hex_file} ${dev_files_arg} -q"
+}
+
+function ci_psoc_edge_deploy_cm55_hil {
+    board=$1
+    devs_file=$2
+    uids=$(etdevs-query uid --filter name=${board} --devs-yml ${devs_file})
+    for uid in $uids; do
+        echo "Deploying CM55 firmware to device with UID: ${uid}"
+        docker exec mpy-ci make deploy_cm55 BOARD=${board} DEV_SERIAL_NUMBER=${uid}
+    done
+}
+
+function ci_psoc_edge_install_libs_hil {
+    board=$1
+    devs_file=$2
+    mpr_cmd="python3 tools/mpremote/mpremote.py"
+    libs=(unittest)
+
+    uids=$(etdevs-query uid --filter name=${board} --devs-yml ${devs_file})
+    for lib in "${libs[@]}"; do
+        for uid in $uids; do
+            port=$(etdevs-query address --filter uid=${uid} --devs-yml ${devs_file})
+            echo "Checking unittest on device UID ${uid} (port: ${port})"
+
+            # Only install the library if not already present in "/lib".
+            # `mpremote ls` prints size columns, so match against the final path token.
+            if ${mpr_cmd} connect ${port} ls lib 2>/dev/null | awk '{print $NF}' | grep -Eq "^${lib}/?$"; then
+                echo "${lib} already installed on ${port}"
+            else
+                echo "Installing ${lib} on ${port}"
+                ${mpr_cmd} connect ${port} mip install ${lib}
+            fi
+        done
+    done
+}
+
+function ci_psoc_edge_deploy_hil {
+    board=$1
+    # hex file including path with respect to micropython root
+    hex_file=$2
+    devs_file=$3
+
+    ci_psoc_edge_deploy_mpy_hil "${board}" "${hex_file}" "${devs_file}"
+    ci_psoc_edge_deploy_cm55_hil "${board}" "${devs_file}"
+    ci_psoc_edge_install_libs_hil "${board}" "${devs_file}"
 }
 
 function ci_psoc_edge_teardown_hil {
