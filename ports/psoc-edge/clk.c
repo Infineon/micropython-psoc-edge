@@ -316,7 +316,7 @@ void pclk_div_repl_uart_init(void) {
     pclk->peri_inst = CLK_DEST_INST(PCLK_SCB2_CLOCK_SCB_EN);
     pclk->type = CY_SYSCLK_DIV_8_BIT;
     pclk->number = 0;
-    pclk->value = 86U; // From retarget-io: floor(10000000/(115200*10)) - 1 = 86
+    pclk->value = 72U; // From retarget-io: floor(10000000/(115200*12)) - 1 = 72
     pclk->value_frac = 0;
     pclk->owner_count = 1;
 
@@ -326,6 +326,6 @@ void pclk_div_repl_uart_init(void) {
     Cy_SysClk_PeriPclkAssignDivider(PCLK_SCB2_CLOCK_SCB_EN, CY_SYSCLK_DIV_8_BIT, 0U);
 
     uint32_t ip_block = (pclk->peri_inst << PERI_PCLK_INST_NUM_Pos) | (pclk->group << PERI_PCLK_GR_NUM_Pos);
-    Cy_SysClk_PeriPclkSetDivider(ip_block, CY_SYSCLK_DIV_8_BIT, 0U, 86U);
+    Cy_SysClk_PeriPclkSetDivider(ip_block, CY_SYSCLK_DIV_8_BIT, 0U, pclk->value);
     Cy_SysClk_PeriPclkEnableDivider(ip_block, CY_SYSCLK_DIV_8_BIT, 0U);
 }
