@@ -766,26 +766,20 @@ static mp_uint_t mp_machine_uart_read(mp_obj_t self_in, void *buf_in, mp_uint_t 
 
 static mp_uint_t mp_machine_uart_write(mp_obj_t self_in, const void *buf_in, mp_uint_t size, int *errcode) {
     machine_uart_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    const uint8_t *src = (const uint8_t *)buf_in;
-    uint32_t write_count = 0;
-
-    while (size > 0) {
-        uint32_t timeout = (write_count == 0) ? self->timeout_ms : self->timeout_char_ms;
-        if (!machine_uart_tx_wait(self, timeout)) {
-            /* First byte timeout should map to EAGAIN (write returns None). */
-            if (write_count == 0) {
-                *errcode = MP_EAGAIN;
-                return MP_STREAM_ERROR;
-            }
-            /* Partial write on timeout after some progress. */
-            break;
-        }
-
-        Cy_SCB_UART_Put(self->scb_obj->scb, (uint32_t)(*src));
-        src++;
-        size--;
-        write_count++;
+    /* wait to be able to write the first character. */
+    if (!machine_uart_tx_wait(self, self->timeout_ms)) {
+        /* EAGAIN causes write to return None */
+        *errcode = MP_EAGAIN;
+        return MP_STREAM_ERROR;
     }
+
+    uint32_t write_count = 0;
+    do {
+        uint32_t written = Cy_SCB_UART_PutArray(self->scb_obj->scb, (void *)buf_in, size);
+        buf_in = (const uint8_t *)buf_in + written;
+        size -= written;
+        write_count += written;
+    } while (size > 0 && machine_uart_tx_wait(self, self->timeout_char_ms));
 
     return write_count;
 }
