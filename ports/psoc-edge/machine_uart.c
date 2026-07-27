@@ -69,7 +69,10 @@
 #define UART_FLOW_CONTROL_RTS     (1)
 #define UART_FLOW_CONTROL_CTS     (2)
 #define UART_FLOW_CONTROL_MASK    (UART_FLOW_CONTROL_RTS | UART_FLOW_CONTROL_CTS)
-#define UART_RTS_RX_FIFO_LEVEL    (8UL)
+
+// The RX FIFO level at which the RTS pin is deasserted to throttle the sender.
+// Threshold is set to 112 bytes, which is fifo size (128) - 16 bytes (cushion).
+#define UART_RTS_RX_FIFO_LEVEL    (112UL)
 #define UART_IRQ_RXIDLE           (CY_SCB_RX_INTR_NOT_EMPTY)
 
 // Class-level constants exposed to Python
@@ -173,7 +176,7 @@ static inline void machine_uart_resume_rx_not_empty_irq(machine_uart_obj_t *self
 static void machine_uart_fill_rx_ring_buff(machine_uart_obj_t *self) {
     uint32_t available_rx_frames = Cy_SCB_UART_GetNumInRxFifo(self->scb_obj->scb);
     for (uint32_t i = 0; i < available_rx_frames; i++) {
-        if (!ringbuf_put(&self->rx_ringbuf, (uint8_t)Cy_SCB_UART_Get(self->scb_obj->scb))) {
+        if (ringbuf_free(&self->rx_ringbuf) == 0) {
             /**
              * Pause software draining when the ring buffer is full so RX FIFO
              * can back up and hardware RTS can deassert to throttle sender.
@@ -181,6 +184,9 @@ static void machine_uart_fill_rx_ring_buff(machine_uart_obj_t *self) {
             machine_uart_set_rx_not_empty_irq(self, false);
             return;
         }
+
+        // Only read from HW FIFO after ensuring there is space in the SW ring buffer.
+        ringbuf_put(&self->rx_ringbuf, (uint8_t)Cy_SCB_UART_Get(self->scb_obj->scb));
     }
 }
 
