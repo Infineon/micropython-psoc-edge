@@ -64,6 +64,17 @@ class PSE84Pin(boardgen.Pin):
     def definition(self):
         return f"PIN({self._port}, {self._pin}, pin_{self.name()}_af)"
 
+    @staticmethod
+    def parse_adc_label(label):
+        """Parse ADC label like 'ADCBLOCK0_CH3' -> (0, 3) or None if invalid."""
+        label = label.strip()
+        if not label:
+            return None
+        match = re.match(r"^ADCBLOCK(\d+)_CH(\d+)$", label)
+        if match:
+            return (int(match.group(1)), int(match.group(2)))
+        return None
+
     def add_af_scb(self, af_idx, af_name, af):
         # The SCB alternate function follow the
         # convention:
@@ -153,8 +164,7 @@ class PSE84Pin(boardgen.Pin):
     def add_af(self, af_idx, af_name, af):
         # Handle ADC entries (usually from a special "ADC" column)
         if af_name == "ADC":
-            # Delegate to generator to track ADC
-            self._adc_map = self._generator.parse_adc_label(af)
+            self._adc_map = self.parse_adc_label(af)
             return
 
         # The AF index matches the column index for the ACTx functions 0-15
@@ -265,17 +275,6 @@ class PSE84PinGenerator(boardgen.PinGenerator):
 
         # ADC tracking: dict of (block, channel) -> pin object
         self._adc_pin_map = {}
-
-    @staticmethod
-    def parse_adc_label(label):
-        """Parse ADC label like 'ADCBLOCK0_CH3' -> (0, 3) or None if invalid."""
-        label = label.strip()
-        if not label:
-            return None
-        match = re.match(r"^ADCBLOCK(\d+)_CH(\d+)$", label)
-        if match:
-            return (int(match.group(1)), int(match.group(2)))
-        return None
 
     def add_adc(self):
         """Collect ADC mappings from all available pins."""
