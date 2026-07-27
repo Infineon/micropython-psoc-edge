@@ -68,7 +68,6 @@
 #define UART_FLOW_CONTROL_NONE    (0)
 #define UART_FLOW_CONTROL_RTS     (1)
 #define UART_FLOW_CONTROL_CTS     (2)
-#define UART_FLOW_CONTROL_MASK    (UART_FLOW_CONTROL_RTS | UART_FLOW_CONTROL_CTS)
 
 // The RX FIFO level at which the RTS pin is deasserted to throttle the sender.
 // Threshold is set to 112 bytes, which is fifo size (128) - 16 bytes (cushion).
@@ -157,7 +156,7 @@ static void machine_uart_irq_rx_break(machine_uart_obj_t *self);
 static void machine_uart_irq_tx_idle(machine_uart_obj_t *self);
 #endif
 
-static inline void machine_uart_set_rx_not_empty_irq(machine_uart_obj_t *self, bool enable) {
+static inline void machine_uart_irq_rx_not_empty_config(machine_uart_obj_t *self, bool enable) {
     uint32_t mask = Cy_SCB_GetRxInterruptMask(self->scb_obj->scb);
     if (enable) {
         mask |= CY_SCB_RX_INTR_NOT_EMPTY;
@@ -167,10 +166,12 @@ static inline void machine_uart_set_rx_not_empty_irq(machine_uart_obj_t *self, b
     Cy_SCB_SetRxInterruptMask(self->scb_obj->scb, mask);
 }
 
-static inline void machine_uart_resume_rx_not_empty_irq(machine_uart_obj_t *self) {
-    if ((Cy_SCB_GetRxInterruptMask(self->scb_obj->scb) & CY_SCB_RX_INTR_NOT_EMPTY) == 0U) {
-        machine_uart_set_rx_not_empty_irq(self, true);
-    }
+static inline void machine_uart_irq_rx_pause(machine_uart_obj_t *self) {
+    machine_uart_irq_rx_not_empty_config(self, false);
+}
+
+static inline void machine_uart_irq_rx_resume(machine_uart_obj_t *self) {
+    machine_uart_irq_rx_not_empty_config(self, true);
 }
 
 static void machine_uart_fill_rx_ring_buff(machine_uart_obj_t *self) {
@@ -178,14 +179,14 @@ static void machine_uart_fill_rx_ring_buff(machine_uart_obj_t *self) {
     for (uint32_t i = 0; i < available_rx_frames; i++) {
         if (ringbuf_free(&self->rx_ringbuf) == 0) {
             /**
-             * Pause software draining when the ring buffer is full so RX FIFO
-             * can back up and hardware RTS can deassert to throttle sender.
+             * Pause rx irq to avoid interrupt storms while the
+             * ring buffer is full. Supports RTS flow control,
+             * if enabled, to throttle the sender.
              */
-            machine_uart_set_rx_not_empty_irq(self, false);
+            machine_uart_irq_rx_pause(self);
             return;
         }
 
-        // Only read from HW FIFO after ensuring there is space in the SW ring buffer.
         ringbuf_put(&self->rx_ringbuf, (uint8_t)Cy_SCB_UART_Get(self->scb_obj->scb));
     }
 }
@@ -519,7 +520,7 @@ static void machine_uart_init_impl(machine_uart_obj_t **self_ptr, int uart_id, s
     /* -- Flow control pins -- */
     uint32_t flow = (uint32_t)args[ARG_flow].u_int;
 
-    if ((flow & ~UART_FLOW_CONTROL_MASK) != 0U) {
+    if ((flow & ~(UART_FLOW_CONTROL_RTS | UART_FLOW_CONTROL_CTS)) != 0U) {
         mp_raise_ValueError(MP_ERROR_TEXT("flow must be UART.RTS, UART.CTS or both"));
     }
 
@@ -721,7 +722,7 @@ static void mp_machine_uart_sendbreak(machine_uart_obj_t *self) {
 static mp_int_t mp_machine_uart_readchar(machine_uart_obj_t *self) {
     if (machine_uart_rx_wait(self, self->timeout_ms)) {
         uint8_t data = (uint8_t)ringbuf_get(&self->rx_ringbuf);
-        machine_uart_resume_rx_not_empty_irq(self);
+        machine_uart_irq_rx_resume(self);
         return data;
     }
 
@@ -758,7 +759,7 @@ static mp_uint_t mp_machine_uart_read(mp_obj_t self_in, void *buf_in, mp_uint_t 
         ringbuf_memcpy_get_internal(&self->rx_ringbuf, (uint8_t *)buf_in + read_count, to_read);
         read_count += to_read;
         size -= to_read;
-        machine_uart_resume_rx_not_empty_irq(self);
+        machine_uart_irq_rx_resume(self);
     } while (size > 0 && machine_uart_rx_wait(self, self->timeout_char_ms));
 
     return read_count;
