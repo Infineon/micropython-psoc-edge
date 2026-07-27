@@ -235,9 +235,6 @@ ADC (analog to digital conversion)
 See :ref:`machine.ADC <machine.ADC>` and :ref:`machine.ADCBlock <machine.ADCBlock>`.
 
 On the PSOC™ Edge, a single ADC block with id - ``0`` is available.
-The ADC functionality is available on the following pins : ``P15_0`` - ``P15_7``.
-
-Channel-to-pin routing is fixed by the board pin map.
 
 Use :class:`ADC` to read analog values from an ADC-capable pin::
 
@@ -249,8 +246,6 @@ Use :class:`ADC` to read analog values from an ADC-capable pin::
     adc.deinit()
 
 This port also supports :class:`ADCBlock` to provide control over ADC configuration.
-Currently, PSOC™ Edge supports a single SAR ADC with channel-to-pin mapping fixed
-by the board pin map.
 
 Use :class:`ADCBlock` to connect by channel, pin, or both::
 
@@ -267,21 +262,8 @@ Use :class:`ADCBlock` to connect by channel, pin, or both::
 
 .. note::
 
-    Arbitrary channel-to-GPIO routing is not supported.
-    Passing a non-ADC pin, or a mismatched channel+pin pair, raises ``ValueError``.
-
-.. note::
-
     ``ADCBlock(0, bits=12)`` is supported on this port.
     Other ``bits`` values are rejected.
-
-For a quick hardware check, use a 10k/10k divider:
-
-- Connect ``P15_3`` to GND.
-- Connect ``P15_2`` to VDD.
-- Connect midpoint of 10k/10k divider to ``P15_1``.
-
-Then ``P15_1`` should read approximately half of ``P15_2``.
 
 Real time clock (RTC)
 ---------------------
