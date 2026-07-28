@@ -1,0 +1,86 @@
+name: psoc-edge port ifx all tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - 'psoc-edge-*'
+      - '!psoc-edge-main'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  mpy_hex_file: firmware.hex
+
+jobs:
+  server-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        board:
+          - KIT_PSE84_AI
+    outputs:
+      commit_sha: ${{ steps.commit_sha.outputs.sha_short }}
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install packages
+        run: source tools/ci.sh && ci_psoc_edge_setup
+      - name: Build
+        run: source tools/ci.sh && ci_psoc_edge_build ${{ matrix.board }}
+      - name: Gets commit SHA
+        if: success()
+        id: commit_sha
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      - name: Save firmware bin
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpy-psoc-edge_${{ matrix.board }}_${{ steps.commit_sha.outputs.sha_short }}
+          path: ports/psoc-edge/build-${{ matrix.board }}/${{ env.mpy_hex_file }}
+
+  on-target-test:
+    runs-on:
+      - self-hosted
+      - Linux
+      - PSOC-EDGE
+    needs: server-build
+    strategy:
+      matrix:
+        board:
+          - KIT_PSE84_AI
+    steps:
+      - name: Fix permissions
+        run: echo ${{ secrets.SELF_HOSTED_PASSWORD }} | sudo -S chown -R $(whoami):$(whoami) .
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+      - name: Container setup
+        run: |
+          echo ${{ secrets.SELF_HOSTED_PASSWORD }} | sudo -S chmod 666 /var/run/docker.sock
+          source tools/ci.sh && ci_psoc_edge_setup_hil ${{ matrix.board }}
+      - name: Setup devices
+        run: |
+          cp mpy-psoc-edge_${{ matrix.board }}_${{ needs.server-build.outputs.commit_sha }}/${{ env.mpy_hex_file }} tools/psoc-edge
+          source tools/ci.sh && ci_psoc_edge_deploy_hil ${{ matrix.board }} ${{ env.mpy_hex_file }} tests/ports/psoc-edge/${{ runner.name }}-devs.yml
+      - name: Run all tests
+        env:
+          pse_test_dir: tests/ports/psoc-edge
+        run: |
+          devs_file=$pse_test_dir/${{ runner.name }}-devs.yml
+          # TODO: Select the UART target via feature query once etdevs-query supports it.
+          target_uid=101A1398012D2400
+
+          target_port=$(etdevs-query address --filter uid=$target_uid --devs-yml $devs_file | head -1)
+          cd tests
+          ./run-tests.py -t "$target_port" --via-mpy || ./run-tests.py -t "$target_port" --via-mpy --run-failures
+          ./run-tests.py -t "$target_port" --via-mpy --emit native || ./run-tests.py -t "$target_port" --via-mpy --emit native --run-failures
+          ./run-tests.py -t "$target_port" -d extmod_hardware || ./run-tests.py -t "$target_port" -d extmod_hardware --run-failures
+          ./run-natmodtests.py -t "$target_port" extmod/*.py
+      - name: Container teardown
+        if: always()
+        run: |
+          source tools/ci.sh && ci_psoc_edge_teardown_hil
