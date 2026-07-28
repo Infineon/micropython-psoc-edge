@@ -125,9 +125,6 @@ static void machine_hw_i2c_init(machine_hw_i2c_obj_t *self, uint32_t freq_hz) {
 
     mp_hal_periph_pins_af_init(i2c_pins_config, 2);
 
-    result = Cy_SCB_I2C_Init(self->scb_obj->scb, &self->cfg, &self->ctx);
-    i2c_assert_raise_val("I2C init failed: 0x%lx", result);
-
     // For desired data rate, clk_scb frequency must be in valid range (see TRM I2C Oversampling section)
     // For 100kHz: clk_scb range is 1.55 - 3.2 MHz (architecture reference manual 002-38331 Rev. P685 table 355)
     //   - clk_peri = 100 MHz, divider = 42 → clk_scb = 2.38 MHz ✓ (mid-range)
@@ -141,6 +138,9 @@ static void machine_hw_i2c_init(machine_hw_i2c_obj_t *self, uint32_t freq_hz) {
     if (self->pclk_div == NULL) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to initialize clock divider for I2C(%u)"), self->scb_obj->id);
     }
+
+    result = Cy_SCB_I2C_Init(self->scb_obj->scb, &self->cfg, &self->ctx);
+    i2c_assert_raise_val("I2C init failed: 0x%lx", result);
 
     uint32_t input_freq = pclk_div_get_input_freq(self->scb_obj->clk);
     if (input_freq == 0U) {
