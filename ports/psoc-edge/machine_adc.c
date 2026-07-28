@@ -49,7 +49,7 @@ static uint8_t adc_enabled_channels_mask = 0;
 // ADC channel object: stores pin mapping
 typedef struct _machine_adc_obj_t {
     mp_obj_base_t base;
-    const machine_pin_obj_t *pin;      // GPIO pin used as the ADC input
+    mp_hal_pin_obj_t pin;              // GPIO pin used as the ADC input
     uint8_t sar_block;                 // SAR block index (always 0 on PSE84)
     uint8_t gpio_channel;              // GPIO channel index (0-7 for P15_0-P15_7)
     bool active;                       // Tracks whether this object is currently active.
@@ -251,10 +251,10 @@ static bool machine_adc_disable_channel(uint8_t channel) {
 
 // Map pin to (SAR block, channel); shared with machine_adc_block.c
 bool machine_adc_get_block_channel_from_pin(
-    const machine_pin_obj_t *pin, uint8_t *sar_block, uint8_t *gpio_channel) {
+    mp_hal_pin_obj_t pin, uint8_t *sar_block, uint8_t *gpio_channel) {
     for (size_t block = 0; block < MICROPY_HW_ADC_MAX_BLOCKS; block++) {
         for (size_t channel = 0; channel < MICROPY_HW_ADC_MAX_CHANNELS; channel++) {
-            const machine_pin_obj_t *adc_pin = machine_adc_block_pins[block][channel];
+            mp_hal_pin_obj_t adc_pin = machine_adc_block_pins[block][channel];
             if (adc_pin == NULL) {
                 continue;
             }
@@ -310,7 +310,7 @@ void machine_adc_deinit_all(void) {
 static mp_obj_t mp_machine_adc_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     mp_arg_check_num(n_args, n_kw, 1, 1, false);
 
-    const machine_pin_obj_t *pin = mp_hal_get_pin_obj(args[0]);
+    mp_hal_pin_obj_t pin = mp_hal_get_pin_obj(args[0]);
     uint8_t sar_block = 0;
     uint8_t channel = 0;
     if (!machine_adc_get_block_channel_from_pin(pin, &sar_block, &channel)) {

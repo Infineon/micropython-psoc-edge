@@ -32,7 +32,7 @@
 
 // Shared pin lookup function from machine_adc.c
 extern bool machine_adc_get_block_channel_from_pin(
-    const machine_pin_obj_t *pin, uint8_t *sar_block, uint8_t *gpio_channel);
+    mp_hal_pin_obj_t pin, uint8_t *sar_block, uint8_t *gpio_channel);
 
 // SAR ADC: fixed 12-bit resolution
 #define ADC_BLOCK_BITS (12)
@@ -77,7 +77,7 @@ static void mp_machine_adc_block_bits_set(machine_adc_block_obj_t *self, mp_int_
 }
 
 // Map ADC block/channel to pin object.
-static const machine_pin_obj_t *machine_adc_block_get_pin_from_channel(uint8_t block, uint8_t channel) {
+static mp_hal_pin_obj_t machine_adc_block_get_pin_from_channel(uint8_t block, uint8_t channel) {
     if (block >= MICROPY_HW_ADC_MAX_BLOCKS || channel >= MICROPY_HW_ADC_MAX_CHANNELS) {
         return NULL;
     }
@@ -91,7 +91,7 @@ static machine_adc_obj_t *mp_machine_adc_block_connect(machine_adc_block_obj_t *
         mp_raise_TypeError(MP_ERROR_TEXT("keyword args not supported"));
     }
 
-    const machine_pin_obj_t *resolved_pin = NULL;
+    mp_hal_pin_obj_t resolved_pin = NULL;
     uint8_t pin_block = 0;
     uint8_t pin_channel = 0;
 
