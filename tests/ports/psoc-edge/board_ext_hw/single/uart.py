@@ -200,6 +200,53 @@ def uart_flow_tests():
     run_case("Flow RTS", UART.RTS)
     run_case("Flow CTS|RTS", UART.CTS | UART.RTS)
 
+    # CTS deasserted should block TX.
+    uart.init(
+        flow=UART.CTS,
+        tx=flow_pins_args["tx"],
+        rx=flow_pins_args["rx"],
+        cts=flow_pins_args["cts"],
+        **flow_conf,
+    )
+    uart.read()
+    cts_peer_pin(1)  # active-low CTS deasserted => transmitter must stop.
+    blocked_payload = b"cts-block-test"
+    uart.write(blocked_payload)
+    time.sleep_ms(50)
+    tx_blocked = uart.txdone() == False
+    rx_data = uart.read(len(blocked_payload))
+    rx_blocked = (rx_data is None) or (rx_data == b"")
+    print("Flow CTS blocked TX:", tx_blocked and rx_blocked)
+
+    # Restore CTS asserted and drain any pending payload.
+    cts_peer_pin(0)
+    time.sleep_ms(50)
+    uart.read()
+
+    # Verify RTS backpressure: when RX capacity is exceeded, RTS should deassert.
+    # Board-ext wiring ties P16_6 (RTS output) to P16_5, so sample P16_5 as observer.
+    rts_observer = Pin("P16_5", Pin.IN)
+    uart.init(
+        flow=UART.RTS,
+        tx=flow_pins_args["tx"],
+        rx=flow_pins_args["rx"],
+        rts=flow_pins_args["rts"],
+        **flow_conf,
+    )
+    uart.read()
+
+    levels = {rts_observer.value()}
+    # Send a payload larger than the RX buffer, in chunks, and sample the RTS line after each chunk.
+    tx_payload = bytes([x & 0xFF for x in range(flow_conf["rxbuf"] + 256)])
+    for i in range(0, len(tx_payload), 64):
+        uart.write(tx_payload[i : i + 64])
+        time.sleep_ms(2)
+        levels.add(rts_observer.value())
+
+    # Drain loopback RX to avoid affecting later users of this UART in this file.
+    uart.read()
+    print("Flow RTS backpressure toggled:", len(levels) > 1)
+
 
 uart_tests()
 uart_irq()
