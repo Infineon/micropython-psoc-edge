@@ -1,6 +1,5 @@
 - require:
     - unittest
-    - umqtt.simple
 
 - name: general
   test: 
