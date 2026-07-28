@@ -49,9 +49,9 @@ static uint8_t adc_enabled_channels_mask = 0;
 // ADC channel object: stores pin mapping
 typedef struct _machine_adc_obj_t {
     mp_obj_base_t base;
-    mp_hal_pin_obj_t pin;              // GPIO pin used as the ADC input
-    uint8_t sar_block;                 // SAR block index (always 0 on PSE84)
-    uint8_t gpio_channel;              // GPIO channel index (0-7 for P15_0-P15_7)
+    mp_hal_pin_obj_t pin;          // GPIO pin used as the ADC input
+    uint8_t block;                 // SAR block index (always 0 on PSE84)
+    uint8_t channel;               // GPIO channel index (0-7 for P15_0-P15_7)
 } machine_adc_obj_t;
 
 MP_REGISTER_ROOT_POINTER(struct _machine_adc_obj_t *machine_adc_obj[ADC_NUM_CHANNELS]);
@@ -73,11 +73,11 @@ static void machine_adc_obj_set(uint8_t channel, machine_adc_obj_t *obj) {
 // ADC.__repr__ -> <ADC pin='P15_0' ch=0>
 static void mp_machine_adc_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     machine_adc_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    mp_printf(print, "<ADC pin='%q' ch=%u>", self->pin->name, self->gpio_channel);
+    mp_printf(print, "<ADC pin='%q' ch=%u>", self->pin->name, self->channel);
 }
 
 // Initialize BSP-generated CYBSP_SAR_ADC_* structures for one requested GPIO channel.
-static void machine_adc_init_gpio_channel(uint8_t channel) {
+static void machine_adc_init_channel(uint8_t channel) {
     if (channel >= ADC_NUM_CHANNELS) {
         return;
     }
@@ -199,8 +199,8 @@ static void machine_adc_init_configs(void) {
 }
 
 // Reload SAR config after channel mask updates.
-static void machine_adc_reload_config(uint8_t sar_block) {
-    uint32_t status = Cy_AutAnalog_SAR_LoadConfig(sar_block, &CYBSP_SAR_ADC_cfg);
+static void machine_adc_reload_config(uint8_t block) {
+    uint32_t status = Cy_AutAnalog_SAR_LoadConfig(block, &CYBSP_SAR_ADC_cfg);
     if (status != CY_AUTANALOG_SUCCESS) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("ADC config load failed"));
     }
@@ -220,7 +220,7 @@ static bool machine_adc_enable_channel(uint8_t channel) {
     }
 
     // Enable only the requested channel in GPIO config, result mask, and sequencer mask.
-    machine_adc_init_gpio_channel(channel);
+    machine_adc_init_channel(channel);
     CYBSP_SAR_ADC_sta_hs_cfg.hsGpioChan[channel] = &CYBSP_SAR_ADC_gpio_ch_cfg[channel];
     adc_enabled_channels_mask |= channel_mask;
     CYBSP_SAR_ADC_sta_hs_cfg.hsGpioResultMask = adc_enabled_channels_mask;
@@ -250,16 +250,16 @@ static bool machine_adc_disable_channel(uint8_t channel) {
 
 // Map pin to (SAR block, channel); shared with machine_adc_block.c
 bool machine_adc_get_block_channel_from_pin(
-    mp_hal_pin_obj_t pin, uint8_t *sar_block, uint8_t *gpio_channel) {
-    for (size_t block = 0; block < MICROPY_HW_ADC_MAX_BLOCKS; block++) {
-        for (size_t channel = 0; channel < MICROPY_HW_ADC_MAX_CHANNELS; channel++) {
-            mp_hal_pin_obj_t adc_pin = machine_adc_block_pins[block][channel];
+    mp_hal_pin_obj_t pin, uint8_t *block, uint8_t *channel) {
+    for (size_t block_idx = 0; block_idx < MICROPY_HW_ADC_MAX_BLOCKS; block_idx++) {
+        for (size_t channel_idx = 0; channel_idx < MICROPY_HW_ADC_MAX_CHANNELS; channel_idx++) {
+            mp_hal_pin_obj_t adc_pin = machine_adc_block_pins[block_idx][channel_idx];
             if (adc_pin == NULL) {
                 continue;
             }
             if (pin->port == adc_pin->port && pin->pin == adc_pin->pin) {
-                *sar_block = (uint8_t)block;
-                *gpio_channel = (uint8_t)channel;
+                *block = (uint8_t)block_idx;
+                *channel = (uint8_t)channel_idx;
                 return true;
             }
         }
@@ -309,9 +309,9 @@ static mp_obj_t mp_machine_adc_make_new(const mp_obj_type_t *type, size_t n_args
     mp_arg_check_num(n_args, n_kw, 1, 1, false);
 
     mp_hal_pin_obj_t pin = mp_hal_get_pin_obj(args[0]);
-    uint8_t sar_block = 0;
+    uint8_t block = 0;
     uint8_t channel = 0;
-    if (!machine_adc_get_block_channel_from_pin(pin, &sar_block, &channel)) {
+    if (!machine_adc_get_block_channel_from_pin(pin, &block, &channel)) {
         mp_raise_ValueError(MP_ERROR_TEXT("Pin doesn't have ADC capabilities"));
     }
 
@@ -322,8 +322,8 @@ static mp_obj_t mp_machine_adc_make_new(const mp_obj_type_t *type, size_t n_args
 
     machine_adc_obj_t *o = mp_obj_malloc(machine_adc_obj_t, &machine_adc_type);
     o->pin = pin;
-    o->sar_block = sar_block;
-    o->gpio_channel = channel;
+    o->block = block;
+    o->channel = channel;
     machine_adc_obj_set(channel, o);
 
     // Initialize autonomous analog once and enable only the requested channel.
@@ -333,19 +333,19 @@ static mp_obj_t mp_machine_adc_make_new(const mp_obj_type_t *type, size_t n_args
 
     // Apply updated channel selection once when configuration changes.
     if (channel_enabled) {
-        machine_adc_reload_config(o->sar_block);
+        machine_adc_reload_config(o->block);
     }
     return MP_OBJ_FROM_PTR(o);
 }
 
 // Read one ADC conversion as raw 12-bit value (0-4095).
 static uint16_t machine_adc_read_raw_12b(machine_adc_obj_t *self) {
-    uint8_t channel_mask = (uint8_t)(1u << self->gpio_channel);
+    uint8_t channel_mask = (uint8_t)(1u << self->channel);
     uint32_t timeout = ADC_READ_TIMEOUT_US;
 
     // Clear result status and wait for new result
-    Cy_AutAnalog_SAR_ClearHSchanResultStatus(self->sar_block, channel_mask);
-    while (((Cy_AutAnalog_SAR_GetHSchanResultStatus(self->sar_block) & channel_mask) == 0u) && timeout != 0u) {
+    Cy_AutAnalog_SAR_ClearHSchanResultStatus(self->block, channel_mask);
+    while (((Cy_AutAnalog_SAR_GetHSchanResultStatus(self->block) & channel_mask) == 0u) && timeout != 0u) {
         mp_hal_delay_us(1);
         timeout--;
     }
@@ -355,7 +355,7 @@ static uint16_t machine_adc_read_raw_12b(machine_adc_obj_t *self) {
     }
 
     // Read 12-bit result
-    int32_t raw = Cy_AutAnalog_SAR_ReadResult(self->sar_block, CY_AUTANALOG_SAR_INPUT_GPIO, self->gpio_channel);
+    int32_t raw = Cy_AutAnalog_SAR_ReadResult(self->block, CY_AUTANALOG_SAR_INPUT_GPIO, self->channel);
     if (raw < 0) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("ADC read failed"));
     }
@@ -378,11 +378,11 @@ static mp_int_t mp_machine_adc_read_uv(machine_adc_obj_t *self) {
 
 // ADC.deinit() - disable this channel and release the cached ADC instance.
 static void mp_machine_adc_deinit(machine_adc_obj_t *self) {
-    if (machine_adc_obj_get(self->gpio_channel) == self) {
-        machine_adc_obj_set(self->gpio_channel, NULL);
+    if (machine_adc_obj_get(self->channel) == self) {
+        machine_adc_obj_set(self->channel, NULL);
     }
-    if (machine_adc_disable_channel(self->gpio_channel)) {
-        machine_adc_reload_config(self->sar_block);
+    if (machine_adc_disable_channel(self->channel)) {
+        machine_adc_reload_config(self->block);
     }
 }
 
