@@ -22,3 +22,5 @@ IRQ RXIDLE detected:  True
 Flow CTS: True
 Flow RTS: True
 Flow CTS|RTS: True
+Flow CTS blocked TX: True
+Flow RTS backpressure toggled: True
