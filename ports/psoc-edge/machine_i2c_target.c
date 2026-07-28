@@ -197,11 +197,6 @@ static void i2c_target_init(machine_i2c_target_obj_t *self, machine_i2c_target_d
 
     mp_hal_periph_pins_af_init(i2c_pins_config, 2);
 
-    result = Cy_SCB_I2C_Init(self->scb_obj->scb, &self->cfg, &self->ctx);
-    if (result != CY_RSLT_SUCCESS) {
-        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("I2C target init failed: 0x%lx"), result);
-    }
-
     // Configure clock for I2C slave operation
     // For 400 khz slave, clk_scb must be 7.82 – 15.38 MHz
     // For 100 khz slave, clk_scb must be 1.55 – 12.8 MHz
@@ -213,6 +208,11 @@ static void i2c_target_init(machine_i2c_target_obj_t *self, machine_i2c_target_d
     self->pclk_div = pclk_div_init(self->scb_obj->clk, divider, 0);
     if (self->pclk_div == NULL) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to initialize clock divider for I2CTarget(%u)"), self->id);
+    }
+
+    result = Cy_SCB_I2C_Init(self->scb_obj->scb, &self->cfg, &self->ctx);
+    if (result != CY_RSLT_SUCCESS) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("I2C target init failed: 0x%lx"), result);
     }
 
     sys_int_init(&(self->scb_obj->irq));
