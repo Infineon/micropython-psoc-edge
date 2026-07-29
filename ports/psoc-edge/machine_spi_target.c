@@ -32,7 +32,7 @@
 #include "cy_scb_spi.h"
 #include "clk.h"
 #include "genhdr/pins_af.h"
-#include "machine_scb.h"
+#include "scb.h"
 #include "modmachine.h"
 
 #if MICROPY_PY_MACHINE_SPI_TARGET
@@ -64,7 +64,7 @@ typedef struct _machine_spi_target_obj_t {
     uint8_t firstbit;
     uint32_t timeout;
     pclk_div_obj_t *pclk_div;
-    machine_scb_obj_t *scb_obj;
+    scb_obj_t *scb_obj;
     cy_stc_scb_spi_config_t cfg;
     cy_stc_scb_spi_context_t ctx;
 } machine_spi_target_obj_t;
@@ -143,14 +143,14 @@ static void machine_spi_target_hw_init(machine_spi_target_obj_t *self) {
 
 
     // Allocate SCB
-    self->scb_obj = machine_scb_obj_alloc(scb_unit, self,
+    self->scb_obj = scb_obj_alloc(scb_unit, self,
         machine_spi_target_scb_isr);
 
     pclk_div_slave_init(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
     self->pclk_div = pclk_div_init(self->scb_obj->clk, SPI_TARGET_CLK_DIV_BASE, 0);
     if (self->pclk_div == NULL) {
         pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
-        machine_scb_obj_free(self->scb_obj);
+        scb_obj_free(self->scb_obj);
         self->scb_obj = NULL;
         mp_raise_ValueError(MP_ERROR_TEXT("SPITarget clock dividers exhausted"));
     }
@@ -206,7 +206,7 @@ static void machine_spi_target_hw_init(machine_spi_target_obj_t *self) {
         pclk_div_deinit(self->pclk_div);
         self->pclk_div = NULL;
         pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
-        machine_scb_obj_free(self->scb_obj);
+        scb_obj_free(self->scb_obj);
         self->scb_obj = NULL;
         mp_raise_msg_varg(&mp_type_ValueError,
             MP_ERROR_TEXT("SPITarget init failed: 0x%lx"), (uint32_t)result);
@@ -223,7 +223,7 @@ static void machine_spi_target_hw_deinit(machine_spi_target_obj_t *self) {
     pclk_div_deinit(self->pclk_div);
     self->pclk_div = NULL;
     pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
-    machine_scb_obj_free(self->scb_obj);
+    scb_obj_free(self->scb_obj);
     self->scb_obj = NULL;
 }
 

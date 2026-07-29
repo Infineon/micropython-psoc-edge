@@ -45,7 +45,7 @@
 #include "clk.h"
 #include "genhdr/pins_af.h"
 #include "modmachine.h"
-#include "machine_scb.h"
+#include "scb.h"
 
 #define DEBUG_printf(...) // printf(__VA_ARGS__)
 
@@ -62,7 +62,7 @@ typedef struct _machine_hw_i2c_obj_t {
     mp_hal_pin_obj_t sda;
     uint32_t freq;
     uint32_t timeout;
-    machine_scb_obj_t *scb_obj;
+    scb_obj_t *scb_obj;
     pclk_div_obj_t *pclk_div;
     cy_stc_scb_i2c_config_t cfg;   // PDL I2C configuration
     cy_stc_scb_i2c_context_t ctx;  // PDL I2C runtime context
@@ -121,7 +121,7 @@ static void machine_hw_i2c_init(machine_hw_i2c_obj_t *self, uint32_t freq_hz) {
     machine_pin_af_unit_t af_unit = MACHINE_PIN_AF_UNIT_NONE;
     mp_hal_periph_pins_af_resolve_fn_unit(i2c_pins_config, 2, MACHINE_PIN_AF_FN_I2C, &af_unit);
 
-    self->scb_obj = machine_scb_obj_alloc(af_unit, self, machine_hw_i2c_scb_isr);
+    self->scb_obj = scb_obj_alloc(af_unit, self, machine_hw_i2c_scb_isr);
 
     mp_hal_periph_pins_af_init(i2c_pins_config, 2);
 
@@ -177,7 +177,7 @@ static void machine_hw_i2c_deinit(mp_obj_base_t *self_in) {
     pclk_div_deinit(self->pclk_div);
     pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
 
-    machine_scb_obj_free(self->scb_obj);
+    scb_obj_free(self->scb_obj);
     machine_hw_i2c_obj_free(self);
 }
 

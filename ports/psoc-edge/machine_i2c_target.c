@@ -39,7 +39,7 @@
 #include "clk.h"
 #include "genhdr/pins_af.h"
 #include "modmachine.h"
-#include "machine_scb.h"
+#include "scb.h"
 
 #define DEBUG_printf(...) // printf(__VA_ARGS__)
 
@@ -53,7 +53,7 @@ typedef struct _machine_i2c_target_obj_t {
     mp_hal_pin_obj_t sda;
     uint32_t slave_addr;
     uint8_t addrsize;
-    machine_scb_obj_t *scb_obj;
+    scb_obj_t *scb_obj;
     pclk_div_obj_t *pclk_div;
     cy_stc_scb_i2c_config_t cfg;
     cy_stc_scb_i2c_context_t ctx;
@@ -193,7 +193,7 @@ static void i2c_target_init(machine_i2c_target_obj_t *self, machine_i2c_target_d
     machine_pin_af_unit_t af_unit = MACHINE_PIN_AF_UNIT_NONE;
     mp_hal_periph_pins_af_resolve_fn_unit(i2c_pins_config, 2, MACHINE_PIN_AF_FN_I2C, &af_unit);
 
-    self->scb_obj = machine_scb_obj_alloc(af_unit, self, machine_i2c_target_scb_isr);
+    self->scb_obj = scb_obj_alloc(af_unit, self, machine_i2c_target_scb_isr);
 
     mp_hal_periph_pins_af_init(i2c_pins_config, 2);
 
@@ -361,7 +361,7 @@ static void mp_machine_i2c_target_deinit(machine_i2c_target_obj_t *self) {
     pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
     self->base.type = NULL;
 
-    machine_scb_obj_free(self->scb_obj);
+    scb_obj_free(self->scb_obj);
 
     DEBUG_printf("I2C Target deinitialized\n");
 }
