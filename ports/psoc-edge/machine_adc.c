@@ -52,6 +52,7 @@ typedef struct _machine_adc_obj_t {
     mp_hal_pin_obj_t pin;          // GPIO pin used as the ADC input
     uint8_t block;                 // SAR block index (always 0 on PSE84)
     uint8_t channel;               // GPIO channel index (0-7 for P15_0-P15_7)
+    bool active;                   // Tracks whether this object is currently active.
 } machine_adc_obj_t;
 
 MP_REGISTER_ROOT_POINTER(struct _machine_adc_obj_t *machine_adc_obj[ADC_NUM_CHANNELS]);
@@ -296,6 +297,7 @@ void machine_adc_deinit_all(void) {
     adc_enabled_channels_mask = 0;
     for (size_t i = 0; i < ADC_NUM_CHANNELS; i++) {
         if (MP_STATE_PORT(machine_adc_obj[i]) != NULL) {
+            MP_STATE_PORT(machine_adc_obj[i])->active = false;
             MP_STATE_PORT(machine_adc_obj[i]) = NULL;
         }
     }
@@ -316,7 +318,7 @@ static mp_obj_t mp_machine_adc_make_new(const mp_obj_type_t *type, size_t n_args
     }
 
     machine_adc_obj_t *existing = machine_adc_obj_get(channel);
-    if (existing != NULL) {
+    if (existing != NULL && existing->active) {
         return MP_OBJ_FROM_PTR(existing);
     }
 
@@ -324,6 +326,7 @@ static mp_obj_t mp_machine_adc_make_new(const mp_obj_type_t *type, size_t n_args
     o->pin = pin;
     o->block = block;
     o->channel = channel;
+    o->active = true;
     machine_adc_obj_set(channel, o);
 
     // Initialize autonomous analog once and enable only the requested channel.
@@ -340,6 +343,10 @@ static mp_obj_t mp_machine_adc_make_new(const mp_obj_type_t *type, size_t n_args
 
 // Read one ADC conversion as raw 12-bit value (0-4095).
 static uint16_t machine_adc_read_raw_12b(machine_adc_obj_t *self) {
+    if (!self->active) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("ADC is deinitialized"));
+    }
+
     uint8_t channel_mask = (uint8_t)(1u << self->channel);
     uint32_t timeout = ADC_READ_TIMEOUT_US;
 
@@ -378,6 +385,11 @@ static mp_int_t mp_machine_adc_read_uv(machine_adc_obj_t *self) {
 
 // ADC.deinit() - disable this channel and release the cached ADC instance.
 static void mp_machine_adc_deinit(machine_adc_obj_t *self) {
+    if (!self->active) {
+        return;
+    }
+
+    self->active = false;
     if (machine_adc_obj_get(self->channel) == self) {
         machine_adc_obj_set(self->channel, NULL);
     }
