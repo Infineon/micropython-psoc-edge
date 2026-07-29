@@ -130,6 +130,14 @@
         features:
           - wifi-idn-b0653ac13e11
 
+- name: adc
+  test:
+    script: ports/psoc-edge/board_ext_hw/single/adc.py
+    device:
+      - board: KIT_PSE84_AI
+        features:
+          - adc
+
 - name: spi
   type: multi
   test:
