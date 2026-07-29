@@ -586,7 +586,6 @@ MOD_SRC_C += \
 	machine_spi_target.c \
 	machine_rtc.c \
 	machine_ipc.c \
-	machine_scb.c \
 	machine_timer.c \
 	machine_counter.c \
 	machine_bitstream.c \
@@ -607,6 +606,7 @@ SRC_C += \
 	help.c \
 	main.c \
 	mphalport.c \
+	scb.c \
 	systick.c \
 	sys_int.c \
 	tcpwm.c \
