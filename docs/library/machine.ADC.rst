@@ -64,3 +64,10 @@ Methods
    Take an analog reading and return an integer value with units of
    microvolts.  It is up to the particular port whether or not this value
    is calibrated, and how calibration is done.
+
+.. method:: ADC.deinit()
+
+   Turn off the ADC.
+
+   .. note::
+      A new instance needs to be created after calling ``deinit()``.
