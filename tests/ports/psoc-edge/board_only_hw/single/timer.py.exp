@@ -1,20 +1,10 @@
 *****Oneshot Timer Execution*****
 Oneshot timer triggered
 *****Periodic Timer Execution*****
-Periodic timer triggered
-Periodic timer triggered
-Periodic timer triggered
-Periodic timer triggered
-Periodic timer triggered
-Periodic timer triggered
-Periodic timer triggered
-Periodic timer triggered
-Periodic timer triggered
-Periodic timer triggered
+Periodic timer triggered: True
 *****Multiple Timers Execution*****
 Oneshot timer triggered
-Periodic timer triggered
-Periodic timer triggered
+Periodic timer triggered: True
 Frequency-based timer triggered
 *****Negative Timer Parameter Tests*****
 invalid_id_-1: Timer id must be in range 0-31

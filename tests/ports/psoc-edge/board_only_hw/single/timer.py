@@ -2,7 +2,7 @@ from machine import Timer
 import time
 
 oneshot_triggered = False
-periodic_triggered = False
+periodic_triggered = 0
 
 
 # Callback functions for the timers to set the respective flags when triggered.
@@ -14,19 +14,19 @@ def call_oneshot(timer):
 # Callback function for the periodic timer to set the respective flag when triggered.
 def call_periodic(timer):
     global periodic_triggered
-    periodic_triggered = True
+    periodic_triggered += 1
 
 
 # Oneshot timer
 def test_oneshot():
     # Oneshot timer
     global oneshot_triggered
-    tim_oneshot = Timer(0, period=1000, mode=Timer.ONE_SHOT, callback=call_oneshot)
+    tim_oneshot = Timer(0, period=100, mode=Timer.ONE_SHOT, callback=call_oneshot)
 
     try:
         # Wait for 5 seconds
-        for i in range(5):
-            time.sleep(1)
+        for i in range(300):
+            time.sleep_ms(100)
             if oneshot_triggered:
                 print("Oneshot timer triggered")
                 oneshot_triggered = False
@@ -38,15 +38,18 @@ def test_oneshot():
 def test_periodic():
     # Periodic timer
     global periodic_triggered
-    tim_periodic = Timer(1, period=1000, mode=Timer.PERIODIC, callback=call_periodic)
+    timer_period_ms = 200
+    tim_periodic = Timer(1, period=timer_period_ms, mode=Timer.PERIODIC, callback=call_periodic)
 
     try:
-        # Wait for 10 seconds
-        for i in range(10):
-            time.sleep(1)
-            if periodic_triggered:
-                print("Periodic timer triggered")
-                periodic_triggered = False
+        delay_ms = 800
+        time.sleep_ms(delay_ms)
+
+        # One less trigger than expected as the Timer
+        # might be deinitialized before the last callback is executed.
+        expected_triggers = delay_ms // timer_period_ms - 1
+        print("Periodic timer triggered:", periodic_triggered >= expected_triggers)
+
     finally:
         tim_periodic.deinit()  # Deinitialize the periodic timer
 
@@ -55,20 +58,22 @@ def test_periodic():
 def test_multiple_timers():
     global oneshot_triggered
     global periodic_triggered
+    periodic_triggered = 0
     # Multiple timers
-    tim_oneshot = Timer(0, period=1000, mode=Timer.ONE_SHOT, callback=call_oneshot)
-    tim_periodic = Timer(1, period=3500, mode=Timer.PERIODIC, callback=call_periodic)
+    timer_period_ms = 200
+    tim_oneshot = Timer(0, period=100, mode=Timer.ONE_SHOT, callback=call_oneshot)
+    tim_periodic = Timer(1, period=timer_period_ms, mode=Timer.PERIODIC, callback=call_periodic)
 
     try:
-        # Wait for 10 seconds
-        for i in range(10):
-            time.sleep(1)
-            if oneshot_triggered:
-                print("Oneshot timer triggered")
-                oneshot_triggered = False
-            if periodic_triggered:
-                print("Periodic timer triggered")
-                periodic_triggered = False
+        delay_ms = 800
+        time.sleep_ms(delay_ms)
+
+        if oneshot_triggered:
+            print("Oneshot timer triggered")
+
+        expected_triggers = delay_ms // timer_period_ms - 1
+        print("Periodic timer triggered:", periodic_triggered >= expected_triggers)
+
     finally:
         tim_oneshot.deinit()  # Deinitialize the Oneshot timer
         tim_periodic.deinit()  # Deinitialize the periodic timer
@@ -84,15 +89,14 @@ def expect_value_error(label, fn):
 
 def test_frequency_input():
     global oneshot_triggered
-    tim_freq = Timer(2, freq=2, mode=Timer.ONE_SHOT, callback=call_oneshot)
+    tim_freq = Timer(2, freq=10, mode=Timer.ONE_SHOT, callback=call_oneshot)
 
     try:
-        for i in range(3):
-            time.sleep(1)
-            if oneshot_triggered:
-                print("Frequency-based timer triggered")
-                oneshot_triggered = False
-                break
+        time.sleep_ms(300)
+        if oneshot_triggered:
+            print("Frequency-based timer triggered")
+            oneshot_triggered = False
+
     finally:
         tim_freq.deinit()
 
