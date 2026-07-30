@@ -10,4 +10,3 @@ mid_raw_half_ok: True
 max_raw_high_ok: True
 monotonic_ok: True
 cleanup_ok: True
-
