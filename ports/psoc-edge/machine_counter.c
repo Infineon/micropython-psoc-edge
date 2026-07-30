@@ -38,8 +38,7 @@
 #include "cy_trigmux.h"
 #include "cy_tcpwm_counter.h"
 #include "cy_tcpwm.h"
-#include "cycfg_peripheral_clocks.h"
-#include "mtb_hal.h"
+#include "clk.h"
 
 #include "genhdr/pins_af.h"
 #include "sys_int.h"
@@ -83,6 +82,7 @@ typedef struct _machine_counter_obj_t {
     uint8_t id;
     uint32_t counter_num;
     en_clk_dst_t pclk_dst;
+    pclk_div_obj_t *pclk_div;
     mp_hal_pin_obj_t src_pin;
     mp_hal_pin_obj_t index_pin;
     mp_hal_pin_obj_t reset_pin;
@@ -108,7 +108,6 @@ typedef struct _machine_counter_obj_t {
 
 // One Counter object per hardware id.
 static machine_counter_obj_t *counter_obj[MACHINE_COUNTER_NUM_INSTANCES] = { NULL };
-static bool machine_counter_clock_configured = false;
 
 // ---------------------------------------------------------------------------
 // Per-ID hardware mapping from generated AF data.
@@ -139,21 +138,27 @@ static const IRQn_Type counter_irq[MACHINE_COUNTER_NUM_INSTANCES] = {
 // Core Helpers
 // ---------------------------------------------------------------------------
 
-// Configure the shared peripheral clock once for all Counter objects.
-static void machine_counter_configure_clock(void) {
-    if (machine_counter_clock_configured) {
+// Configure the peripheral clock divider for this Counter instance.
+// The Counter base clock is fixed (COUNTER_CLK_HZ), so once a divider has been
+// allocated it is reused on subsequent init() calls (no re-init).
+static void machine_counter_configure_clock(machine_counter_obj_t *self) {
+    if (self->pclk_div != NULL) {
         return;
     }
 
-    cy_rslt_t rslt = mtb_hal_clock_set_peri_clock_freq(&CYBSP_GENERAL_PURPOSE_TIMER_clock_ref,
-        COUNTER_CLK_HZ, 1000);
-    if (rslt != CY_RSLT_SUCCESS) {
-        mp_raise_msg_varg(&mp_type_ValueError,
-            MP_ERROR_TEXT("Counter clock setup failed (0x%lx)"),
-            (unsigned long)rslt);
+    pclk_div_slave_init(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+
+    uint32_t clk_freq = pclk_div_get_input_freq(self->pclk_dst);
+    if (clk_freq == 0U) {
+        mp_raise_ValueError(MP_ERROR_TEXT("failed to get counter input clock"));
     }
 
-    machine_counter_clock_configured = true;
+    uint32_t divider = (clk_freq / COUNTER_CLK_HZ) - 1U;
+
+    self->pclk_div = pclk_div_init(self->pclk_dst, divider, 0);
+    if (self->pclk_div == NULL) {
+        mp_raise_ValueError(MP_ERROR_TEXT("Counter clock dividers exhausted"));
+    }
 }
 
 // Return the max period for this counter width (16-bit or 32-bit).
@@ -619,10 +624,8 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
     machine_counter_disable_aux_irqs(self);
     machine_counter_restore_src_pin(self);
 
-    // Ensure shared timer clock is configured and bound to this counter PCLK.
-    machine_counter_configure_clock();
-    Cy_SysClk_PeriPclkAssignDivider(self->pclk_dst,
-        CY_SYSCLK_DIV_16_BIT, CYBSP_GENERAL_PURPOSE_TIMER_CLK_DIV_NUM);
+    // Ensure the peripheral clock divider is configured and bound to this counter PCLK.
+    machine_counter_configure_clock(self);
 
     mp_hal_periph_pins_af_init(&src_pin_af_config, 1);
 
@@ -776,6 +779,7 @@ static mp_obj_t machine_counter_make_new(const mp_obj_type_t *type,
     self->id = (uint8_t)id;
     self->counter_num = counter_hw[id];
     self->pclk_dst = machine_tcpwm_counter_pclk(self->counter_num);
+    self->pclk_div = NULL;
     self->src_pin = NULL;
     self->index_pin = NULL;
     self->reset_pin = NULL;
@@ -848,6 +852,16 @@ static mp_obj_t machine_counter_deinit(mp_obj_t self_in) {
     if (self->mp_irq_obj != NULL) {
         self->mp_irq_obj->handler = mp_const_none;
     }
+
+    pclk_div_deinit(self->pclk_div);
+    /**
+     * TODO: The TCPWM0 MMIO slave is shared across Counter, Timer and PWM
+     * instances. Tearing it down here can break other active instances using a
+     * different counter. Review with a reference-counted shared usage of the
+     * TCPWM0 MMIO slave before enabling the slave deinit.
+     */
+    // pclk_div_slave_deinit(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+    self->pclk_div = NULL;
 
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
     if (counter_obj[self->id] == self) {
