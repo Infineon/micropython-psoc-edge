@@ -58,16 +58,10 @@ typedef struct _machine_adc_obj_t {
 MP_REGISTER_ROOT_POINTER(struct _machine_adc_obj_t *machine_adc_obj[ADC_NUM_CHANNELS]);
 
 static machine_adc_obj_t *machine_adc_obj_get(uint8_t channel) {
-    if (channel >= ADC_NUM_CHANNELS) {
-        return NULL;
-    }
     return MP_STATE_PORT(machine_adc_obj[channel]);
 }
 
 static void machine_adc_obj_set(uint8_t channel, machine_adc_obj_t *obj) {
-    if (channel >= ADC_NUM_CHANNELS) {
-        return;
-    }
     MP_STATE_PORT(machine_adc_obj[channel]) = obj;
 }
 
@@ -79,9 +73,6 @@ static void mp_machine_adc_print(const mp_print_t *print, mp_obj_t self_in, mp_p
 
 // Initialize BSP-generated CYBSP_SAR_ADC_* structures for one requested GPIO channel.
 static void machine_adc_init_channel(uint8_t channel) {
-    if (channel >= ADC_NUM_CHANNELS) {
-        return;
-    }
 
     // All channels share the same base configuration and only differ by GPIO pin index.
     const cy_stc_autanalog_sar_hs_chan_t default_ch_cfg = {
