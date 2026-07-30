@@ -1,6 +1,6 @@
 # ADC test
 # Setup (single board):
-#   - Build a divider with R1=10k and R2=10k.
+#   - Build a divider with R1=15k and R2=15k.
 #   - Connect R1 top to board VDD rail (1.8V or 3.3V).
 #   - Connect R2 bottom to GND.
 #   - Connect divider midpoint to adc_pin_mid.
