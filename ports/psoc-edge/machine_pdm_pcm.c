@@ -29,6 +29,7 @@
 #include "cy_pdl.h"
 #include "cybsp.h"
 
+#include "clk.h"
 #include "sys_int.h"
 
 #include "extmod/vfs.h"
@@ -138,17 +139,73 @@ static inline uint32_t *pdm_pcm_rx_buffer_get_next_frame_to_fill(pcm_pdm_rx_fifo
 typedef struct _pdm_pcm_block_obj_t {
     uint8_t id;
     PDM_Type *periph;
+    en_clk_dst_t clk;
+    pclk_div_obj_t *pclk_div;
+    uint8_t mmio_slave_nr;
     bool inited;
 } pdm_pcm_block_obj_t;
 
 /**
  * For the current PSE8x family there is only one PDM block.
  */
-static pdm_pcm_block_obj_t pdm_pcm_block_obj[1] = { { 0, PDM0, false } };
+static pdm_pcm_block_obj_t pdm_pcm_block_obj[1] = { { 0, PDM0, PCLK_PDM0_CLK_IF_SRSS, NULL, CY_MMIO_PDM0_SLAVE_NR, false } };
+
+static void pdm_pcm_block_clk_init(pdm_pcm_block_obj_t *block) {
+    pclk_div_slave_init(block->clk, block->mmio_slave_nr);
+
+    uint32_t clock_freq = pclk_div_get_input_freq(block->clk);
+    if (clock_freq == 0) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to get clock frequency for PDM PCM(%u)"), block->id);
+    }
+
+    /**
+     * The master clock is set to 12.288 MHz.
+     * This value is chosen because from it the provided
+     * sampling rates can be derived using the available dividers.
+     */
+    #define PDM_PCM_MASTER_CLOCK_FREQ 12288000
+    /**
+     * DPLL output is slightly off from the ideal (e.g. 49151999 vs 49152000 Hz),
+     * so plain integer division would truncate to the wrong quotient.
+     * Rounding compensates for this.
+     */
+    #define DIV_ROUND(x, d)    (((x) + (d) / 2) / (d))
+    uint32_t divider = DIV_ROUND(clock_freq, PDM_PCM_MASTER_CLOCK_FREQ) - 1;
+
+    block->pclk_div = pclk_div_init(block->clk, divider, 0);
+    if (block->pclk_div == NULL) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to initialize clock divider for PDM PCM(%u)"), block->id);
+    }
+#undef PDM_PCM_MASTER_CLOCK_FREQ
+#undef DIV_ROUND
+}
+
+static void pdm_pcm_block_clk_deinit(pdm_pcm_block_obj_t *block) {
+    pclk_div_deinit(block->pclk_div);
+    pclk_div_slave_deinit(block->clk, block->mmio_slave_nr);
+}
 
 static void pdm_pcm_block_init(pdm_pcm_block_obj_t *block) {
+    /* -- Clock configuration -- */
+    pdm_pcm_block_clk_init(block);
+
+    /**
+     * Additionally the PDM peripheral clock divider is
+     * set to 7, which will divide the master clock by 8.
+     * This will result in a PDM clock of 1.536 MHz.
+     * And that supports the following sample rates:
+     * - 8 kHz: 1.536 MHz / 192
+     * - 16 kHz: 1.536 MHz / 96
+     * - 32 kHz: 1.536 MHz / 48
+     * - 48 kHz: 1.536 MHz / 32
+     *
+     * The dividing factor will be then set by the
+     * CIC, FIR0 and FIR1 decimation factors.
+     */
+    #define PDM_PCK_BLOCK_DIVIDER (7)
+
     cy_stc_pdm_pcm_config_v2_t pdm_pcm_block_conf = {
-        .clkDiv = 7,
+        .clkDiv = PDM_PCK_BLOCK_DIVIDER,
         .clksel = CY_PDM_PCM_SEL_SRSS_CLOCK,
         .halverate = CY_PDM_PCM_RATE_FULL,
         .route = 4,
@@ -158,6 +215,7 @@ static void pdm_pcm_block_init(pdm_pcm_block_obj_t *block) {
 
     cy_en_pdm_pcm_status_t ret = Cy_PDM_PCM_Init(block->periph, &pdm_pcm_block_conf);
     pdm_pcm_assert_raise_val("PDM PCM initialization failed with code: %d \r\n", ret);
+#undef PDM_PCK_BLOCK_DIVIDER
     block->inited = true;
 }
 
@@ -167,6 +225,7 @@ static inline bool pdm_pcm_block_is_inited(pdm_pcm_block_obj_t *block) {
 
 static inline void pdm_pcm_block_deinit(pdm_pcm_block_obj_t *block) {
     Cy_PDM_PCM_DeInit(block->periph);
+    pdm_pcm_block_clk_deinit(block);
     block->inited = false;
 }
 
@@ -199,7 +258,7 @@ static void pdm_pcm_channel_irq_handler(uint8_t pdm_pcm_channel);
 
 MICROPY_PY_MACHINE_FOR_ALL_PDM_PCM(DEFINE_PDM_PCM_CHANNEL_IRQ_HANDLER)
 
-#define MAP_PDM_PCM_IRQ_CONFIG(pdm_pcm_channel) \
+#define MAP_PDM_PCM_CONFIG(pdm_pcm_channel) \
     [pdm_pcm_channel] = { \
         &pdm_pcm_block_obj[0], \
         pdm_pcm_channel, \
@@ -212,7 +271,7 @@ MICROPY_PY_MACHINE_FOR_ALL_PDM_PCM(DEFINE_PDM_PCM_CHANNEL_IRQ_HANDLER)
     },
 
 static pdm_pcm_channel_obj_t pdm_pcm_channel_obj[MICROPY_PY_MACHINE_PDM_PCM_NUM_ENTRIES] = {
-    MICROPY_PY_MACHINE_FOR_ALL_PDM_PCM(MAP_PDM_PCM_IRQ_CONFIG)
+    MICROPY_PY_MACHINE_FOR_ALL_PDM_PCM(MAP_PDM_PCM_CONFIG)
 };
 
 static pdm_pcm_channel_obj_t *pdm_pcm_channel_alloc(uint8_t channel_id, mp_obj_t parent) {
