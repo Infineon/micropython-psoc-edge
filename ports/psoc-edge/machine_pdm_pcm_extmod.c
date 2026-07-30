@@ -180,6 +180,8 @@ static void fill_appbuf_from_ringbuf_non_blocking(machine_pdm_pcm_obj_t *self) {
 
 #endif // MICROPY_PY_MACHINE_PDM_PCM_RING_BUF
 
+#define PDM_PCM_IBUF_DEFAULT_SIZE_IN_BYTES 4000
+
 MP_NOINLINE static void machine_pdm_pcm_init_helper(machine_pdm_pcm_obj_t *self, size_t n_pos_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_sck,             MP_ARG_KW_ONLY | MP_ARG_REQUIRED | MP_ARG_OBJ,   {.u_obj = MP_OBJ_NULL} },
@@ -188,7 +190,7 @@ MP_NOINLINE static void machine_pdm_pcm_init_helper(machine_pdm_pcm_obj_t *self,
         { MP_QSTR_bits,            MP_ARG_KW_ONLY | MP_ARG_REQUIRED | MP_ARG_INT,   {.u_int = 16} },
         { MP_QSTR_format,          MP_ARG_KW_ONLY | MP_ARG_REQUIRED | MP_ARG_INT,   {.u_int = MONO} },
         { MP_QSTR_gain,            MP_ARG_KW_ONLY | MP_ARG_OBJ,   {.u_obj = mp_const_none} },
-        { MP_QSTR_ibuf,            MP_ARG_KW_ONLY | MP_ARG_INT,   {.u_int = 20000} },
+        { MP_QSTR_ibuf,            MP_ARG_KW_ONLY | MP_ARG_INT,   {.u_int = PDM_PCM_IBUF_DEFAULT_SIZE_IN_BYTES} },
     };
 
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
