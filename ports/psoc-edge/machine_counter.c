@@ -146,7 +146,7 @@ static void machine_counter_configure_clock(machine_counter_obj_t *self) {
         return;
     }
 
-    pclk_div_slave_init(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+    machine_tcpwm_slave_init(self->pclk_dst);
 
     uint32_t clk_freq = pclk_div_get_input_freq(self->pclk_dst);
     if (clk_freq == 0U) {
@@ -618,14 +618,14 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
 
     en_peri0_trig_input_debugreducation1_t in_trig = peri0_tr_io_input[fn_unit];
 
+    // Ensure the peripheral clock divider is configured and bound to this counter PCLK.
+    machine_counter_configure_clock(self);
+
     // Tear down any previous run before programming new pin routing.
     machine_counter_stop_hw(self);
     machine_counter_stop_irq(self);
     machine_counter_disable_aux_irqs(self);
     machine_counter_restore_src_pin(self);
-
-    // Ensure the peripheral clock divider is configured and bound to this counter PCLK.
-    machine_counter_configure_clock(self);
 
     mp_hal_periph_pins_af_init(&src_pin_af_config, 1);
 
@@ -837,7 +837,10 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(machine_counter_init_obj, 1, machine_counter_i
 static mp_obj_t machine_counter_deinit(mp_obj_t self_in) {
     machine_counter_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
-    machine_counter_stop_hw(self);
+    // Only touch the TCPWM0 block if this counter actually configured it.
+    if (self->pclk_div != NULL) {
+        machine_counter_stop_hw(self);
+    }
     machine_counter_stop_irq(self);
     machine_counter_disable_aux_irqs(self);
     machine_counter_restore_src_pin(self);
@@ -853,15 +856,12 @@ static mp_obj_t machine_counter_deinit(mp_obj_t self_in) {
         self->mp_irq_obj->handler = mp_const_none;
     }
 
-    pclk_div_deinit(self->pclk_div);
-    /**
-     * TODO: The TCPWM0 MMIO slave is shared across Counter, Timer and PWM
-     * instances. Tearing it down here can break other active instances using a
-     * different counter. Review with a reference-counted shared usage of the
-     * TCPWM0 MMIO slave before enabling the slave deinit.
-     */
-    // pclk_div_slave_deinit(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
-    self->pclk_div = NULL;
+    if (self->pclk_div != NULL) {
+        pclk_div_deinit(self->pclk_div);
+        self->pclk_div = NULL;
+        // Release the shared TCPWM0 slave
+        machine_tcpwm_slave_deinit(self->pclk_dst);
+    }
 
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
     if (counter_obj[self->id] == self) {
