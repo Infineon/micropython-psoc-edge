@@ -391,10 +391,14 @@ static void mp_machine_adc_deinit(machine_adc_obj_t *self) {
     }
     if (machine_adc_disable_channel(self->channel)) {
         if (adc_enabled_channels_mask == 0) {
-            // Last channel disabled: perform a full hardware shutdown matching
-            // machine_adc_deinit_all() so that any in-flight scan is stopped and
-            // config structures are reset before execution returns.
-            machine_adc_deinit_all();
+            // All channels deinited: load zero-channel config so the SAR does not
+            // start a new scan, then mark the controller as uninitialised.
+            // Do NOT call Cy_AutAnalog_Disable() here — disabling the peripheral
+            // while a scan may be in progress triggers a deferred bus-fault / LOCKUP
+            // on some boards.  The soft-reset path (machine_adc_deinit_all) will
+            // call Cy_AutAnalog_Disable() safely once the Python VM is torn down.
+            Cy_AutAnalog_SAR_LoadConfig(self->block, &CYBSP_SAR_ADC_cfg);
+            adc_autanalog_initialized = false;
         } else {
             machine_adc_reload_config(self->block);
         }
