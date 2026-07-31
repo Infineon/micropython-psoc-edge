@@ -268,11 +268,6 @@ static void machine_adc_init_autanalog(void) {
     // Initialize ADC configuration structures dynamically
     machine_adc_init_configs();
 
-    // Ensure the peripheral is disabled before (re-)initialisation to recover
-    // from any residual hardware state left by a previous crash or incomplete
-    // shutdown (e.g. the autonomous controller running with chanEn=0).
-    Cy_AutAnalog_Disable();
-
     // Initialize autonomous analog controller
     uint32_t status = Cy_AutAnalog_Init((cy_stc_autanalog_t *)&autonomous_analog_init);
     if (status != CY_AUTANALOG_SUCCESS) {
