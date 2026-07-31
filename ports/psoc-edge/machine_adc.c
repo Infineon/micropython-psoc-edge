@@ -285,7 +285,9 @@ static void machine_adc_init_autanalog(void) {
 }
 
 void machine_adc_deinit_all(void) {
-    Cy_AutAnalog_Disable();
+    if (adc_autanalog_initialized) {
+        Cy_AutAnalog_Disable();
+    }
 
     adc_autanalog_initialized = false;
     adc_enabled_channels_mask = 0;
