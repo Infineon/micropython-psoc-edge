@@ -30,4 +30,8 @@
     - spi
     - bitstream
     - time-pulse
+
+- name: KIT_PSE84_AI
+  uid: 190A0E98012D2400
+  features:
     - adc
