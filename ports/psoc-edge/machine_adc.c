@@ -385,7 +385,10 @@ static void mp_machine_adc_deinit(machine_adc_obj_t *self) {
         machine_adc_obj_set(self->channel, NULL);
     }
     if (machine_adc_disable_channel(self->channel)) {
-        machine_adc_reload_config(self->block);
+        if (adc_enabled_channels_mask != 0u) {
+            // Do not restart the autonomous controller with chanEn == 0.
+            machine_adc_reload_config(self->block);
+        }
     }
 }
 
