@@ -1,9 +1,2 @@
 *****ADC tests*****
-invalid_pin_rejected: True
-connect_channel_ok: True
-connect_pin_ok: True
-connect_channel_pin_ok: True
-gnd_uv_ok: True
-gnd_raw_ok: True
-max_raw_high_ok: True
-cleanup_ok: True
+read_ok: True
