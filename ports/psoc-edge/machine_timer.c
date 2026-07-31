@@ -116,7 +116,7 @@ static void machine_timer_configure_clock(machine_timer_obj_t *self) {
         return;
     }
 
-    pclk_div_slave_init(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+    machine_tcpwm_slave_init(self->pclk_dst);
 
     uint32_t clk_freq = pclk_div_get_input_freq(self->pclk_dst);
 
@@ -363,8 +363,11 @@ static mp_obj_t machine_timer_make_new(const mp_obj_type_t *type,
         }
         nlr_pop();
     } else {
-        pclk_div_deinit(self->pclk_div);
-        self->pclk_div = NULL;
+        if (self->pclk_div != NULL) {
+            pclk_div_deinit(self->pclk_div);
+            self->pclk_div = NULL;
+            machine_tcpwm_slave_deinit(self->pclk_dst);
+        }
         machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
         timer_obj[id] = NULL;
         nlr_jump(nl.ret_val);
@@ -390,17 +393,21 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(machine_timer_init_obj, 1, machine_timer_init)
 
 static mp_obj_t machine_timer_deinit(mp_obj_t self_in) {
     machine_timer_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
+    // Only touch the TCPWM0 block if this timer actually configured it.
+    if (self->pclk_div != NULL) {
+        Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
+    }
     if (self->active) {
         sys_int_deinit(&self->irq_cfg);
     }
     self->callback = mp_const_none;
     self->ishard = false;
     self->active = false;
-    pclk_div_deinit(self->pclk_div);
-    /* TODO: Review obj initialization in general... */
-    // pclk_div_slave_deinit(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
-    self->pclk_div = NULL;
+    if (self->pclk_div != NULL) {
+        pclk_div_deinit(self->pclk_div);
+        self->pclk_div = NULL;
+        machine_tcpwm_slave_deinit(self->pclk_dst);
+    }
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
     timer_obj[self->id] = NULL;
     return mp_const_none;

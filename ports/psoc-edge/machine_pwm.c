@@ -201,11 +201,9 @@ static void machine_pwm_configure_clock(machine_pwm_obj_t *self) {
      * used.
      */
     if (self->pclk_div != NULL) {
-        pclk_div_deinit(self->pclk_div);
-        self->pclk_div = NULL;
+        return;
     }
-
-    pclk_div_slave_init(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+    machine_tcpwm_slave_init(self->pclk_dst);
 
     uint32_t clock_freq = pclk_div_get_input_freq(self->pclk_dst);
     if (clock_freq == 0) {
@@ -383,7 +381,12 @@ static mp_obj_t mp_machine_pwm_make_new(const mp_obj_type_t *type, size_t n_args
         mp_machine_pwm_init_helper(self, n_args - 1, args + 1, &kw_args);
         nlr_pop();
     } else {
-        pclk_div_deinit(self->pclk_div);
+        if (self->pclk_div != NULL) {
+            pclk_div_deinit(self->pclk_div);
+            self->pclk_div = NULL;
+            // Release the shared TCPWM0 slave
+            machine_tcpwm_slave_deinit(self->pclk_dst);
+        }
         machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
         pwm_pin_restore(self->pin);
         pwm_obj_free(self);
@@ -395,18 +398,18 @@ static mp_obj_t mp_machine_pwm_make_new(const mp_obj_type_t *type, size_t n_args
 
 // Disable the TCPWM counter, restore the GPIO pin to Hi-Z, and free the instance slot.
 static void mp_machine_pwm_deinit(machine_pwm_obj_t *self) {
-    Cy_TCPWM_PWM_Disable(TCPWM0, self->counter_num);
+    // Only touch the TCPWM0 block while if instance still holds the shared slave
+    if (self->pclk_div != NULL) {
+        Cy_TCPWM_PWM_Disable(TCPWM0, self->counter_num);
+    }
     pwm_pin_restore(self->pin);
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
-    pclk_div_deinit(self->pclk_div);
-    /**
-     * TODO: The TCPWM0 MMIO slave is shared across Timer and PWM instances.
-     * Tearing it down here can break an active Timer that is using a different
-     * counter, which causes the TCPWM ownership test to hang after a fallback PWM.
-     * Review with a shared usage of the TCPWM0 MMIO slave and implement a reference counting mechanism to avoid
-     * tearing down the TCPWM0 MMIO slave when other instances are still using it.
-     */
-    // pclk_div_slave_deinit(self->pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+    if (self->pclk_div != NULL) {
+        pclk_div_deinit(self->pclk_div);
+        self->pclk_div = NULL;
+        // Release the shared TCPWM0 slave
+        machine_tcpwm_slave_deinit(self->pclk_dst);
+    }
     pwm_obj_free(self);
 }
 

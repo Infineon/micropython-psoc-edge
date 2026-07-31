@@ -26,8 +26,12 @@
 
 #include "py/runtime.h"
 #include "tcpwm.h"
+#include "clk.h"
 
 static mp_obj_t machine_tcpwm0_counter[MICROPY_PY_MACHINE_TCPWM0_NUM_COUNTERS] = { MP_OBJ_NULL };
+
+// Shared reference count for the TCPWM0 slave TCPWM_0_SLAVE_NR.
+static uint32_t machine_tcpwm0_slave_ref_count = 0;
 
 // Helper function to validate if a counter is supported
 static bool machine_tcpwm_counter_is_valid(uint32_t counter_num) {
@@ -88,4 +92,21 @@ en_clk_dst_t machine_tcpwm_counter_pclk(uint32_t counter_num) {
                 MP_ERROR_TEXT("TCPWM0 counter %lu is not supported"), counter_num);
     }
 #undef TCPWM_PCLK_CASE
+}
+
+void machine_tcpwm_slave_init(en_clk_dst_t pclk_dst) {
+    pclk_div_slave_init(pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+    machine_tcpwm0_slave_ref_count++;
+}
+
+void machine_tcpwm_slave_deinit(en_clk_dst_t pclk_dst) {
+    if (machine_tcpwm0_slave_ref_count == 0) {
+        return;
+    }
+    machine_tcpwm0_slave_ref_count--;
+    // Only tear the shared slave down once the last Counter/Timer/PWM using the
+    // TCPWM0 block has been deinitialised.
+    if (machine_tcpwm0_slave_ref_count == 0) {
+        pclk_div_slave_deinit(pclk_dst, CY_MMIO_TCPWM0_SLAVE_NR);
+    }
 }
