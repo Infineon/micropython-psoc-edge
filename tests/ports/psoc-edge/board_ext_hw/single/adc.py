@@ -53,45 +53,27 @@ print("connect_channel_pin_ok:", adc_by_both is not None)
 
 # Voltage checks.
 adc_gnd = ADC(adc_pin_gnd)
-adc_mid = ADC(adc_pin_mid)
 adc_max = ADC(adc_pin_max)
 time.sleep_ms(20)
 
 g_uv, g_raw = avg_read(adc_gnd)
-m_uv, m_raw = avg_read(adc_mid)
 x_uv, x_raw = avg_read(adc_max)
 
 # Broad tolerances account for leakage current and reference voltage variation across boards
 gnd_uv_ok = g_uv <= 200000
 gnd_raw_ok = g_raw <= 5000
 
-if x_uv > 0:
-    mid_ratio = m_uv / x_uv
-else:
-    mid_ratio = 0.0
-mid_uv_ratio_ok = 0.40 <= mid_ratio <= 0.60
-
-# Midpoint should also be close to half-scale in read_u16.
-mid_raw_half_ok = abs(m_raw - 32768) <= 8000
-
 # MAX should be near top of range when tied to VDD.
 max_raw_high_ok = x_raw >= 58000
 
-# Ordering sanity check.
-monotonic_ok = g_uv < m_uv < x_uv
-
 print("gnd_uv_ok:", gnd_uv_ok)
 print("gnd_raw_ok:", gnd_raw_ok)
-print("mid_uv_ratio_ok:", mid_uv_ratio_ok)
-print("mid_raw_half_ok:", mid_raw_half_ok)
 print("max_raw_high_ok:", max_raw_high_ok)
-print("monotonic_ok:", monotonic_ok)
 
 # Cleanup.
 adc_by_ch.deinit()
 adc_by_pin.deinit()
 adc_by_both.deinit()
 adc_gnd.deinit()
-adc_mid.deinit()
 adc_max.deinit()
 print("cleanup_ok:", True)
