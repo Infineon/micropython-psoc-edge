@@ -385,7 +385,15 @@ static void mp_machine_adc_deinit(machine_adc_obj_t *self) {
         machine_adc_obj_set(self->channel, NULL);
     }
     if (machine_adc_disable_channel(self->channel)) {
-        machine_adc_reload_config(self->block);
+        if (adc_enabled_channels_mask == 0) {
+            // Last channel disabled: shut down the controller cleanly instead of
+            // reloading config with zero channels (which leaves the hardware running
+            // in an undefined state and can trigger a deferred hard-fault).
+            Cy_AutAnalog_Disable();
+            adc_autanalog_initialized = false;
+        } else {
+            machine_adc_reload_config(self->block);
+        }
     }
 }
 
