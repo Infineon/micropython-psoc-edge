@@ -391,11 +391,10 @@ static void mp_machine_adc_deinit(machine_adc_obj_t *self) {
     }
     if (machine_adc_disable_channel(self->channel)) {
         if (adc_enabled_channels_mask == 0) {
-            // Last channel disabled: shut down the controller cleanly instead of
-            // reloading config with zero channels (which leaves the hardware running
-            // in an undefined state and can trigger a deferred hard-fault).
-            Cy_AutAnalog_Disable();
-            adc_autanalog_initialized = false;
+            // Last channel disabled: perform a full hardware shutdown matching
+            // machine_adc_deinit_all() so that any in-flight scan is stopped and
+            // config structures are reset before execution returns.
+            machine_adc_deinit_all();
         } else {
             machine_adc_reload_config(self->block);
         }
