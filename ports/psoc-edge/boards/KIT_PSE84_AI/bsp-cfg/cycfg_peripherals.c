@@ -1433,6 +1433,7 @@ void init_cycfg_peripherals(void) {
  */
 
 void init_cycfg_peripheral_s_minimal(void) {
+    Cy_SysClk_PeriGroupSlaveInit(CY_MMIO_PASS_PERI_NR, CY_MMIO_PASS_GROUP_NR, CY_MMIO_PASS_SLAVE_NR, CY_MMIO_PASS_CLK_HF_NR);
     #if defined(CY_DEVICE_CONFIGURATOR_IP_ENABLE_FEATURE)
     Cy_SysClk_PeriGroupSlaveInit(CY_MMIO_SDHC0_PERI_NR, CY_MMIO_SDHC0_GROUP_NR, CY_MMIO_SDHC0_SLAVE_NR, CY_MMIO_SDHC0_CLK_HF_NR);
     #endif /* defined (CY_DEVICE_CONFIGURATOR_IP_ENABLE_FEATURE) */
