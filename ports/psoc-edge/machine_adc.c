@@ -265,6 +265,9 @@ static void machine_adc_init_autanalog(void) {
         return;
     }
 
+    // PASS peripheral clock group must be enabled before Cy_AutAnalog_Init
+    Cy_SysClk_PeriGroupSlaveInit(CY_MMIO_PASS_PERI_NR, CY_MMIO_PASS_GROUP_NR, CY_MMIO_PASS_SLAVE_NR, CY_MMIO_PASS_CLK_HF_NR);
+
     // Initialize ADC configuration structures dynamically
     machine_adc_init_configs();
 
