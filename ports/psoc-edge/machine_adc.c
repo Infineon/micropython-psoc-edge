@@ -389,8 +389,12 @@ static void mp_machine_adc_deinit(machine_adc_obj_t *self) {
     }
     if (machine_adc_disable_channel(self->channel)) {
         if (adc_enabled_channels_mask != 0u) {
-            // Do not restart the autonomous controller with chanEn == 0.
             machine_adc_reload_config(self->block);
+        } else {
+            // Last channel deinitialized — shut down hardware to save power.
+            Cy_AutAnalog_Disable();
+            adc_autanalog_initialized = false;
+            machine_adc_init_configs();
         }
     }
 }
