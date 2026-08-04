@@ -404,7 +404,6 @@ static void mp_machine_adc_deinit(machine_adc_obj_t *self) {
 
 // ADC.block() -> ADCBlock(0)
 static mp_obj_t mp_machine_adc_block(machine_adc_obj_t *self) {
-    (void)self;
-    mp_obj_t block_id = MP_OBJ_NEW_SMALL_INT(0);
+    mp_obj_t block_id = MP_OBJ_NEW_SMALL_INT(self->block);
     return MP_OBJ_TYPE_GET_SLOT(&machine_adc_block_type, make_new)(&machine_adc_block_type, 1, 0, &block_id);
 }
