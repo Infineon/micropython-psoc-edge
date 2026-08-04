@@ -46,6 +46,9 @@ static bool adc_autanalog_initialized = false;
 // Bitmask of ADC channels enabled by user-created ADC objects.
 static uint8_t adc_enabled_channels_mask = 0;
 
+// ADC GPIO channel config is runtime-owned by the machine ADC module.
+cy_stc_autanalog_sar_hs_chan_t CYBSP_SAR_ADC_gpio_ch_cfg[ADC_NUM_CHANNELS];
+
 // ADC channel object: stores pin mapping
 typedef struct _machine_adc_obj_t {
     mp_obj_base_t base;
