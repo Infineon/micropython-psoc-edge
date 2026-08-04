@@ -28,8 +28,7 @@
 #include <alloca.h>
 #include "mpconfigboard.h"
 
-// Use core features for Thonny compatibility (larger firmware)
-#define MICROPY_CONFIG_ROM_LEVEL                (MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES)
+#define MICROPY_CONFIG_ROM_LEVEL                (MICROPY_CONFIG_ROM_LEVEL_FULL_FEATURES)
 
 // MicroPython emitters
 #define MICROPY_PERSISTENT_CODE_LOAD            (1)
@@ -55,7 +54,7 @@
 #define MICROPY_ALLOC_PARSE_CHUNK_INIT          (16)
 #define MICROPY_PY_MATH_GAMMA_FIX_NEGINF        (1)
 
-// Enable features above the default EXTRA_FEATURES ROM level
+// Enable features above the default FULL_FEATURES ROM level
 #define MICROPY_PY_WEAKREF                      (1)
 #define MICROPY_PY_IO_BUFFEREDWRITER            (1)
 #define MICROPY_PY_RE_MATCH_GROUPS              (1)
