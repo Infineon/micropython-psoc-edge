@@ -55,6 +55,12 @@
 #define MICROPY_ALLOC_PARSE_CHUNK_INIT          (16)
 #define MICROPY_PY_MATH_GAMMA_FIX_NEGINF        (1)
 
+// Enable features above the default EXTRA_FEATURES ROM level
+#define MICROPY_PY_WEAKREF                      (1)
+#define MICROPY_PY_IO_BUFFEREDWRITER            (1)
+#define MICROPY_PY_RE_MATCH_GROUPS              (1)
+#define MICROPY_PY_RE_MATCH_SPAN_START_END      (1)
+
 // Fine control over Python builtins, classes, modules, etc
 #define MICROPY_PY_SYS_PLATFORM                 "psoc-edge"
 #define MICROPY_PY_BUILTINS_HELP_TEXT           psoc_edge_help_text
