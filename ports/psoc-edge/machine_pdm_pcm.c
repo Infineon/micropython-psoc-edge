@@ -142,13 +142,13 @@ typedef struct _pdm_pcm_block_obj_t {
     en_clk_dst_t clk;
     pclk_div_obj_t *pclk_div;
     uint8_t mmio_slave_nr;
-    bool inited;
+    uint8_t owner_count;
 } pdm_pcm_block_obj_t;
 
 /**
  * For the current PSE8x family there is only one PDM block.
  */
-static pdm_pcm_block_obj_t pdm_pcm_block_obj[1] = { { 0, PDM0, PCLK_PDM0_CLK_IF_SRSS, NULL, CY_MMIO_PDM0_SLAVE_NR, false } };
+static pdm_pcm_block_obj_t pdm_pcm_block_obj[1] = { { 0, PDM0, PCLK_PDM0_CLK_IF_SRSS, NULL, CY_MMIO_PDM0_SLAVE_NR, 0 } };
 
 static void pdm_pcm_block_clk_init(pdm_pcm_block_obj_t *block) {
     pclk_div_slave_init(block->clk, block->mmio_slave_nr);
@@ -186,6 +186,12 @@ static void pdm_pcm_block_clk_deinit(pdm_pcm_block_obj_t *block) {
 }
 
 static void pdm_pcm_block_init(pdm_pcm_block_obj_t *block) {
+    /* Only initialize if not already owned */
+    if (block->owner_count > 0) {
+        block->owner_count++;
+        return;
+    }
+
     /* -- Clock configuration -- */
     pdm_pcm_block_clk_init(block);
 
@@ -216,17 +222,16 @@ static void pdm_pcm_block_init(pdm_pcm_block_obj_t *block) {
     cy_en_pdm_pcm_status_t ret = Cy_PDM_PCM_Init(block->periph, &pdm_pcm_block_conf);
     pdm_pcm_assert_raise_val("PDM PCM initialization failed with code: %d \r\n", ret);
 #undef PDM_PCK_BLOCK_DIVIDER
-    block->inited = true;
-}
-
-static inline bool pdm_pcm_block_is_inited(pdm_pcm_block_obj_t *block) {
-    return block->inited;
+    block->owner_count++;
 }
 
 static inline void pdm_pcm_block_deinit(pdm_pcm_block_obj_t *block) {
+    block->owner_count--;
+    if (block->owner_count > 0) {
+        return;
+    }
     Cy_PDM_PCM_DeInit(block->periph);
     pdm_pcm_block_clk_deinit(block);
-    block->inited = false;
 }
 
 /* -------------------------------- PDM Channel -------------------------------- */
@@ -290,9 +295,8 @@ static void pdm_pcm_channel_free(pdm_pcm_channel_obj_t *chan_obj) {
 }
 
 static void pdm_pcm_channel_init(pdm_pcm_channel_obj_t *chan_obj, sample_rate_t sample_rate, pdm_pcm_word_length_t word_length, bool second_channel) {
-    if (!pdm_pcm_block_is_inited(chan_obj->block)) {
-        pdm_pcm_block_init(chan_obj->block);
-    }
+
+    pdm_pcm_block_init(chan_obj->block);
 
     Cy_PDM_PCM_Channel_Enable(chan_obj->block->periph, chan_obj->id);
 
@@ -649,15 +653,8 @@ static void mp_machine_pdm_pcm_deinit(machine_pdm_pcm_obj_t *self) {
         pdm_pcm_channel_deinit(self->channels[1]);
         pdm_pcm_channel_free(self->channels[1]);
     }
-    MP_STATE_PORT(machine_pdm_pcm_obj[self->id]) = NULL;
-
-    /* Deinit the block if no other instances are using it */
-    for (uint8_t i = 0; i < MICROPY_PY_MACHINE_PDM_PCM_NUM_ENTRIES; i++) {
-        if (MP_STATE_PORT(machine_pdm_pcm_obj[i]) != NULL) {
-            return;
-        }
-    }
     pdm_pcm_block_deinit(self->channels[0]->block);
+    MP_STATE_PORT(machine_pdm_pcm_obj[self->id]) = NULL;
 }
 
 void machine_pdm_pcm_deinit_all(void) {
