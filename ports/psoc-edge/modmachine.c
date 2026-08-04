@@ -111,7 +111,9 @@ void machine_deinit(void) {
     #if MICROPY_PY_MACHINE_SPI_TARGET
     machine_spi_target_deinit_all();
     #endif
+    #if MICROPY_PY_MACHINE_ADC
     machine_adc_deinit_all();
+    #endif
     machine_pdm_pcm_deinit_all();
     machine_ipc_deinit_all();
     machine_counter_deinit_all();
