@@ -247,18 +247,16 @@ Use :class:`ADC` to read analog values from an ADC-capable pin::
 
 This port also supports :class:`ADCBlock` to provide control over ADC configuration.
 
-Use :class:`ADCBlock` to connect by channel, pin, or both::
+``ADCBlock.connect()`` accepts a channel, a pin, or both when they resolve to the same ADC source.
+
+Use :class:`ADCBlock` to connect a channel to a pin::
 
     from machine import ADCBlock
 
     blk = ADCBlock(0, bits=12)
-    adc0 = blk.connect(1)
-    adc1 = blk.connect('P15_1')
-    adc2 = blk.connect(1, 'P15_1')
-    print(adc0.read_u16())
-    adc0.deinit()
-    adc1.deinit()
-    adc2.deinit()
+    adc = blk.connect(1, 'P15_1')
+    print(adc.read_u16())
+    adc.deinit()
 
 .. note::
 
