@@ -48,6 +48,15 @@ static uint8_t adc_enabled_channels_mask = 0;
 
 // ADC GPIO channel config is runtime-owned by the machine ADC module.
 cy_stc_autanalog_sar_hs_chan_t CYBSP_SAR_ADC_gpio_ch_cfg[ADC_NUM_CHANNELS];
+cy_stc_autanalog_sar_sta_hs_t CYBSP_SAR_ADC_sta_hs_cfg;
+cy_stc_autanalog_sar_sta_t CYBSP_SAR_ADC_sta_cfg;
+cy_stc_autanalog_sar_seq_tab_hs_t CYBSP_SAR_ADC_seq_hs_cfg[2];
+cy_stc_autanalog_sar_t CYBSP_SAR_ADC_cfg;
+cy_stc_autanalog_stt_sar_t CYBSP_SAR_ADC_stt[3];
+
+#if defined(COMPONENT_MTB_HAL) && (MTB_HAL_DRIVER_AVAILABLE_ADC)
+mtb_hal_adc_configurator_t CYBSP_SAR_ADC_hal_config;
+#endif
 
 // ADC channel object: stores pin mapping
 typedef struct _machine_adc_obj_t {
@@ -191,6 +200,13 @@ static void machine_adc_init_configs(void) {
     machine_adc_init_seq_cfg();
     machine_adc_init_sar_cfg();
     machine_adc_init_stt_cfg();
+
+    #if defined(COMPONENT_MTB_HAL) && (MTB_HAL_DRIVER_AVAILABLE_ADC)
+    CYBSP_SAR_ADC_hal_config.config = &CYBSP_SAR_ADC_cfg;
+    CYBSP_SAR_ADC_hal_config.num_channels = 2;
+    CYBSP_SAR_ADC_hal_config.clock = NULL;
+    CYBSP_SAR_ADC_hal_config.adc_index = 0U;
+    #endif
 }
 
 // Reload SAR config after channel mask updates.
