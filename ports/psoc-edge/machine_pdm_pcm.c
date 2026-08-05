@@ -330,6 +330,7 @@ static void pdm_pcm_channel_init(pdm_pcm_channel_obj_t *chan_obj, sample_rate_t 
 static void pdm_pcm_channel_deinit(pdm_pcm_channel_obj_t *chan_obj) {
     Cy_PDM_PCM_Channel_DeInit(chan_obj->block->periph, chan_obj->id);
     Cy_PDM_PCM_Channel_Disable(chan_obj->block->periph, chan_obj->id);
+    pdm_pcm_block_deinit(chan_obj->block);
 }
 
 static void pdm_pcm_channel_irq_init(pdm_pcm_channel_obj_t *chan_obj) {
@@ -653,7 +654,6 @@ static void mp_machine_pdm_pcm_deinit(machine_pdm_pcm_obj_t *self) {
         pdm_pcm_channel_deinit(self->channels[1]);
         pdm_pcm_channel_free(self->channels[1]);
     }
-    pdm_pcm_block_deinit(self->channels[0]->block);
     MP_STATE_PORT(machine_pdm_pcm_obj[self->id]) = NULL;
 }
 
