@@ -486,6 +486,7 @@ function ci_psoc_edge_run_tests_hil {
             -e basics/string_tstring_basic1.py \
             -e basics/string_tstring_parser1.py \
             -e basics/weakref_callback_exception.py \
+            -e extmod/deflate_compress.py \
             -e extmod/machine_spi_rate.py \
             -e extmod/machine_timer.py \
             -e stress/recursive_iternext.py)
