@@ -77,28 +77,6 @@ typedef struct _machine_pwm_obj_t {
 
 static machine_pwm_obj_t *pwm_obj[MICROPY_PY_MACHINE_PWM_MAX_OBJS] = { NULL };
 
-static const machine_pin_af_obj_t *pwm_pin_af_find_and_alloc(machine_pwm_obj_t *self) {
-    bool has_pwm_af = false;
-    for (uint8_t i = 0; i < self->pin->af_num; i++) {
-        const machine_pin_af_obj_t *af = &self->pin->af[i];
-        if (af->signal != MACHINE_PIN_AF_SIGNAL_TCPWM_LINE) {
-            continue;
-        }
-        has_pwm_af = true;
-        if (machine_tcpwm_counter_try_alloc(af->unit, MP_OBJ_FROM_PTR(self))) {
-            self->counter_num = af->unit;
-            self->pclk_dst = machine_tcpwm_counter_pclk(self->counter_num);
-            return af;
-        }
-    }
-
-    if (has_pwm_af) {
-        mp_raise_msg_varg(&mp_type_ValueError,
-            MP_ERROR_TEXT("No free TCPWM counter is available for Pin %q"), self->pin->name);
-    }
-    mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("Pin %q does not support PWM output"), self->pin->name);
-}
-
 // Search the instance pool for an existing PWM object on the given port/pin; returns NULL if not found.
 static inline machine_pwm_obj_t *pwm_obj_find_by_pin(uint8_t port, uint8_t pin) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_PWM_MAX_OBJS; i++) {
@@ -135,20 +113,6 @@ static void pwm_duty_ns_assert(mp_int_t duty_ns, uint32_t freq) {
     if (duty_ns > (int)(1000000000 / freq)) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("PWM duty in ns is larger than the period %d ns"), (int)(1000000000 / freq));
     }
-}
-
-// Configure the GPIO pin to route the TCPWM output via HSIOM.
-static void pwm_pin_config(machine_pwm_obj_t *self) {
-    GPIO_PRT_Type *port = Cy_GPIO_PortToAddr(self->pin->port);
-    Cy_GPIO_SetHSIOM(port, self->pin->pin, self->pin_af->idx);
-    Cy_GPIO_SetDrivemode(port, self->pin->pin, CY_GPIO_DM_STRONG_IN_OFF);
-}
-
-// Restore the GPIO pin to plain GPIO mode (Hi-Z, no peripheral routing)
-static void pwm_pin_restore(const machine_pin_obj_t *pin) {
-    GPIO_PRT_Type *port = Cy_GPIO_PortToAddr(pin->port);
-    Cy_GPIO_SetHSIOM(port, pin->pin, HSIOM_SEL_GPIO);
-    Cy_GPIO_SetDrivemode(port, pin->pin, CY_GPIO_DM_HIGHZ);
 }
 
 // Reconfigure and restart the TCPWM counter using the current pwm_obj config struct.
@@ -265,9 +229,6 @@ static void mp_machine_pwm_init_helper(machine_pwm_obj_t *self, size_t n_args, c
     /* Apply frequency and duty cycle to the PWM config struct */
     pwm_config(self);
 
-    /* Route the TCPWM output to the configured GPIO pin */
-    pwm_pin_config(self);
-
     machine_pwm_configure_clock(self);
 
     cy_en_tcpwm_status_t result = Cy_TCPWM_PWM_Init(TCPWM0,
@@ -312,12 +273,43 @@ static mp_obj_t mp_machine_pwm_make_new(const mp_obj_type_t *type, size_t n_args
     }
 
     self->pin = pin;
+    self->pin_af = NULL;
     self->counter_num = UINT32_MAX;
     self->pclk_div = NULL;
 
     nlr_buf_t nl_af;
     if (nlr_push(&nl_af) == 0) {
-        self->pin_af = pwm_pin_af_find_and_alloc(self);
+        bool has_pwm_af = false;
+        for (uint8_t i = 0; i < self->pin->af_num; i++) {
+            const machine_pin_af_obj_t *af = &self->pin->af[i];
+            if (af->signal != MACHINE_PIN_AF_SIGNAL_TCPWM_LINE) {
+                continue;
+            }
+            has_pwm_af = true;
+            if (machine_tcpwm_counter_try_alloc(af->unit, MP_OBJ_FROM_PTR(self))) {
+                self->pin_af = af;
+                self->counter_num = af->unit;
+                self->pclk_dst = machine_tcpwm_counter_pclk(self->counter_num);
+                break;
+            }
+        }
+
+        if (self->counter_num == UINT32_MAX) {
+            if (has_pwm_af) {
+                mp_raise_msg_varg(&mp_type_ValueError,
+                    MP_ERROR_TEXT("No free TCPWM counter is available for Pin %q"), self->pin->name);
+            }
+            mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("Pin %q does not support PWM output"), self->pin->name);
+        }
+
+        mp_hal_pin_af_config_t pwm_pin_cfg = {
+            .pin = self->pin,
+            .signal = MACHINE_PIN_AF_SIGNAL_TCPWM_LINE,
+            .cy_drive_mode = CY_GPIO_DM_STRONG_IN_OFF,
+            .init_value = 0,
+            .af = self->pin_af,
+        };
+        mp_hal_periph_pins_af_init(&pwm_pin_cfg, 1);
         nlr_pop();
     } else {
         if (self->counter_num != UINT32_MAX) {
@@ -388,7 +380,7 @@ static mp_obj_t mp_machine_pwm_make_new(const mp_obj_type_t *type, size_t n_args
             machine_tcpwm_slave_deinit(self->pclk_dst);
         }
         machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
-        pwm_pin_restore(self->pin);
+        mp_hal_pin_config(self->pin, GPIO_MODE_IN, GPIO_PULL_NONE, MACHINE_PIN_OUT_VAL_UNDEF);
         pwm_obj_free(self);
         nlr_jump(nl.ret_val);
     }
@@ -402,7 +394,7 @@ static void mp_machine_pwm_deinit(machine_pwm_obj_t *self) {
     if (self->pclk_div != NULL) {
         Cy_TCPWM_PWM_Disable(TCPWM0, self->counter_num);
     }
-    pwm_pin_restore(self->pin);
+    mp_hal_pin_config(self->pin, GPIO_MODE_IN, GPIO_PULL_NONE, MACHINE_PIN_OUT_VAL_UNDEF);
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
     if (self->pclk_div != NULL) {
         pclk_div_deinit(self->pclk_div);
