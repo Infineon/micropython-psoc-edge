@@ -2,6 +2,9 @@ name: psoc-edge port ifx all tests
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - ci-run-test-all
   pull_request:
     branches:
       - 'psoc-edge-*'
@@ -67,19 +70,8 @@ jobs:
           cp mpy-psoc-edge_${{ matrix.board }}_${{ needs.server-build.outputs.commit_sha }}/${{ env.mpy_hex_file }} tools/psoc-edge
           source tools/ci.sh && ci_psoc_edge_deploy_hil ${{ matrix.board }} ${{ env.mpy_hex_file }} tests/ports/psoc-edge/${{ runner.name }}-devs.yml
       - name: Run all tests
-        env:
-          pse_test_dir: tests/ports/psoc-edge
         run: |
-          devs_file=$pse_test_dir/${{ runner.name }}-devs.yml
-          # TODO: Select the UART target via feature query once etdevs-query supports it.
-          target_uid=101A1398012D2400
-
-          target_port=$(etdevs-query address --filter uid=$target_uid --devs-yml $devs_file | head -1)
-          cd tests
-          ./run-tests.py -t "$target_port" --via-mpy || ./run-tests.py -t "$target_port" --via-mpy --run-failures
-          ./run-tests.py -t "$target_port" --via-mpy --emit native || ./run-tests.py -t "$target_port" --via-mpy --emit native --run-failures
-          ./run-tests.py -t "$target_port" -d extmod_hardware || ./run-tests.py -t "$target_port" -d extmod_hardware --run-failures
-          ./run-natmodtests.py -t "$target_port" extmod/*.py
+          source tools/ci.sh && ci_psoc_edge_run_tests_hil ${{ matrix.board }} tests/ports/psoc-edge/${{ runner.name }}-devs.yml
       - name: Container teardown
         if: always()
         run: |
