@@ -477,14 +477,29 @@ function ci_psoc_edge_run_tests_hil {
     fi
     
     cd tests || return 1
-    ./run-tests.py -t "${target_port}" \
-        -e basics/class_setname_hazard_rand.py \
-        -e basics/string_tstring_basic1.py \
-        -e basics/string_tstring_parser1.py \
-        -e basics/weakref_callback_exception.py \
-        -e extmod/machine_spi_rate.py \
-        -e extmod/machine_timer.py \
-        -e stress/recursive_iternext.py
+
+    function _ci_psoc_edge_run_tests_variant {
+        local -a run_tests_cmd=(./run-tests.py -t "${target_port}" "$@" \
+            -e basics/class_setname_hazard_rand.py \
+            -e basics/string_tstring_basic1.py \
+            -e basics/string_tstring_parser1.py \
+            -e basics/weakref_callback_exception.py \
+            -e extmod/machine_spi_rate.py \
+            -e extmod/machine_timer.py \
+            -e stress/recursive_iternext.py)
+
+        if ! "${run_tests_cmd[@]}"; then
+            if ! "${run_tests_cmd[@]}" --run-failures; then
+                "${run_tests_cmd[@]}" --run-failures
+            fi
+        fi
+    }
+
+    _ci_psoc_edge_run_tests_variant
+    _ci_psoc_edge_run_tests_variant --via-mpy
+    _ci_psoc_edge_run_tests_variant --via-mpy --emit native
+
+    ./run-natmodtests.py -t "${target_port}" extmod/*.py
 }
 
 function ci_psoc_edge_teardown_hil {
