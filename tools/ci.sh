@@ -475,6 +475,8 @@ function ci_psoc_edge_run_tests_hil {
         echo "Failed to resolve target port for board: ${board}" 1>&2
         return 1
     fi
+
+    make ${MAKEOPTS} -C mpy-cross
     
     cd tests || return 1
 
