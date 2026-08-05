@@ -468,24 +468,22 @@ function ci_psoc_edge_run_tests_hil {
     board=$1
     devs_file=$2
 
-    target_port=$(etdevs-query address --filter name=${board} --devs-yml ${devs_file} | head -1)
+    target_port=$(etdevs-query address --filter name=${board} --devs-yml ${devs_file})
 
     if [ -z "${target_port}" ]; then
         echo "Failed to resolve target port for board: ${board}" 1>&2
         return 1
     fi
-
-    (
-        cd tests || return 1
-        ./run-tests.py -t "${target_port}" \
-            -e basics/class_setname_hazard_rand.py \
-            -e basics/string_tstring_basic1.py \
-            -e basics/string_tstring_parser1.py \
-            -e basics/weakref_callback_exception.py \
-            -e extmod/machine_spi_rate.py \
-            -e extmod/machine_timer.py \
-            -e stress/recursive_iternext.py
-    )
+    
+    cd tests || return 1
+    ./run-tests.py -t "${target_port}" \
+        -e basics/class_setname_hazard_rand.py \
+        -e basics/string_tstring_basic1.py \
+        -e basics/string_tstring_parser1.py \
+        -e basics/weakref_callback_exception.py \
+        -e extmod/machine_spi_rate.py \
+        -e extmod/machine_timer.py \
+        -e stress/recursive_iternext.py
 }
 
 function ci_psoc_edge_teardown_hil {
