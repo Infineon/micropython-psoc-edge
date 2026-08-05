@@ -468,7 +468,7 @@ function ci_psoc_edge_run_tests_hil {
     board=$1
     devs_file=$2
 
-    target_port=$(etdevs-query address --filter name=${board} --devs-yml ${devs_file})
+    target_port=$(etdevs-query address --filter name=${board} --devs-yml ${devs_file} | head -1)
 
     if [ -z "${target_port}" ]; then
         echo "Failed to resolve target port for board: ${board}" 1>&2
