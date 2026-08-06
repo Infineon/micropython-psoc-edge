@@ -364,9 +364,155 @@ function ci_psoc_edge_setup {
 }
 
 function ci_psoc_edge_build {
+    board_arg=""
+
+    if [ -n "$1" ]; then
+        board_arg="BOARD=$1"
+    fi
+
     make ${MAKEOPTS} -C mpy-cross
     make ${MAKEOPTS} -C ports/psoc-edge submodules
-    make ${MAKEOPTS} -C ports/psoc-edge
+    make ${MAKEOPTS} -C ports/psoc-edge ${board_arg}
+}
+
+MPY_PSOC_CI_DOCKER_VERSION=0.1.0
+
+function ci_psoc_edge_setup_hil {
+    # Access to serial device
+    if [ "$1" = "--dev-access" ]; then
+        device0_flag=--device=/dev/ttyACM0
+        device1_flag=--device=/dev/ttyACM1
+    else
+        device0_flag=
+        device1_flag=
+    fi
+
+    docker pull ifxmakers/mpy-psoc-ci:${MPY_PSOC_CI_DOCKER_VERSION}
+    docker run --name mpy-ci --rm --privileged -d -it \
+      ${device0_flag} \
+      ${device1_flag} \
+      -v "$(pwd)":/micropython-psoc-edge \
+      -w /micropython-psoc-edge/ports/psoc-edge \
+      ifxmakers/mpy-psoc-ci:${MPY_PSOC_CI_DOCKER_VERSION}
+    docker ps -a
+
+    # This command prevents the issue "fatal: detected dubious ownership in repository at '/micropython'""
+    docker exec mpy-ci /bin/bash -c "git config --global --add safe.directory /micropython-psoc-edge"
+    docker exec mpy-ci /bin/bash -c "git config --global --add safe.directory /micropython-psoc-edge/lib/mpy-test-ext"
+
+    # Initialize the submodules
+    docker exec mpy-ci make submodules
+}
+
+function ci_psoc_edge_build_hil {
+    board=$1
+    docker exec mpy-ci make BOARD=${board}
+}
+
+function ci_psoc_edge_deploy_mpy_hil {
+    board=$1
+    # hex file including path with respect to micropython root
+    hex_file=$2
+    devs_file=$3
+
+    # if no devices file is provided, don´t add the --devs-file argument to the command
+    if [ -z "$devs_file" ]; then
+        dev_files_arg=""
+    else
+        dev_files_arg="--devs-file ../../${devs_file}"
+    fi
+
+    docker exec mpy-ci /bin/bash -c "cd ../../tools/psoc-edge && python3 mpy-pse.py device-setup --board ${board} --hex-file ${hex_file} ${dev_files_arg} -q"
+}
+
+function ci_psoc_edge_deploy_cm55_hil {
+    board=$1
+    devs_file=$2
+    uids=$(etdevs-query uid --filter name=${board} --devs-yml ${devs_file})
+    for uid in $uids; do
+        echo "Deploying CM55 firmware to device with UID: ${uid}"
+        docker exec mpy-ci make deploy_cm55 BOARD=${board} DEV_SERIAL_NUMBER=${uid}
+    done
+}
+
+function ci_psoc_edge_install_libs_hil {
+    board=$1
+    devs_file=$2
+    mpr_cmd="python3 tools/mpremote/mpremote.py"
+    libs=(unittest)
+
+    uids=$(etdevs-query uid --filter name=${board} --devs-yml ${devs_file})
+    for lib in "${libs[@]}"; do
+        for uid in $uids; do
+            port=$(etdevs-query address --filter uid=${uid} --devs-yml ${devs_file})
+            echo "Checking unittest on device UID ${uid} (port: ${port})"
+
+            # Only install the library if not already present in "/lib".
+            # `mpremote ls` prints size columns, so match against the final path token.
+            if ${mpr_cmd} connect ${port} ls lib 2>/dev/null | awk '{print $NF}' | grep -Eq "^${lib}/?$"; then
+                echo "${lib} already installed on ${port}"
+            else
+                echo "Installing ${lib} on ${port}"
+                ${mpr_cmd} connect ${port} mip install ${lib}
+            fi
+        done
+    done
+}
+
+function ci_psoc_edge_deploy_hil {
+    board=$1
+    # hex file including path with respect to micropython root
+    hex_file=$2
+    devs_file=$3
+
+    ci_psoc_edge_deploy_mpy_hil "${board}" "${hex_file}" "${devs_file}"
+    # ci_psoc_edge_deploy_cm55_hil "${board}" "${devs_file}"
+    ci_psoc_edge_install_libs_hil "${board}" "${devs_file}"
+}
+
+function ci_psoc_edge_run_tests_hil {
+    board=$1
+    devs_file=$2
+
+    target_ports=($(etdevs-query address --filter name=${board} --devs-yml ${devs_file}))
+    target_port=${target_ports[0]}
+
+    if [ -z "${target_port}" ]; then
+        echo "Failed to resolve target port for board: ${board}" 1>&2
+        return 1
+    fi
+
+    make ${MAKEOPTS} -C mpy-cross
+
+    cd tests || return 1
+
+    function _ci_psoc_edge_run_tests_variant {
+        local -a run_tests_cmd=(./run-tests.py -t "${target_port}" "$@" \
+            -e basics/class_setname_hazard_rand.py \
+            -e basics/string_tstring_basic1.py \
+            -e basics/string_tstring_parser1.py \
+            -e basics/weakref_callback_exception.py \
+            -e extmod/deflate_compress.py \
+            -e extmod/machine_spi_rate.py \
+            -e extmod/machine_timer.py \
+            -e stress/recursive_iternext.py)
+
+        if ! "${run_tests_cmd[@]}"; then
+            if ! "${run_tests_cmd[@]}" --run-failures; then
+                "${run_tests_cmd[@]}" --run-failures
+            fi
+        fi
+    }
+
+    _ci_psoc_edge_run_tests_variant
+    _ci_psoc_edge_run_tests_variant --via-mpy
+    _ci_psoc_edge_run_tests_variant --via-mpy --emit native
+
+    ./run-natmodtests.py -t "${target_port}" extmod/*.py
+}
+
+function ci_psoc_edge_teardown_hil {
+    docker stop mpy-ci
 }
 
 ########################################################################################
