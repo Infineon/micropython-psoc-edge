@@ -120,7 +120,6 @@
 
 #define MICROPY_PY_MACHINE_WDT                  (1)
 #define MICROPY_PY_MACHINE_WDT_INCLUDEFILE      "ports/psoc-edge/machine_wdt.c"
-#define MICROPY_PY_MACHINE_SIGNAL               (1)
 
 #define MICROPY_PY_MACHINE_BITSTREAM            (1)
 
