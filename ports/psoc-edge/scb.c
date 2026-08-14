@@ -70,6 +70,8 @@ MICROPY_PY_FOR_ALL_SCB(DEFINE_SCB_IRQ_HANDLER)
             SCB##scb##_IRQ_Handler \
         }, \
         PCLK_SCB##scb##_CLOCK_SCB_EN, \
+        CY_MMIO_SCB##scb##_PERI_NR, \
+        CY_MMIO_SCB##scb##_GROUP_NR, \
         CY_MMIO_SCB##scb##_SLAVE_NR, \
         NULL, \
         NULL, \
