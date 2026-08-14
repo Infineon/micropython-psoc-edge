@@ -146,10 +146,10 @@ static void machine_spi_target_hw_init(machine_spi_target_obj_t *self) {
     self->scb_obj = scb_obj_alloc(scb_unit, self,
         machine_spi_target_scb_isr);
 
-    pclk_div_slave_init(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
+    pclk_div_slave_init(self->scb_obj->clk, self->scb_obj->mmio_peri_nr, self->scb_obj->mmio_group_nr, self->scb_obj->mmio_slave_nr);
     self->pclk_div = pclk_div_init(self->scb_obj->clk, SPI_TARGET_CLK_DIV_BASE, 0);
     if (self->pclk_div == NULL) {
-        pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
+        pclk_div_slave_deinit(self->scb_obj->mmio_peri_nr, self->scb_obj->mmio_group_nr, self->scb_obj->mmio_slave_nr);
         scb_obj_free(self->scb_obj);
         self->scb_obj = NULL;
         mp_raise_ValueError(MP_ERROR_TEXT("SPITarget clock dividers exhausted"));
@@ -205,7 +205,7 @@ static void machine_spi_target_hw_init(machine_spi_target_obj_t *self) {
     if (result != CY_SCB_SPI_SUCCESS) {
         pclk_div_deinit(self->pclk_div);
         self->pclk_div = NULL;
-        pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
+        pclk_div_slave_deinit(self->scb_obj->mmio_peri_nr, self->scb_obj->mmio_group_nr, self->scb_obj->mmio_slave_nr);
         scb_obj_free(self->scb_obj);
         self->scb_obj = NULL;
         mp_raise_msg_varg(&mp_type_ValueError,
@@ -222,7 +222,7 @@ static void machine_spi_target_hw_deinit(machine_spi_target_obj_t *self) {
     sys_int_deinit(&self->scb_obj->irq);
     pclk_div_deinit(self->pclk_div);
     self->pclk_div = NULL;
-    pclk_div_slave_deinit(self->scb_obj->clk, self->scb_obj->mmio_slave_nr);
+    pclk_div_slave_deinit(self->scb_obj->mmio_peri_nr, self->scb_obj->mmio_group_nr, self->scb_obj->mmio_slave_nr);
     scb_obj_free(self->scb_obj);
     self->scb_obj = NULL;
 }
