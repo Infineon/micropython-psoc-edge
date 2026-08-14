@@ -222,19 +222,15 @@ static uint8_t pclk_div_get_free_num(en_clk_dst_t clk_dst, cy_en_divider_types_t
 /******************************************************************************/
 /** -- Peripheral Clock Divider API -- **/
 
-void pclk_div_slave_init(en_clk_dst_t clk_dst, pclk_mmio_slave_num_t clk_slave_num) {
-    uint32_t peri_inst = CLK_DEST_INST(clk_dst);
-    uint32_t group = CLK_DEST_GROUP(clk_dst);
-    if (!Cy_SysClk_IsPeriGroupSlaveEnabled(peri_inst, group, clk_slave_num)) {
-        Cy_SysClk_PeriGroupSlaveInit(peri_inst, group, clk_slave_num, Cy_Sysclk_PeriPclkGetClkHfNum(clk_dst));
+void pclk_div_slave_init(en_clk_dst_t clk_dst, uint32_t mmio_peri_nr, uint32_t mmio_group_nr, pclk_mmio_slave_num_t clk_slave_num) {
+    if (!Cy_SysClk_IsPeriGroupSlaveEnabled(mmio_peri_nr, mmio_group_nr, clk_slave_num)) {
+        Cy_SysClk_PeriGroupSlaveInit(mmio_peri_nr, mmio_group_nr, clk_slave_num, Cy_Sysclk_PeriPclkGetClkHfNum(clk_dst));
     }
 }
 
-void pclk_div_slave_deinit(en_clk_dst_t clk_dst, pclk_mmio_slave_num_t clk_slave_num) {
-    uint32_t peri_inst = CLK_DEST_INST(clk_dst);
-    uint32_t group = CLK_DEST_GROUP(clk_dst);
-    if (Cy_SysClk_IsPeriGroupSlaveEnabled(peri_inst, group, clk_slave_num)) {
-        Cy_SysClk_PeriGroupSlaveDeinit(peri_inst, group, clk_slave_num);
+void pclk_div_slave_deinit(uint32_t mmio_peri_nr, uint32_t mmio_group_nr, pclk_mmio_slave_num_t clk_slave_num) {
+    if (Cy_SysClk_IsPeriGroupSlaveEnabled(mmio_peri_nr, mmio_group_nr, clk_slave_num)) {
+        Cy_SysClk_PeriGroupSlaveDeinit(mmio_peri_nr, mmio_group_nr, clk_slave_num);
     }
 }
 
