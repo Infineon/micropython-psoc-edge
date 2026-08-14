@@ -38,7 +38,7 @@ uint32_t machine_get_hw_reset_reason(void);
 
 void machine_pin_irq_deinit_all(void);
 void machine_uart_deinit_all(void);
-void machine_hw_i2c_deinit_all(void);
+void machine_i2c_deinit_all(void);
 void machine_spi_deinit_all(void);
 #if MICROPY_PY_MACHINE_SPI_TARGET
 void machine_spi_target_deinit_all(void);

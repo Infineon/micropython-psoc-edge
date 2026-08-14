@@ -106,7 +106,7 @@ void machine_deinit(void) {
     reset_cause = MACHINE_SOFT_RESET;
     machine_pin_irq_deinit_all();
     machine_uart_deinit_all();
-    machine_hw_i2c_deinit_all();
+    machine_i2c_deinit_all();
     machine_spi_deinit_all();
     #if MICROPY_PY_MACHINE_SPI_TARGET
     machine_spi_target_deinit_all();
