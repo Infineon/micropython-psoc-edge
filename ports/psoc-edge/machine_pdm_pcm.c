@@ -141,6 +141,8 @@ typedef struct _pdm_pcm_block_obj_t {
     PDM_Type *periph;
     en_clk_dst_t clk;
     pclk_div_obj_t *pclk_div;
+    uint8_t mmio_peri_nr;
+    uint8_t mmio_group_nr;
     uint8_t mmio_slave_nr;
     uint8_t owner_count;
 } pdm_pcm_block_obj_t;
@@ -148,10 +150,10 @@ typedef struct _pdm_pcm_block_obj_t {
 /**
  * For the current PSE8x family there is only one PDM block.
  */
-static pdm_pcm_block_obj_t pdm_pcm_block_obj[1] = { { 0, PDM0, PCLK_PDM0_CLK_IF_SRSS, NULL, CY_MMIO_PDM0_SLAVE_NR, 0 } };
+static pdm_pcm_block_obj_t pdm_pcm_block_obj[1] = { { 0, PDM0, PCLK_PDM0_CLK_IF_SRSS, NULL, CY_MMIO_PDM0_PERI_NR, CY_MMIO_PDM0_GROUP_NR, CY_MMIO_PDM0_SLAVE_NR, 0 } };
 
 static void pdm_pcm_block_clk_init(pdm_pcm_block_obj_t *block) {
-    pclk_div_slave_init(block->clk, block->mmio_slave_nr);
+    pclk_div_slave_init(block->clk, block->mmio_peri_nr, block->mmio_group_nr, block->mmio_slave_nr);
 
     uint32_t clock_freq = pclk_div_get_input_freq(block->clk);
     if (clock_freq == 0) {
@@ -182,7 +184,7 @@ static void pdm_pcm_block_clk_init(pdm_pcm_block_obj_t *block) {
 
 static void pdm_pcm_block_clk_deinit(pdm_pcm_block_obj_t *block) {
     pclk_div_deinit(block->pclk_div);
-    pclk_div_slave_deinit(block->clk, block->mmio_slave_nr);
+    pclk_div_slave_deinit(block->mmio_peri_nr, block->mmio_group_nr, block->mmio_slave_nr);
 }
 
 static void pdm_pcm_block_init(pdm_pcm_block_obj_t *block) {
