@@ -88,9 +88,11 @@ void init_cycfg_peripheral_clocks(void) {
  */
 
 void init_cycfg_peripheral_clocks_s_minimal(void) {
+    // Added for voice assistant
     Cy_SysClk_PeriPclkDisableDivider((en_clk_dst_t)CYBSP_PDM_CLK_DIV_GRP_NUM, CY_SYSCLK_DIV_16_5_BIT, 1U);
     Cy_SysClk_PeriPclkSetFracDivider((en_clk_dst_t)CYBSP_PDM_CLK_DIV_GRP_NUM, CY_SYSCLK_DIV_16_5_BIT, 1U, 3U, 0U);
     Cy_SysClk_PeriPclkEnableDivider((en_clk_dst_t)CYBSP_PDM_CLK_DIV_GRP_NUM, CY_SYSCLK_DIV_16_5_BIT, 1U);
+
     Cy_SysClk_PeriPclkDisableDivider((en_clk_dst_t)CYBSP_SDHC_0_CLK_DIV_GRP_NUM, CY_SYSCLK_DIV_8_BIT, 0U);
     Cy_SysClk_PeriPclkSetDivider((en_clk_dst_t)CYBSP_SDHC_0_CLK_DIV_GRP_NUM, CY_SYSCLK_DIV_8_BIT, 0U, 1U);
     Cy_SysClk_PeriPclkEnableDivider((en_clk_dst_t)CYBSP_SDHC_0_CLK_DIV_GRP_NUM, CY_SYSCLK_DIV_8_BIT, 0U);
