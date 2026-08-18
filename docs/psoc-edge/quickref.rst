@@ -356,29 +356,10 @@ Use the ``I2C`` class for controller (master) operations::
     
     i2c = I2C(scl='P17_0', sda='P17_1', freq=100000) 
 
-Constructor arguments:
+.. note::
+    The nominal Standard-mode (100 KHz) supports the range 48-100 KHz. 
+    The nominal Fast-mode (400 KHz) supports the range 244-400 KHz.
 
-    - ``id``: I2C bus number (currently only 0 is available).
-      **This parameter is ignored**.
-    - ``scl``: SCL pin (string 'P<port>_<pin>' or Pin object).
-    - ``sda``: SDA pin (string 'P<port>_<pin>' or Pin object).
-    - ``freq``: I2C clock frequency in Hz. Supported: 100000 (100kHz) or
-      400000 (400kHz). Default is 400000.
-    - ``timeout``: Transfer timeout in microseconds. Must be > 0.
-      Default is 50000 (50ms).
-
-The ``scl`` and ``sda`` pins are the only mandatory arguments. 
-
-Methods
-~~~~~~~
-
-All the methods(functions) given in :ref:`machine.I2C <machine.I2C>` class have been implemented in this port except:
-
-.. method:: I2C.init()
-
-Additionally, the following functions are enabled:
-
-.. method:: I2C.deinit()
 
 Target mode (Slave)
 ^^^^^^^^^^^^^^^^^^^
