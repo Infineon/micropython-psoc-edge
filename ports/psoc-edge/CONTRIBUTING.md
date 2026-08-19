@@ -166,31 +166,32 @@ For questions about the port, open a
 [GitHub Discussion](https://github.com/Infineon/micropython-psoc-edge/discussions)
 or raise an issue.
 
-# Upstream PR flow
-1. Choose the feature/issue to upstream.
-2. Create a new branch from master+ci-hil with the following the psoc-edge-<feature> convention in kebab-case (low case with hyphens). This will be a preliminary branch against which we will open PRs in our fork.
-3. We create a new branch psoc-edge-<feature>-review from psoc-edge-<feature>. If the changes are large, it can be done in several (stack) PRs. Chose the appropriate descriptive name each division
-4. Add the contribution from psoc-edge-main. Use the most convenient approach: cherry-picking, diff strategies, ...
-5. Clean up the commit history:
-- Commits belonging to the same file or file groups might be candidate for squashing.
-- Extend the commit message with a description when applicable.
-- Review commit messages and ensure they are descriptive of the changes.
-6. Identify if there are existing tests which are applicable for the module or unit of the contributed code. Specially those which require hardware wiring, make sure that they run locally.  
+## Upstream PR Flow
 
-```python
-$ ./run-tests.py -t a0 
-$ ./run-tests.py -t a0 --via-mpy
-$ ./run-tests.py -t a0 --via-mpy --emit native
-$ ./run-tests.py -t a0 -d extmod_hardware # When applicable
-$ ./run-natmodtests.py -t a0 extmod/*.py
+1. Choose the feature or issue to upstream.
+2. Create a branch from `master+ci-hil` using the naming convention `psoc-edge-<feature>` in kebab-case (lowercase with hyphens). This is the preliminary branch used as the base for fork-internal PRs.
+3. Create a review branch `psoc-edge-<feature>-review` from `psoc-edge-<feature>`. For larger changes, split the work into several stacked PRs and choose descriptive names for each split.
+4. Bring in the contribution from `psoc-edge-main` using the most suitable method (for example, cherry-picking or diff-based strategies).
+5. Clean up commit history:
+     - Squash commits when they belong to the same file or closely related file groups.
+     - Expand commit messages with additional context when useful.
+     - Ensure all commit messages clearly describe the changes.
+6. Identify existing tests relevant to the contributed module or unit. For tests that require hardware wiring, make sure they also run locally.
+
+```bash
+./run-tests.py -t a0
+./run-tests.py -t a0 --via-mpy
+./run-tests.py -t a0 --via-mpy --emit native
+./run-tests.py -t a0 -d extmod_hardware  # when applicable
+./run-natmodtests.py -t a0 extmod/*.py
 ```
 
-7. Most of these tests will anyhow run when you open a PR from psoc-edge-<feature>-review to the psoc-edge-<feature> branch.
-This workflow will take quite some time (~30 min) and some tests will anyhow fail. If manually passing in the local setup, it is fine.
-Some tests can fail, specially due to any hanging from a previous tests.
-8. Open a PR from psoc-edge-<feature>-review to psoc-edge-<feature>
-9. Review iterations.
-10. Drop/Remove all ci check content/commits. You can do this with interactive rebase, dropping the commit with all the CI HIL changes that should not be pushed to the upstream and then force push.
-11. Once we have approved and review everything, we will push it to the upstream master.
-12. Once accepted and merged, bring the changes from the master to our psoc-edge-main. (At some point these should be the same + our fork ci-hil extras).
+7. Most of these tests will also run automatically when you open a PR from `psoc-edge-<feature>-review` to `psoc-edge-<feature>`.
+8. Expect this workflow to take about 30 minutes. Some tests may still fail; if they pass locally in your setup, that is acceptable.
+9. Some failures can be caused by hangs from previous tests.
+10. Open a PR from `psoc-edge-<feature>-review` to `psoc-edge-<feature>`.
+11. Address review feedback.
+12. Remove CI-check-only content/commits before upstreaming. You can do this with interactive rebase by dropping commits that contain CI HIL changes that should not be pushed upstream, then force-push.
+13. After internal approval and final review, push to upstream `master`.
+14. Once accepted and merged, sync the changes from `master` back into `psoc-edge-main` (eventually these branches should differ only by fork-specific CI HIL additions).
 
