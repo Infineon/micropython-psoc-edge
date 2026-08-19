@@ -193,3 +193,4 @@ Some tests can fail, specially due to any hanging from a previous tests.
 10. Drop/Remove all ci check content/commits. You can do this with interactive rebase, dropping the commit with all the CI HIL changes that should not be pushed to the upstream and then force push.
 11. Once we have approved and review everything, we will push it to the upstream master.
 12. Once accepted and merged, bring the changes from the master to our psoc-edge-main. (At some point these should be the same + our fork ci-hil extras).
+
