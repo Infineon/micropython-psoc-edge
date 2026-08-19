@@ -99,7 +99,7 @@ void machine_tcpwm_slave_init(en_clk_dst_t pclk_dst) {
     machine_tcpwm0_slave_ref_count++;
 }
 
-void machine_tcpwm_slave_deinit(en_clk_dst_t pclk_dst) {
+void machine_tcpwm_slave_deinit(void) {
     if (machine_tcpwm0_slave_ref_count == 0) {
         return;
     }

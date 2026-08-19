@@ -860,7 +860,7 @@ static mp_obj_t machine_counter_deinit(mp_obj_t self_in) {
         pclk_div_deinit(self->pclk_div);
         self->pclk_div = NULL;
         // Release the shared TCPWM0 slave
-        machine_tcpwm_slave_deinit(self->pclk_dst);
+        machine_tcpwm_slave_deinit();
     }
 
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
