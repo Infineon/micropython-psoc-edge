@@ -366,7 +366,7 @@ static mp_obj_t machine_timer_make_new(const mp_obj_type_t *type,
         if (self->pclk_div != NULL) {
             pclk_div_deinit(self->pclk_div);
             self->pclk_div = NULL;
-            machine_tcpwm_slave_deinit(self->pclk_dst);
+            machine_tcpwm_slave_deinit();
         }
         machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
         timer_obj[id] = NULL;
@@ -406,7 +406,7 @@ static mp_obj_t machine_timer_deinit(mp_obj_t self_in) {
     if (self->pclk_div != NULL) {
         pclk_div_deinit(self->pclk_div);
         self->pclk_div = NULL;
-        machine_tcpwm_slave_deinit(self->pclk_dst);
+        machine_tcpwm_slave_deinit();
     }
     machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
     timer_obj[self->id] = NULL;

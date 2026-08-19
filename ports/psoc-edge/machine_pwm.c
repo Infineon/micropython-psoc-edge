@@ -385,7 +385,7 @@ static mp_obj_t mp_machine_pwm_make_new(const mp_obj_type_t *type, size_t n_args
             pclk_div_deinit(self->pclk_div);
             self->pclk_div = NULL;
             // Release the shared TCPWM0 slave
-            machine_tcpwm_slave_deinit(self->pclk_dst);
+            machine_tcpwm_slave_deinit();
         }
         machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
         pwm_pin_restore(self->pin);
@@ -408,7 +408,7 @@ static void mp_machine_pwm_deinit(machine_pwm_obj_t *self) {
         pclk_div_deinit(self->pclk_div);
         self->pclk_div = NULL;
         // Release the shared TCPWM0 slave
-        machine_tcpwm_slave_deinit(self->pclk_dst);
+        machine_tcpwm_slave_deinit();
     }
     pwm_obj_free(self);
 }

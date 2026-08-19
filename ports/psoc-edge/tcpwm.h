@@ -38,6 +38,6 @@ void machine_tcpwm_counter_free(uint32_t counter_num, mp_obj_t owner);
 en_clk_dst_t machine_tcpwm_counter_pclk(uint32_t counter_num);
 
 void machine_tcpwm_slave_init(en_clk_dst_t pclk_dst);
-void machine_tcpwm_slave_deinit(en_clk_dst_t pclk_dst);
+void machine_tcpwm_slave_deinit(void);
 
 #endif // MICROPY_INCLUDED_PSOC_EDGE_MACHINE_TCPWM_H
