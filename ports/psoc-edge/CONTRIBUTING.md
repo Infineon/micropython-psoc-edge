@@ -89,6 +89,9 @@ git pull --rebase
 # 2. Rebase your feature branch on top of it
 git checkout <feature-branch>
 git rebase psoc-edge-main
+#If conflicts, resolve it then,
+git add <resolved-files>
+git rebase --continue
 
 # 3. If you have sub-feature branches, cascade the rebase
 git checkout <sub-feature-branch>
@@ -190,7 +193,7 @@ or raise an issue.
 8. Expect this workflow to take about 30 minutes. Some tests may still fail; if they pass locally in your setup, that is acceptable.
 9. Some failures can be caused by hangs from previous tests.
 10. Open a PR from `psoc-edge-<feature>-review` to `psoc-edge-<feature>`.
-11. Address review feedback.
+11. Keep the psoc-edge-<feature> PR active on micropython group and Address review feedback by committing changes into the same psoc-edge-<feature> branch.
 12. Remove CI-check-only content/commits before upstreaming. You can do this with interactive rebase by dropping commits that contain CI HIL changes that should not be pushed upstream, then force-push.
 13. After internal approval and final review, push to upstream `master`.
 14. Once accepted and merged, sync the changes from `master` back into `psoc-edge-main` (eventually these branches should differ only by fork-specific CI HIL additions).
