@@ -121,6 +121,9 @@ static void machine_i2c_obj_make_or_reuse(machine_i2c_obj_t **self_ptr, uint8_t 
         /* Create a new object and allocate the scb instance if free.*/
         if (scb_is_free(id)) {
             (*self_ptr) = machine_i2c_obj_alloc();
+            if (*self_ptr == NULL) {
+                mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to allocate I2C(%u) object"), id);
+            }
             (*self_ptr)->id = id;
             (*self_ptr)->pclk_div = NULL;
             (*self_ptr)->scb_obj = scb_obj_alloc(id, *self_ptr, machine_i2c_scb_isr);
