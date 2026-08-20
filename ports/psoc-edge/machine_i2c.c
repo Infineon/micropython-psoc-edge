@@ -132,6 +132,16 @@ static void machine_i2c_obj_make_or_reuse(machine_i2c_obj_t **self_ptr, uint8_t 
     }
 }
 
+static void machine_i2c_obj_destruct(machine_i2c_obj_t *self) {
+    if (self != NULL) {
+        if (self->scb_obj != NULL) {
+            scb_obj_free(self->scb_obj);
+        }
+        pclk_div_slave_deinit(self->scb_obj->mmio_peri_nr, self->scb_obj->mmio_group_nr, self->scb_obj->mmio_slave_nr);
+        machine_i2c_obj_free(self);
+    }
+}
+
 static uint32_t machine_i2c_hw_scb_clk_freq(machine_i2c_obj_t *self) {
     /**
      * For desired data rate, clk_scb frequency must be in valid range (see TRM I2C Oversampling section)
@@ -395,7 +405,16 @@ static mp_obj_t machine_i2c_make_new(const mp_obj_type_t *type, size_t n_args, s
     machine_i2c_obj_t *self = NULL;
     mp_map_t kw_args;
     mp_map_init_fixed_table(&kw_args, n_kw, args + n_args);
-    machine_i2c_init_impl(&self, i2c_id, init_n_args, init_args, &kw_args);
+
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        machine_i2c_init_impl(&self, i2c_id, init_n_args, init_args, &kw_args);
+        nlr_pop();
+    } else {
+        machine_i2c_obj_destruct(self);
+        nlr_raise(nlr.ret_val);
+    }
+
     return MP_OBJ_FROM_PTR(self);
 }
 
