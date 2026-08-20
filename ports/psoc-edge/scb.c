@@ -31,6 +31,7 @@
 #include "py/runtime.h"
 #include "genhdr/pins_af.h"
 #include "scb.h"
+#include "clk.h"
 
 /* Forward declaration */
 static void scb_irq_handler(uint8_t scb);
@@ -97,10 +98,13 @@ scb_obj_t *scb_obj_alloc(uint8_t scb, mp_obj_t parent, scb_parent_irq_handler_t 
 
     obj->parent = parent;
     obj->parent_handler = handler;
+    pclk_div_slave_init(obj->clk, obj->mmio_peri_nr, obj->mmio_group_nr, obj->mmio_slave_nr);
+
     return &scb_obj[scb];
 }
 
 void scb_obj_free(scb_obj_t *scb) {
+    pclk_div_slave_deinit(scb->mmio_peri_nr, scb->mmio_group_nr, scb->mmio_slave_nr);
     scb->parent = NULL;
     scb->parent_handler = NULL;
 }
