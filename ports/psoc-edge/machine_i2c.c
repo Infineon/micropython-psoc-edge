@@ -146,27 +146,27 @@ static void machine_i2c_obj_destruct(machine_i2c_obj_t *self) {
 static uint32_t machine_i2c_hw_scb_clk_freq(machine_i2c_obj_t *self) {
     /**
      * For desired data rate, clk_scb frequency must be in valid range (see TRM I2C Oversampling section)
-     * For 100kHz: clk_scb range is 1.55 - 3.2 MHz (architecture reference manual 002-38331 Rev. P685 table 355)
-     *   - clk_peri = 100 MHz, divider = 42 → clk_scb = 2.38 MHz ✓ (mid-range)
+     * For 100kHz: clk_scb range is 1.55 - 3.2 MHz (architecture reference manual 002-38331 Rev. *B P707 table 366)
+     *   - target clk_scb = 2.38 MHz (mid-range)
      * For 400kHz: clk_scb range is 7.82 - 10 MHz
-     *   - clk_peri = 100 MHz, divider = 11 → clk_scb = 9.09 MHz ✓ (within range)
-     * Note: Cy_SysClk_PeriphSetDivider takes (divider - 1), so divider=11 → value=10
+     *   - target clk_scb = 9.09 MHz (within range)
      */
-
-    uint32_t divider = (self->freq <= 100000) ? 41U : 10U;
-
-    self->pclk_div = pclk_div_init(self->scb_obj->clk, divider, 0);
-    if (self->pclk_div == NULL) {
-        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to initialize clock divider for I2C(%u)"), self->scb_obj->id);
-    }
+    #define MACHINE_I2C_CLK_SCB_FREQ_100KHZ  (2380000U)
+    #define MACHINE_I2C_CLK_SCB_FREQ_400KHZ  (9090000U)
 
     uint32_t input_freq = pclk_div_get_input_freq(self->scb_obj->clk);
     if (input_freq == 0U) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to get clock frequency for I2C(%u)"), self->scb_obj->id);
     }
 
-    uint32_t clk_scb_freq = input_freq / (divider + 1U);
+    uint32_t clk_scb_freq = (self->freq <= 100000) ? MACHINE_I2C_CLK_SCB_FREQ_100KHZ : MACHINE_I2C_CLK_SCB_FREQ_400KHZ;
+    uint32_t divider = (input_freq / clk_scb_freq) - 1U;
     DEBUG_printf("DEBUG: clk_scb_freq=%u Hz\n", clk_scb_freq);
+
+    self->pclk_div = pclk_div_init(self->scb_obj->clk, divider, 0);
+    if (self->pclk_div == NULL) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to initialize clock divider for I2C(%u)"), self->scb_obj->id);
+    }
 
     return clk_scb_freq;
 }
