@@ -10,6 +10,12 @@
 |                   | P16_5         | P16_6         | UART CTS to RTS                |
 |                   |               |               |                                |
 | Counter           | P16_7         | P11_1         | GPIO pulse output to Counter input |
+|                   |               |               |                                |
+| ADC               | P15_3         | GND           | ADC input to GND               |
+|                   | P15_2         | VDD           | ADC input to VDD               |
+|                   | P15_1         | Divider midpoint | ADC input to divider midpoint  |
+
+ADC divider note: use R1=15k from VDD to P15_1, and R2=15k from P15_1 to GND.
 
 # Pin Connections for HIL Test Setup Between 2 Boards
 
