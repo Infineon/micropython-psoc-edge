@@ -113,7 +113,7 @@ on `psoc-edge-main`.
 ## Pull Request Workflow
 
 ```
-feature branch
+feature branch ← psoc-edge-main
       │
       ▼
  Open PR → psoc-edge-main
@@ -122,7 +122,7 @@ feature branch
       │
  CI Validation
       │
-    Merge
+ Rebase & Merge
       ▼
  psoc-edge-main
 ```
