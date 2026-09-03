@@ -28,8 +28,7 @@
 #include <alloca.h>
 #include "mpconfigboard.h"
 
-// Use core features for Thonny compatibility (larger firmware)
-#define MICROPY_CONFIG_ROM_LEVEL                (MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES)
+#define MICROPY_CONFIG_ROM_LEVEL                (MICROPY_CONFIG_ROM_LEVEL_FULL_FEATURES)
 
 // MicroPython emitters
 #define MICROPY_PERSISTENT_CODE_LOAD            (1)
@@ -41,6 +40,11 @@
 #define MICROPY_READER_VFS                      (1)
 #define MICROPY_ENABLE_GC                       (1)
 #define MICROPY_STACK_CHECK_MARGIN              (1024)
+// Required for hard IRQ on FreeRTOS: ISRs use MSP while tasks use PSP, so
+// mp_cstack_check() needs re-initialising at ISR entry. Must not exceed
+// __StackSize (MSP stack, default 0x1000 = 4096 bytes).
+#define MICROPY_STACK_SIZE_HARD_IRQ             (4096U)
+
 #define MICROPY_ENABLE_EMERGENCY_EXCEPTION_BUF  (1)
 #define MICROPY_LONGINT_IMPL                    (MICROPY_LONGINT_IMPL_MPZ)
 #define MICROPY_FLOAT_IMPL                      (MICROPY_FLOAT_IMPL_FLOAT)
@@ -49,6 +53,12 @@
 #define MICROPY_USE_INTERNAL_ERRNO              (1)
 #define MICROPY_ALLOC_PARSE_CHUNK_INIT          (16)
 #define MICROPY_PY_MATH_GAMMA_FIX_NEGINF        (1)
+
+// Enable features above the default FULL_FEATURES ROM level
+#define MICROPY_PY_WEAKREF                      (1)
+#define MICROPY_PY_IO_BUFFEREDWRITER            (1)
+#define MICROPY_PY_RE_MATCH_GROUPS              (1)
+#define MICROPY_PY_RE_MATCH_SPAN_START_END      (1)
 
 // Fine control over Python builtins, classes, modules, etc
 #define MICROPY_PY_SYS_PLATFORM                 "psoc-edge"
@@ -67,8 +77,19 @@
 // Machine module
 #define MICROPY_PY_MACHINE                      (1)
 #define MICROPY_PY_MACHINE_INCLUDEFILE          "ports/psoc-edge/modmachine.c"
+#define MICROPY_PY_MACHINE_RESET                (1)
+#define MICROPY_PY_MACHINE_BARE_METAL_FUNCS     (1)
+#define MICROPY_PY_MACHINE_DISABLE_IRQ_ENABLE_IRQ (1)
 
 #define MICROPY_PY_MACHINE_PIN_MAKE_NEW         mp_pin_make_new
+
+#define MICROPY_PY_MACHINE_I2C                  (1)
+#define MICROPY_PY_MACHINE_SOFTI2C              (0)
+
+#define MICROPY_PY_MACHINE_SPI                  (1)
+
+#define MICROPY_PY_MACHINE_SPI_TARGET           (1)
+#define MICROPY_PY_MACHINE_SPI_TARGET_MAX       (1)
 
 #define MICROPY_PY_MACHINE_UART                 (1)
 #define MICROPY_PY_MACHINE_UART_INCLUDEFILE     "ports/psoc-edge/machine_uart.c"
@@ -76,6 +97,54 @@
 #define MICROPY_PY_MACHINE_UART_READCHAR_WRITECHAR (1)
 #define MICROPY_PY_MACHINE_UART_IRQ             (1)
 #define MICROPY_STREAMS_NON_BLOCK               (1)
+
+#define MICROPY_PY_MACHINE_I2C_TARGET           (1)
+#define MICROPY_PY_MACHINE_I2C_TARGET_MAX       (1)
+#define MICROPY_PY_MACHINE_I2C_TARGET_HARD_IRQ  (1)
+#define MICROPY_PY_MACHINE_I2C_TARGET_INCLUDEFILE "ports/psoc-edge/machine_i2c_target.c"
+
+#define MICROPY_PY_MACHINE_PDM_PCM              (1)
+#define MICROPY_PY_MACHINE_PDM_PCM_RING_BUF     (1)
+#define MICROPY_PY_MACHINE_PDM_PCM_INCLUDEFILE  "machine_pdm_pcm.c"
+
+#define MICROPY_PY_MACHINE_PWM                  (1)
+#define MICROPY_PY_MACHINE_PWM_INCLUDEFILE      "ports/psoc-edge/machine_pwm.c"
+
+// ADC module
+#define MICROPY_PY_MACHINE_ADC                  (1)
+#define MICROPY_PY_MACHINE_ADC_INCLUDEFILE      "ports/psoc-edge/machine_adc.c"
+#define MICROPY_PY_MACHINE_ADC_DEINIT           (1)
+#define MICROPY_PY_MACHINE_ADC_READ_UV          (1)
+#define MICROPY_PY_MACHINE_ADC_BLOCK            (1)
+#define MICROPY_PY_MACHINE_ADC_BLOCK_INCLUDEFILE "ports/psoc-edge/machine_adc_block.c"
+
+#define MICROPY_PY_MACHINE_WDT                  (1)
+#define MICROPY_PY_MACHINE_WDT_INCLUDEFILE      "ports/psoc-edge/machine_wdt.c"
+
+#define MICROPY_PY_MACHINE_BITSTREAM            (1)
+
+extern void machine_deinit();
+#define MICROPY_PORT_DEINIT_FUNC machine_deinit()
+
+#define MICROPY_PY_MACHINE_PULSE                (1)
+
+#define MICROPY_PY_SSL_DTLS                     (0)
+#define MICROPY_TRACKED_ALLOC                   (MICROPY_SSL_MBEDTLS)
+
+// By default networking should include sockets, ssl, websockets, webrepl
+
+#if MICROPY_PY_NETWORK
+
+#define MICROPY_PY_SOCKET                       (0)
+
+extern const struct _mp_obj_type_t mp_network_ifx_wcm_type;
+#define MICROPY_HW_NIC_IFX_WCM  \
+    { MP_ROM_QSTR(MP_QSTR_WLAN), MP_ROM_PTR(&mp_network_ifx_wcm_type) },
+
+#define MICROPY_PORT_NETWORK_INTERFACES \
+    MICROPY_HW_NIC_IFX_WCM
+
+#endif // MICROPY_PY_NETWORK
 
 // type definitions for the specific machine
 #define MP_SSIZE_MAX (0x7fffffff)
