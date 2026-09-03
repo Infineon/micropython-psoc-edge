@@ -181,10 +181,6 @@ extern cy_stc_autanalog_sar_seq_tab_hs_t CYBSP_SAR_ADC_seq_hs_cfg[];
 extern cy_stc_autanalog_sar_t CYBSP_SAR_ADC_cfg;
 extern cy_stc_autanalog_stt_sar_t CYBSP_SAR_ADC_stt[];
 
-#if defined(COMPONENT_MTB_HAL) && (MTB_HAL_DRIVER_AVAILABLE_ADC)
-extern mtb_hal_adc_configurator_t CYBSP_SAR_ADC_hal_config;
-#endif /* defined (COMPONENT_MTB_HAL) && (MTB_HAL_DRIVER_AVAILABLE_ADC) */
-
 extern const cy_stc_i3c_config_t CYBSP_I3C_CONTROLLER_config;
 extern const cy_stc_pdm_pcm_config_v2_t CYBSP_PDM_config;
 extern const cy_stc_pdm_pcm_channel_config_t channel_2_config;
