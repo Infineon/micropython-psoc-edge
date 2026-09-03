@@ -39,6 +39,23 @@
 
 #include "cybsp.h"
 
+#if defined(CY_RTOS_AWARE)
+// FreeRTOS CM33 NTZ uses BASEPRI (not PRIMASK) for critical sections.
+// Use the ISR-safe BASEPRI wrappers so hard IRQ and task context both work.
+// Hard-IRQ NVIC priorities must be >= configMAX_SYSCALL_INTERRUPT_PRIORITY.
+extern uint32_t ulSetInterruptMask(void);
+extern void vClearInterruptMask(uint32_t ulMask);
+
+static inline mp_uint_t disable_irq(void) {
+    return ulSetInterruptMask();
+}
+
+static inline void enable_irq(mp_uint_t state) {
+    vClearInterruptMask(state);
+}
+
+#else
+
 static inline void enable_irq(mp_uint_t state) {
     if (state == 0) {
         __enable_irq();
@@ -50,6 +67,8 @@ static inline mp_uint_t disable_irq(void) {
     __disable_irq();
     return state;
 }
+
+#endif // CY_RTOS_AWARE
 
 #define MICROPY_BEGIN_ATOMIC_SECTION()     disable_irq()
 #define MICROPY_END_ATOMIC_SECTION(state)  enable_irq(state)
@@ -67,10 +86,11 @@ void mp_hal_set_interrupt_char(int c); // -1 to disable
 
 
 #define MP_HAL_PIN_FMT          "\'%q\'"
+#define MP_HAL_PIN_OBJ_NULL     ((mp_hal_pin_obj_t)NULL)
 #define mp_hal_pin_obj_t        const machine_pin_obj_t *
 #define mp_hal_get_pin_obj(o)   machine_pin_get_pin_obj(o)
 #define mp_hal_pin_name(p)      ((p)->name)
-#define mp_hal_pin_input(p)     mp_hal_pin_config((p), GPIO_MODE_IN, GPIO_PULL_NONE, 0)
+#define mp_hal_pin_input(p)     mp_hal_pin_config((p), GPIO_MODE_IN, GPIO_PULL_NONE, MACHINE_PIN_OUT_VAL_UNDEF)
 #define mp_hal_pin_output(p)    mp_hal_pin_config((p), GPIO_MODE_OUT, GPIO_PULL_NONE, 0)
 #define mp_hal_pin_open_drain(p) mp_hal_pin_config((p), GPIO_MODE_OPEN_DRAIN, GPIO_PULL_NONE, 0)
 #define mp_hal_pin_high(p)      mp_hal_pin_write((p), 1)
@@ -119,6 +139,7 @@ typedef struct {
 
 mp_hal_pin_af_obj_t mp_hal_pin_af_find(mp_hal_pin_obj_t pin, machine_pin_af_signal_t af_signal);
 
+void mp_hal_get_random(size_t n, uint8_t *buf);
 void mp_hal_periph_pins_af_resolve_fn_unit(const mp_hal_pin_af_config_t *periph_pins_config, uint8_t pin_num, machine_pin_af_fn_t fn, machine_pin_af_unit_t *fn_unit);
 void mp_hal_periph_pins_af_resolve_pin_af(mp_hal_pin_af_config_t *periph_pins_config, uint8_t pin_num, machine_pin_af_unit_t fn_unit);
 machine_pin_af_periph_t mp_hal_periph_pins_af_init(const mp_hal_pin_af_config_t *periph_pins_config, uint8_t num_pins);
