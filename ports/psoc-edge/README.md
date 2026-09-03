@@ -37,6 +37,10 @@ Make sure that `arm-none-eabi-gcc`, `edgeprotecttools` and `openocd` are added t
 
 ## Building and running on Linux
 
+As we are working on the `psoc-edge-main` branch, first checkout that branch after cloning this repo:
+
+    git checkout --track origin/psoc-edge-main
+
 Before building the firmware for a given board the MicroPython cross-compiler
 must be built; it will be used to pre-compile some of the built-in scripts to
 bytecode.  The cross-compiler is built and run on the host machine, using:
