@@ -20,13 +20,18 @@ working with this port it may be useful to get an overview of the microcontrolle
 
    general.rst
    installation.rst
+   mpy-usage.rst
 
-.. note::
+General board control
+---------------------
 
-    You can follow the latest progress for this port in the `Infineon MicroPython
-    PSOC™ Edge fork <https://github.com/Infineon/micropython-psoc-edge>`_.
-    We are working to bring those features here. Meanwhile, you can try them early
-    by installing the fork version.
+See the :mod:`machine` module for more details.
+
+The :mod:`machine` module::
+
+    import machine
+
+    machine.freq()          # get the current frequency of the Core M33
 
 Pins and GPIO
 -------------
@@ -158,12 +163,105 @@ The following parameters have port-specific behavior:
 
         - ``trigger``: The ``Pin.IRQ_LOW_LEVEL`` and ``Pin.IRQ_HIGH_LEVEL`` triggers are not supported.
         - ``wake``: The wake parameter is currently not supported.
-        - ``hard``: This parameter is ignored. It can be passed but currently has no effect.
+
+.. note::
+
+    When using ``hard=True``, the callback runs directly in ISR context — keep it
+    short and allocation-free (no ``print``, no heap allocation).
 
 .. note::
 
     **None** of the non-core methods from the Pin API are currently implemented for this port.
 
+Signal 
+^^^^^^
+
+There's a higher-level abstraction :ref:`machine.Signal <machine.Signal>`
+which can be used to invert a pin. Useful for illuminating active-low LEDs
+using ``Signal.on()`` or ``Signal.value(1)``.
+
+Bitstream
+------------------------------------------------
+
+Use :func:`machine.bitstream` directly for timing-sensitive one-wire protocols::
+
+    import machine
+
+    pin = machine.Pin('P20_5', machine.Pin.OUT)
+    # Example timings for 800 kHz class LEDs (T0H, T0L, T1H, T1L) in ns.
+    timing = (400, 850, 800, 450)
+    data = bytes([0x10, 0x00, 0x00])
+
+    machine.bitstream(pin, 0, timing, data)
+
+.. note::
+    Port-specific behavior and limits on PSOC™ Edge:
+    
+    - Each timing value must be at least 300 ns; smaller values raise ``ValueError``.
+    - If the runtime core clock is invalid (0 Hz), transmission raises ``ValueError``.
+
+Memory access
+-------------
+
+See :mod:`machine` (``mem8``, ``mem16``, ``mem32``) for the full API.
+
+These objects allow direct read/write access to memory-mapped addresses using
+subscript notation::
+
+    from machine import mem8, mem16, mem32
+
+    # Read ARM Cortex-M33 CPUID register (read-only, always safe)
+    cpuid = mem32[0xE000ED00]
+
+    # Read SysTick reload value to derive CPU clock
+    # reload = 200000 counts at 1 kHz tick -> 200 MHz
+    reload = mem32[0xE000E014]
+
+    # Toggle two GPIO pins atomically in a single write
+    GPIO_PRT10 = 0x42810500
+    OUT_SET    = GPIO_PRT10 + 0x08   # drive HIGH
+    OUT_CLR    = GPIO_PRT10 + 0x04   # drive LOW
+    mem32[OUT_SET] = (1 << 7) | (1 << 5)  # P10_7 and P10_5 simultaneously
+
+.. note::
+    ``mem32`` returns a signed integer. For values with bit 31 set, mask with
+    ``0xFFFFFFFF`` to get the unsigned representation::
+
+        value = mem32[addr] & 0xFFFFFFFF
+
+ADC (analog to digital conversion)
+----------------------------------
+
+See :ref:`machine.ADC <machine.ADC>` and :ref:`machine.ADCBlock <machine.ADCBlock>`.
+
+On the PSOC™ Edge, a single ADC block with id - ``0`` is available.
+
+Use :class:`ADC` to read analog values from an ADC-capable pin::
+
+    from machine import ADC
+
+    adc = ADC('P15_1')
+    print(adc.read_u16())  # raw analog value in the range 0..65535
+    print(adc.read_uv())   # analog value in microvolts
+    adc.deinit()
+
+This port also supports :class:`ADCBlock` to provide control over ADC configuration.
+
+``ADCBlock.connect()`` accepts a channel, a pin, or both when they resolve to the same ADC source.
+
+Use :class:`ADCBlock` to connect a channel to a pin::
+
+    from machine import ADCBlock
+
+    blk = ADCBlock(0, bits=12)
+    adc = blk.connect(1, 'P15_1')
+    print(adc.read_u16())
+    adc.deinit()
+
+.. note::
+
+    ``ADCBlock(0, bits=12)`` is supported on this port.
+    Other ``bits`` values are rejected.
 
 Real time clock (RTC)
 ---------------------
@@ -221,6 +319,487 @@ See :ref:`machine.RTC <machine.RTC>`: ::
     RTC alarm timing on this port has second-level resolution. Millisecond alarm values are accepted, but are rounded
     up to whole seconds internally.
 
+Watch dog timer (WDT)
+---------------------
+
+See :ref:`machine.WDT <machine.WDT>`: ::
+
+    from machine import WDT
+
+    wdt = WDT(timeout=2000) # initialise wdt with id = 0 (default),
+                            # timeout in milliseconds
+    wdt.feed() # Feed the WDT. Do this periodically before the timeout.
+
+.. note::
+    The minimum timeout is 1 millisecond and the maximum timeout is 383999 milliseconds (~6.4 minutes).
+
+Hardware I2C bus 
+----------------
+
+See :ref:`machine.I2C <machine.I2C>` and :ref:`machine.I2CTarget <machine.I2CTarget>` for the complete I2C API reference.
+
+Hardware I2C is available on the PSOC™ Edge E84 using the SCB (Serial Communication Block) 
+peripheral. The port supports both controller (master) and target (slave) modes.
+
+.. note::
+    External pull-up resistors (typically 4.7kΩ) are required on both SCL and SDA lines.
+    Only one I2C instance (controller or target) can be active at a time, as both modes 
+    share the same SCB peripheral and pins.
+
+
+Controller mode (Master)
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use the ``I2C`` class for controller (master) operations::
+
+    from machine import I2C
+    
+    i2c = I2C(scl='P17_0', sda='P17_1', freq=100000) 
+
+.. note::
+    The nominal Standard-mode (100 KHz) supports the range 48-100 KHz. 
+    The nominal Fast-mode (400 KHz) supports the range 244-400 KHz.
+
+
+Target mode (Slave)
+^^^^^^^^^^^^^^^^^^^
+
+Use the ``I2CTarget`` class for target (slave) operations::
+
+    from machine import I2CTarget
+
+    mem = bytearray([0xAA, 0xBB, 0xCC, 0xDD])
+    i2c_target = I2CTarget(scl="P17_0", sda="P17_1", addr=0x43, mem=mem)
+
+
+The I2CTarget implementation on PSoC Edge has the following port-specific details:
+
+**Memory Addressing:**
+    - ``addrsize``: 7-bit and 10-bit addresses are accepted.
+    - ``mem_addrsize``: Only ``0`` is supported.
+    - EEPROM-like internal address phase (8/16/24/32-bit ``mem_addrsize``) is not implemented.
+
+**IRQ triggers:**
+
+The ``hard`` argument in ``i2c_target.irq(..., hard=True)`` is supported.
+When ``True``, the callback executes in ISR context — keep it short and allocation-free
+(no ``print``, no heap allocation).
+
+Current implementation notes for IRQ data-phase events:
+
+
+        - PSoC hardware events are limited and do not map
+            1:1 to MicroPython ``IRQ_READ_REQ``/ ``IRQ_WRITE_REQ`` semantics.
+        - Treat these two flags as optional notifications, not required control points.
+        - In the current PSOC Edge port implementation, data-path behavior is
+            strongly tied to ``mem`` buffer configuration. After address match, 
+            hardware/port state handling performs most data movement automatically (when ``mem`` is configured).
+       
+
+Practical guidance for this port:
+
+        - For robust target-mode operation, configure ``mem`` and size it to cover
+            expected master write payloads.
+        - With ``mem`` configured, explicit ``I2CTarget.readinto()``/
+          ``I2CTarget.write()`` calls are usually optional, and mainly needed for
+          custom protocol handling in IRQ callbacks.
+
+
+Hardware SPI bus
+----------------
+
+See :ref:`machine.SPI <machine.SPI>` for the complete SPI master API reference.
+``SPITarget`` is a PSOC™ Edge-specific class and has no separate library page.
+
+Hardware SPI on PSOC™ Edge uses the SCB peripheral and supports both controller
+(master) and target (slave) modes.
+
+Controller mode (Master)
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use the ``SPI`` class for controller-mode transfers::
+
+    from machine import SPI, Pin
+
+    spi = SPI(
+        baudrate=1_000_000,
+        polarity=0,
+        phase=0,
+        bits=8,
+        firstbit=SPI.MSB,
+        sck='P16_0',
+        mosi='P16_1',
+        miso='P16_2',
+    )
+
+    cs = Pin('P16_3', Pin.OUT, value=1)
+    tx = b'\x9f\x00\x00\x00'
+    rx = bytearray(4)
+
+    cs(0)
+    spi.write_readinto(tx, rx)
+    cs(1)
+    print(rx)
+
+Constructor arguments:
+
+    - ``id``: accepted for API compatibility, currently ignored.
+    - ``baudrate``: SPI clock in Hz. Default is ``1_000_000``.
+    - ``polarity`` / ``phase``: must be ``0`` or ``1``.
+    - ``bits``: only ``8`` is supported.
+    - ``firstbit``: ``SPI.MSB`` or ``SPI.LSB``.
+    - ``sck``, ``mosi``, ``miso``: required SPI signal pins.
+
+.. note::
+
+    Chip select (CS/SS) is controlled by user code with ``machine.Pin``.
+    It is not driven automatically by ``machine.SPI``.
+
+
+Target mode (Slave)
+^^^^^^^^^^^^^^^^^^^
+
+Use the ``SPITarget`` class for target-mode communication::
+
+    from machine import SPITarget
+
+    spi_t = SPITarget(
+        sck='P16_0',
+        mosi='P16_1',
+        miso='P16_2',
+        ssel='P16_3',
+        polarity=0,
+        phase=0,
+        bits=8,
+        firstbit=SPITarget.MSB,
+    )
+
+    tx = b'\x11\x22\x33\x44'
+    rx = bytearray(4)
+    spi_t.write_readinto(tx, rx)
+
+    spi_t.deinit()
+
+Constructor arguments:
+
+    - ``sck``: SPI clock pin.
+    - ``mosi``: target TX pin.
+    - ``miso``: target RX pin.
+    - ``ssel``: chip-select input pin.
+    - ``polarity`` / ``phase``: must be ``0`` or ``1``.
+    - ``bits``: only ``8`` is supported.
+    - ``firstbit``: ``SPITarget.MSB`` or ``SPITarget.LSB``.
+
+Constants:
+
+    - ``SPITarget.MSB``: most-significant-bit first.
+    - ``SPITarget.LSB``: least-significant-bit first.
+
+Methods:
+
+.. method:: SPITarget.readinto(buf)
+
+    Read bytes from the SPI target RX FIFO into writable buffer ``buf``.
+    Returns the number of bytes read.
+
+    Raises ``OSError`` on timeout.
+
+.. method:: SPITarget.write(buf)
+
+    Write bytes from buffer ``buf`` to the SPI target TX FIFO.
+    Returns the number of bytes written.
+
+    Raises ``OSError`` on timeout.
+
+.. method:: SPITarget.write_readinto(tx_buf, rx_buf)
+
+    Full-duplex transfer in target mode. Writes bytes from ``tx_buf`` and
+    reads bytes into ``rx_buf``.
+
+    ``tx_buf`` and ``rx_buf`` must have the same length.
+    Returns the number of bytes transferred.
+
+    Raises ``ValueError`` if buffer lengths differ.
+    Raises ``OSError`` on timeout.
+
+.. method:: SPITarget.deinit()
+
+    Deinitialise the SPITarget instance and release its underlying SCB resource.
+
+The SPITarget implementation on PSoC Edge has the following port-specific details:
+
+- ``sck``, ``mosi``, ``miso``, and ``ssel`` are all required.
+- ``bits`` is fixed to 8.
+- ``readinto()``, ``write()``, and ``write_readinto()`` are blocking and use an
+    internal timeout.
+- A single ``SPITarget`` instance is supported in this port configuration.
+
+
+
+Inter-Processor Communication (IPC)
+-------------------------------------
+
+The ``IPC`` class provides message-passing between the two cores using the
+hardware IPC pipe peripheral. This is a PSOC™ Edge-specific module — it is not part of
+the standard MicroPython ``machine`` API. Currently, for this port, IPC is supported to enable communication from the CM33 core to the CM55 core.
+.. note::
+
+    IPC is only available on builds compiled with the ``MULTI_CORE`` flag. The module is
+    not present on single-core firmware images. By default it is enabled for this port.
+
+.. note::
+
+    Only CM33 → CM55 communication is currently supported. The CM33 core always acts as
+    the initiating side; the CM55 firmware must be built and deployed separately.
+
+The constructor
+^^^^^^^^^^^^^^^
+
+::
+
+    from machine import IPC
+
+    ipc = IPC(src_core=IPC.CM33, target_core=IPC.CM55)
+
+Constructor arguments:
+
+    - ``src_core``: Source core ID. Currently only ``IPC.CM33`` (``0``) is supported.
+      Default is ``IPC.CM33``.
+    - ``target_core``: Destination core ID. Currently only ``IPC.CM55`` (``1``) is supported.
+      Default is ``IPC.CM55``.
+
+Up to 5 IPC object instances can be created and this is enforced by the constructor. Each instance can be configured with different source and target cores, but currently only CM33 → CM55 communication is supported regardless of the constructor arguments.
+
+Core ID and command constants
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The following class-level constants are available on every ``IPC`` object:
+
+    - ``IPC.CM33``: Core ID for the CM33 core (``0``).
+    - ``IPC.CM55``: Core ID for the CM55 core (``1``).
+    - ``IPC.CMD_START``: Pre-defined start command (``0x82``).
+    - ``IPC.CMD_STOP``: Pre-defined stop command (``0x83``).
+
+Methods
+^^^^^^^
+
+.. method:: IPC.init()
+
+    Initialise the IPC pipe hardware. Must be called once after construction and before
+    any other IPC operation::
+
+        ipc.init()
+
+.. method:: IPC.register_client(client_id, callback, endpoint_id, endpoint_addr)
+
+    Register a client on the source endpoint so that incoming messages addressed
+    to ``client_id`` invoke ``callback``.
+
+        - ``client_id``: Unique client identifier (``0``–``7``). Each registered client
+          must have a unique ID.
+        - ``callback``: A callable invoked as ``callback(client)`` when a message arrives
+          for this client. The callback receives a single ``IPCClient`` object with the
+          following read-only attributes:
+
+          - ``client.cmd``: Command byte received from the target core.
+          - ``client.value``: 32-bit value received from the target core.
+          - ``client.id``: The client ID this message was addressed to.
+
+          The callback is deferred and runs in the MicroPython scheduler context (not in
+          the ISR), so it is safe to allocate memory and call any MicroPython function.
+
+        - ``endpoint_id``: Endpoint index for source core.
+        - ``endpoint_addr``: Endpoint address for the source core.
+
+    Returns ``True`` on success, ``False`` otherwise.
+
+    Maximum of 8 clients can be registered per endpoint. This is a PSOC™ Edge-specific limit.
+
+    Example — registering two independent services::
+
+        def svc1_cb(client):
+            print("Service1 received cmd=0x{:02X}".format(client.cmd))
+
+        def svc2_cb(client):
+            print("Service2 received cmd=0x{:02X}".format(client.cmd))
+
+        ipc.register_client(3, svc1_cb, 1, 1)   # Service 1
+        ipc.register_client(4, svc2_cb, 1, 1)   # Service 2
+
+.. method:: IPC.enable_core(core_id=IPC.CM55)
+
+    Boot the target core and wait for it to start. Currently only ``IPC.CM55`` is
+    supported.
+
+        - ``core_id``: The core to enable. Default is ``IPC.CM55``.
+
+    Calling this when the CM55 is already running prints a notice and returns immediately.
+    Allow a short delay after this call for CM55 initialisation
+    to complete before sending messages::
+
+        ipc.enable_core(IPC.CM55)
+        time.sleep(1)   # Wait for CM55 firmware to initialise
+
+.. method:: IPC.send(cmd, value=0, client_id)
+
+    Send a message to a client on the target core.
+
+        - ``cmd``: Command byte. Use ``IPC.CMD_START``, ``IPC.CMD_STOP``, or any
+          application-defined value.
+        - ``value``: Optional 32-bit data payload. Default is ``0``.
+        - ``client_id``: Client ID on the target core.
+
+    Raises ``OSError`` if the send fails after the maximum number of retries
+
+        ipc.send(IPC.CMD_START, 0, 5)   # Send CMD_START to CM55 client 5
+        ipc.send(IPC.CMD_STOP,  0, 6)   # Send CMD_STOP  to CM55 client 6
+
+.. method:: IPC.is_busy([core_id])
+
+    Check whether the IPC channel for the given core is currently locked.
+
+        - ``core_id``: ``IPC.CM33`` or ``IPC.CM55``
+
+    Returns ``True`` if the channel is busy, ``False`` otherwise::
+
+        if not ipc.is_busy():
+            ipc.send(IPC.CMD_START, 0, 5)
+
+        # Check a specific core explicitly
+        if ipc.is_busy(IPC.CM55):
+            print("CM33 channel is locked")
+
+Complete example
+^^^^^^^^^^^^^^^^
+
+The following example demonstrates two independent services sharing a single IPC endpoint,
+with each service using its own client IDs on both the CM33 and CM55 sides::
+
+    import time
+    from machine import IPC
+
+    ipc = IPC(src_core=IPC.CM33, target_core=IPC.CM55)
+    ipc.init()
+
+    # Per-service receive state
+    svc1 = {"received": False, "cmd": None}
+    svc2 = {"received": False, "cmd": None}
+
+    def svc1_cb(client):
+        svc1["received"] = True
+        svc1["cmd"] = client.cmd
+
+    def svc2_cb(client):
+        svc2["received"] = True
+        svc2["cmd"] = client.cmd
+
+    # Register both services on the CM33 endpoint (endpoint_id=1, endpoint_addr=1)
+    ipc.register_client(3, svc1_cb, 1, 1)   # Service 1 -- CM33 client_id=3
+    ipc.register_client(4, svc2_cb, 1, 1)   # Service 2 -- CM33 client_id=4
+
+    # Boot CM55 and wait for it to initialise
+    ipc.enable_core(IPC.CM55)
+    time.sleep(1)
+
+    # Send CMD_START to CM55 Service 1 (client_id=5); echo comes back to CM33 client_id=3
+    ipc.send(IPC.CMD_START, 0, 5)
+
+    # Send CMD_STOP to CM55 Service 2 (client_id=6); echo comes back to CM33 client_id=4
+    ipc.send(IPC.CMD_STOP, 0, 6)
+
+PDM - PCM bus
+--------------
+
+PDM/PCM is a asynchronous operation used to connect digital audio devices.
+At the physical level, a bus consists of 2 lines: CLK, DATA.
+
+.. warning:: 
+    This is not part of the core MicroPython libraries. Therefore, not mapping any existing machine class API and neither supported by other ports.
+
+PDM-PCM objects can be created and initialized using::
+
+    from machine import PDM_PCM
+
+    clk_pin = "P8_5"
+    data_pin = "P8_6"
+
+    pdm_pcm = PDM_PCM(
+    sck=clk_pin,
+    data=data_pin,
+    sample_rate=16000,
+    bits=PDM_PCM.BITS_16,
+    format=PDM_PCM.MONO,
+    gain=0,
+    )
+
+2 modes of operation are supported:
+ - blocking
+ - non-blocking
+
+
+Constructor
+^^^^^^^^^^^^
+
+.. class:: PDM_PCM(clk, data, sample_rate, bits, format, gain, ibuf)
+
+   Keyword-only parameters that are supported on this port:
+
+     - ``clk`` is a pin object for the clock line
+     - ``data`` is a pin object for the data line
+     - ``sample_rate`` specifies audio sampling rate. **Currently only 16 KHz sample rate is supported**.
+     - ``bits`` specifies word length - 16 and 32 being accepted values.
+     - ``format`` specifies channel format - STEREO or MONO.
+     - ``gain`` is the gain in dB. In case of STEREO format is applies to both channels. The range goes from -103 to +83 dB with 6 dB step. Values will be rounded to the closest step.
+     - ``ibuf`` is the size of the internal ring buffer (in bytes) storing the incoming audio data stream. Default is 20000.
+
+Methods
+^^^^^^^^
+
+.. method:: PDM_PCM.init(clk, data, sample_rate, bits, format, gain, ibuf)
+    
+    Initializes the PDM_PCM hardware as per the specified parameters. See the constructor for details on the supported parameters.
+
+.. method:: PDM_PCM.deinit()
+
+    Deinitializes the PDM_PCM object.
+
+.. method::  PDM_PCM.readinto(buf)
+
+    Read audio samples into the buffer specified by ``buf``. ``buf`` must support the buffer protocol, such as bytearray or array.
+    Sample size can be calculated as (PCM_bits/8) * (format_size); where format_size is 2(stereo mode) and 1(mono mode).
+    Returns number of bytes read.
+
+.. method::  PDM_PCM.irq(handler)
+
+    Set the callback.``handler`` is called when ``buf`` becomes full (``readinto`` method).
+    Setting a callback changes the ``readinto`` method to non-blocking operation.
+    ``handler`` is called in the context of the MicroPython scheduler.
+
+.. method::  PDM_PCM.gain([gain])
+    
+    Set/get the gain for of all the channels. The gain is specified in dB. The range goes from -103 to +83 dB with 6 dB step. Values will be rounded to the closest step.
+    Default is 0 dB.
+
+Constants
+^^^^^^^^^^
+
+.. data:: PDM_PCM.STEREO
+
+   for initialising the PDM_PCM ``format`` to stereo
+
+.. data:: PDM_PCM.MONO
+
+   for initialising the PDM_PCM ``format`` to mono
+
+.. data:: PDM_PCM.BITS_16
+
+   for initialising the PDM_PCM ``bits`` to 16
+
+.. data:: PDM_PCM.BITS_32
+
+   for initialising the PDM_PCM ``bits`` to 32
+
+
 UART
 ----
 
@@ -236,12 +815,6 @@ Constructor
    The following parameters are supported with limited configuration:
    
    - ``bits``. Only 8 bits.
-
-   These are planned for future implementation, but yet unavailable:
-
-   - ``rts``
-   - ``cts``
-   - ``flow``
        
 .. Note::
 
@@ -249,11 +822,351 @@ Constructor
    
    - ``txbuf``
    - ``invert`` 
-
-
+  
+  
 Methods
 ^^^^^^^
 
 .. method:: UART.init(baudrate=9600, bits=8, parity=None, stop=1, *, ...)
 
     The same parameters as the constructor are supported, with the same limitations.
+
+
+PWM
+----
+
+Pulse Width Modulation (PWM) signal output on the PSOC™ Edge. See :ref:`machine.PWM <machine.PWM>` for the standard MicroPython PWM API.
+
+.. note::
+
+    On this port, PWM output is available exclusively on pins **P16_1** through **P16_7**. Each pin is backed by an independent TCPWM0 counter, 
+    so each instance can run at a different frequency simultaneously. A maximum of **7** PWM instances can be active at the same time.
+
+.. note::
+
+    The base clock driving all counters is **1 MHz** (derived from the 100 MHz PCLK via a shared 16-bit divider). 
+    This gives a frequency range of **1 Hz - 500 kHz** and a period resolution of 1 µs.
+
+A PWM object can be created and started using::
+
+    from machine import PWM
+
+    pwm = PWM("P16_1", freq=1000, duty_u16=32767)  # 1 kHz, 50 % duty cycle
+
+Constructor
+^^^^^^^^^^^^
+
+.. class:: PWM(pin, *, freq, duty_u16, duty_ns, invert=False)
+
+    Construct and immediately start a PWM signal on *pin*.
+
+      - ``pin`` — the output pin. Accepts a string label (``"P16_1"``), a ``Pin.cpu.<pin>`` object, or a ``Pin.board.<pin>`` object.
+        The pin must be one of the PWM-capable pins P16_1 - P16_7.
+      - ``freq`` — output frequency in Hz (**required**). Must be in the range 1 - 500 000.
+      - ``duty_u16`` — duty cycle as a 16-bit unsigned integer 0-65535 (0 % - ~100 %).
+      - ``duty_ns`` — duty cycle (high pulse width) in nanoseconds. Must not exceed the period (``1 000 000 000 / freq`` ns).
+      - ``invert`` — if ``True``, inverts the output polarity. Default is ``False``.
+
+    Raises ``ValueError`` if the pin does not support PWM, if a PWM instance for that pin already exists without calling ``deinit()`` 
+    first, or if the frequency or duty arguments are out of range.
+
+Complete example
+^^^^^^^^^^^^^^^^
+
+::
+
+    from machine import PWM
+
+    # Start a 1 kHz signal at 50 % duty cycle on P16_1
+    pwm = PWM("P16_1", freq=1000, duty_u16=32767)
+    print(pwm)                     # PWM(Pin.cpu.P16_1, freq=1000, duty=50.00%)
+
+    # Read back the current settings
+    print(pwm.freq())              # 1000
+    print(pwm.duty_u16())          # 32767
+    print(pwm.duty_ns())           # 500000  (0.5 ms duty cycle at 1 kHz)
+
+    # Update frequency only — duty ratio preserved
+    pwm.freq(2000)
+    print(pwm.freq())              # 2000
+
+    # Switch to nanosecond duty control: 250 µs duty cycle at 2 kHz = 50 %
+    pwm.duty_ns(250000)
+    print(pwm.duty_ns())           # 250000
+
+    # Reconfigure completely
+    pwm.init(freq=500, duty_u16=16383)   # 500 Hz, 25 %
+
+    # Stop and release the pin
+    pwm.deinit()
+
+
+Timer
+-----
+
+Hardware timer using the TCPWM0 peripheral on the PSOC™ Edge. See :ref:`machine.Timer <machine.Timer>` for the standard MicroPython Timer API.
+
+.. note::
+
+    This port provides **32** independent hardware timer instances (IDs ``0`` to ``31``).
+
+    - **32-bit timers**: IDs ``0`` through ``7`` (TCPWM0 counters ``0`` through ``7``).
+    - **16-bit timers**: IDs ``8`` through ``31`` (TCPWM0 counters ``256`` through ``279``).
+
+    Only one instance per ID can exist at a time; constructing a second ``Timer(id)`` without calling ``deinit()`` first raises a ``ValueError``.
+
+.. note::
+
+    The timer clock is **1 MHz** (shared with the system tick). This means:
+
+    - The minimum resolvable period is **1 µs**.
+    - With ``period``, the minimum value is **1 ms**.
+    - For **32-bit timers** (IDs ``0`` to ``7``), the maximum period is **4 294 967 ms** (~49.7 days).
+    - For **16-bit timers** (IDs ``8`` to ``31``), the maximum period is **65 ms**.
+    - With ``freq``, the minimum frequency is **1 Hz** and the maximum is **1 000 000 Hz** (1 MHz).
+    - Computed period ticks must fit the selected counter width: **1-4 294 967 295** for 32-bit timers, **1-65 535** for 16-bit timers.
+    - The ``hard`` parameter is supported. When ``True``, the callback executes in ISR context
+      — keep it short and allocation-free (no ``print``, no heap allocation).
+
+Complete example
+^^^^^^^^^^^^^^^^
+
+::
+
+    from machine import Timer
+    import time
+
+    # --- Periodic soft timer (default) ---
+    count = 0
+
+    def on_tick(timer):
+        global count
+        count += 1
+        print("tick", count)
+
+    tim = Timer(0, mode=Timer.PERIODIC, period=500, callback=on_tick)
+    time.sleep(3)          # let it fire ~6 times
+    tim.deinit()
+
+    # --- One-shot timer ---
+    def on_done(timer):
+        print("one-shot fired")
+
+    tim = Timer(1, mode=Timer.ONE_SHOT, period=1000, callback=on_done)
+    time.sleep(2)
+    tim.deinit()
+
+    # --- Frequency-based timer ---
+    def on_freq(timer):
+        print("2 Hz tick")
+
+    tim = Timer(2, mode=Timer.PERIODIC, freq=2, callback=on_freq)
+    time.sleep(3)
+    tim.deinit()
+
+    # --- Hard IRQ timer (callback runs in ISR — must be allocation-free) ---
+    fired = [False]
+
+    def on_hard(timer):
+        fired[0] = True     # list index write is allocation-free
+
+    tim = Timer(0, mode=Timer.ONE_SHOT, period=100, callback=on_hard, hard=True)
+    time.sleep_ms(200)
+    tim.deinit()
+    print("hard fired:", fired[0])
+
+Counter
+-------
+
+Hardware edge counter using TCPWM0 on PSOC-Edge. See :ref:`machine.Counter <machine.Counter>` for the common API.
+
+This section lists only PSOC-Edge specifics and deviations.
+
+.. note::
+
+    - IDs ``0`` to ``31`` are available (same TCPWM mapping as ``Timer``: 32-bit IDs ``0-7``, 16-bit IDs ``8-31``).
+    - ``src`` must be a pin with ``PERI_TR_IO_INPUT`` routing. This is a mandatory parameter for the constructor.
+    - Constructing ``Counter(id, src)`` again while that instance is active raises ValueError instead of returning/reinitialising the existing instance. Call ``deinit()`` first.
+    - ``min`` must be ``< max``. Both can be negative (e.g., ``min=-100, max=100``).
+    - ``match`` is an init-only parameter. It cannot be changed at runtime.
+    - ``filter_ns`` is currently not supported.
+    - ``match_pin`` is currently not supported.
+
+Complete example
+^^^^^^^^^^^^^^^^
+
+::
+
+    # Setup on KIT_PSE84_AI:
+    #   P16_7 -> P11_1  (pulse source -> counter src)
+    # Optional for index/reset demo:
+    #   P16_6 -> P11_3
+
+    from machine import Counter, Pin
+    import time
+
+    src = Pin("P11_1")
+    pulse_out = Pin("P16_7", Pin.OUT, value=0)
+
+    # Uses edge/direction/max/min/index/reset/match in one init.
+    c = Counter(
+        0,
+        src=src,
+        edge=Counter.RISING,
+        direction=Counter.UP,
+        max=100,
+        min=-50,
+        index=Pin("P11_3"),
+        reset=Pin("P11_3"),
+        match=-25,
+    )
+
+    # value()/cycles() read-write API.
+    print("value:", c.value())
+    print("cycles:", c.cycles())
+    c.cycles(2)
+
+    irq_events = 0
+
+    def on_counter_irq(_counter):
+        global irq_events
+        irq_events += 1
+
+    # Subscribe to multiple trigger sources (bitmask).
+    irq = c.irq(handler=on_counter_irq,
+                trigger=Counter.IRQ_ROLL_OVER | Counter.IRQ_MATCH | Counter.IRQ_INDEX | Counter.IRQ_RESET)
+
+    # Generate a few pulses on src.
+    for _ in range(30):
+        pulse_out(1)
+        time.sleep_us(100)
+        pulse_out(0)
+        time.sleep_us(100)
+
+    print("value after pulses:", c.value())
+    print("cycles after pulses:", c.cycles())
+    print("irq flags:", irq.flags())
+    print("irq calls:", irq_events)
+
+    c.deinit()
+
+Network Module
+--------------
+
+The :mod:`network` module.
+
+See :ref:`network.WLAN <network.WLAN>`:
+
+This section documents only the PSOC™ Edge-specific WLAN behaviour.
+
+.. method:: WLAN.active([is_active])
+
+    Interface activation differs by interface type:
+
+    * STA: ``WLAN.active()`` returns the current connection state. Setting the STA active state is not supported.
+    * AP: ``WLAN.active()`` returns whether the access point is running, and ``WLAN.active(True/False)`` starts or stops it.
+
+.. method:: WLAN.scan(ssid=None, bssid=None)
+
+    STA only. Accepts one optional filter per call:
+
+    * ``ssid`` — return only networks matching this SSID.
+    * ``bssid`` — return only networks matching this BSSID (bytes of length 6).
+
+    Passing both filters together is not supported.
+
+.. method:: WLAN.connect(ssid, key=None, *, bssid=None)
+
+    Connect the STA interface to an access point.
+
+    * ``ssid`` is required.
+    * ``key`` is optional and may be omitted for open networks.
+    * ``bssid`` is optional and, if provided, must be 6 bytes.
+
+.. method:: WLAN.isconnected()
+
+    Return the interface connection state:
+
+    * STA: ``True`` when connected to an access point.
+    * AP: ``True`` when the access point is running and at least one station is associated.
+
+.. method:: WLAN.status('param')
+
+    .. warning::
+        This function does not provide link-up/down connection state. Use
+        ``isconnected()`` to check connection status.
+
+    The following query parameters are allowed:
+
+        * ``rssi`` — received signal strength in dBm (STA only).
+        * ``stations`` — list of connected station MAC addresses as bytes (AP only).
+
+.. method:: WLAN.config('param')
+            WLAN.config(param=value, ...)
+
+    Supported configuration parameters are:
+
+    * AP query parameters:
+
+        - ``channel``
+        - ``ssid``
+        - ``security``
+        - ``key`` / ``password`` — only queryable when the default AP password is set.
+        - ``mac``
+
+    * AP set parameters:
+
+        - ``channel``
+        - ``ssid``
+        - ``security``
+        - ``key`` / ``password``
+
+    * STA query parameters:
+
+        - ``channel``
+        - ``ssid``
+        - ``security``
+        - ``mac``
+
+    .. note::
+        STA has no settable config parameters. Use ``WLAN.connect(ssid, key)`` to associate to a network.
+
+Constants
+^^^^^^^^^
+
+Security mode constants:
+
+.. data:: WLAN.OPEN
+        WLAN.WEP
+        WLAN.WPA
+        WLAN.WPA2
+        WLAN.WPA3
+        WLAN.WPA2_WPA_PSK
+        WLAN.SEC_UNKNOWN
+
+The following helper can be run manually (or placed in ``boot.py``) to connect
+to a Wi-Fi network:
+
+::
+
+    def network_connect(ssid, key, timeout_s=30):
+        import network
+        import time
+
+        wlan = network.WLAN(network.STA_IF)
+
+        if wlan.isconnected():
+            print("[Network] Already connected")
+            print(wlan.ifconfig())
+            return
+
+        wlan.connect(ssid, key)
+
+        for _ in range(timeout_s):
+            if wlan.isconnected():
+                print("[Network] Connected")
+                print(wlan.ifconfig())
+                return
+            time.sleep(1)
+
+        print("[Network] Connection failed")
