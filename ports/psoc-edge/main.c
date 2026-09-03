@@ -33,6 +33,12 @@
 // MTB includes
 #include "cybsp.h"
 
+#if MICROPY_PY_FREERTOS
+// FreeRTOS header files
+#include <FreeRTOS.h>
+#include <task.h>
+#endif
+
 // micropython includes
 #include "py/builtin.h"
 #include "py/compile.h"
@@ -44,24 +50,65 @@
 #include "shared/runtime/pyexec.h"
 #include "shared/readline/readline.h"
 
+#if MICROPY_PY_LWIP
+#include "lwip/init.h"
+#include "lwip/apps/mdns.h"
+#endif
+
+#if MICROPY_PY_NETWORK
+#include "extmod/modnetwork.h"
+#include "network_ifx_wcm.h"
+#endif
+
 // port-specific includes
+#include "modmachine.h"
 #include "mphalport.h"
+
+#if MICROPY_PY_FREERTOS
+// FreeRTOS task parameters for the MicroPython task
+#define MPY_TASK_STACK_SIZE     (5120u)
+#define MPY_TASK_PRIORITY       (1u)
+
+// GC heap boundaries come from --defsym in the Makefile (MICROPY_C_HEAP_SIZE).
+// __GcHeapStart = __HeapBase + MICROPY_C_HEAP_SIZE  (default: 0x16000 WiFi, 0x8000 no-WiFi)
+// __GcHeapEnd   = __HeapLimit
+// [__HeapBase .. __GcHeapStart) is the C-malloc zone for WiFi/WCM/LwIP.
+// FreeRTOS uses its own static heap (configTOTAL_HEAP_SIZE) independently.
+#if MICROPY_ENABLE_GC
+extern uint8_t __GcHeapStart, __GcHeapEnd;
+#endif
+#else
+#if MICROPY_ENABLE_GC
+extern uint8_t __StackTop, __StackSize;
+extern uint8_t __HeapBase, __HeapLimit;
+#endif
+#endif
 
 typedef enum {
     BOOT_MODE_NORMAL,
     BOOT_MODE_SAFE
 } boot_mode_t;
 
-
-#if MICROPY_ENABLE_GC
-extern uint8_t __StackTop, __StackSize;
-extern uint8_t __HeapBase, __HeapLimit;
-#endif
-
 extern void machine_rtc_init_all(void);
 extern void machine_pin_irq_deinit_all(void);
 extern void machine_uart_deinit_all(void);
+extern void machine_hw_i2c_deinit_all(void);
+extern void machine_spi_deinit_all(void);
+#if MICROPY_PY_MACHINE_SPI_TARGET
+extern void machine_spi_target_deinit_all(void);
+#endif
+extern void machine_pdm_pcm_deinit_all(void);
+extern void machine_ipc_deinit_all(void);
 extern void mp_hal_ticks_init(void);
+extern void machine_timer_deinit_all(void);
+extern void machine_wdt_deinit(void);
+extern void machine_deinit(void);
+
+
+void micropython_task(void *arg);
+#if MICROPY_PY_FREERTOS
+static TaskHandle_t mpy_task_handle;
+#endif
 
 boot_mode_t check_boot_mode(void) {
     boot_mode_t boot_mode;
@@ -99,7 +146,7 @@ int main(void) {
     /* Initialize the device and board peripherals. */
     result = cybsp_init();
     if (result != CY_RSLT_SUCCESS) {
-        mp_raise_ValueError(MP_ERROR_TEXT("cybsp_init failed !\n"));
+        CY_ASSERT(0);
     }
 
     /* Enable global interrupts */
@@ -108,19 +155,46 @@ int main(void) {
     /* Initialize stdio interface */
     mp_hal_stdio_init();
 
-    // Initialise the MicroPython runtime.
+    #if MICROPY_PY_FREERTOS
+    xTaskCreate(micropython_task, "MicroPython task", MPY_TASK_STACK_SIZE, NULL, MPY_TASK_PRIORITY, &mpy_task_handle);
+    vTaskStartScheduler();
+    #else
+    micropython_task(NULL);
+    #endif
+
+    // Should never get here
+    CY_ASSERT(0);
+    return 0;
+}
+
+
+void micropython_task(void *arg) {
+    // One-time initialisation – must be before the soft_reset label.
     #if MICROPY_ENABLE_GC
+    #if MICROPY_PY_FREERTOS
+    if (&__GcHeapEnd <= &__GcHeapStart) {
+        CY_ASSERT(0);
+    }
+    gc_init(&__GcHeapStart, &__GcHeapEnd);
+    mp_cstack_init_with_top((void *)&arg, MPY_TASK_STACK_SIZE * sizeof(StackType_t));
+    #else
     gc_init(&__HeapBase, &__HeapLimit);
     mp_cstack_init_with_top((void *)&__StackTop, (size_t)&__StackSize);
     #endif
+    #endif
 
     mp_hal_ticks_init();
+    machine_init();
 
 soft_reset:
     machine_rtc_init_all();
     mp_init();
 
     readline_init0();
+
+    #if MICROPY_PY_NETWORK
+    mod_network_init();
+    #endif
 
     #if MICROPY_VFS
     mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_));
@@ -163,8 +237,11 @@ soft_reset:
 
     mp_printf(&mp_plat_print, "MPY: soft reboot\n");
 
-    machine_pin_irq_deinit_all();
-    machine_uart_deinit_all();
+
+    #if MICROPY_PY_NETWORK
+    mod_network_deinit();
+    network_deinit();
+    #endif
 
     #if MICROPY_ENABLE_GC
     gc_sweep_all();
