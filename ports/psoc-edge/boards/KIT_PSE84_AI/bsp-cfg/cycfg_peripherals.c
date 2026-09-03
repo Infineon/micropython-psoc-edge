@@ -201,143 +201,6 @@ cy_stc_autanalog_stt_ac_t CYBSP_AUTONOMOUS_CONTROLLER_stt[] =
         .gpioOut = CY_AUTANALOG_STT_AC_GPIO_OUT_DISABLED,
     },
 };
-cy_stc_autanalog_sar_hs_chan_t CYBSP_SAR_ADC_gpio_ch_cfg[] =
-{
-    {
-        .posPin = CY_AUTANALOG_SAR_PIN_GPIO1,
-        .hsDiffEn = false,
-        .sign = false,
-        .posCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED,
-        .negPin = CY_AUTANALOG_SAR_PIN_GPIO0,
-        .accShift = false,
-        .negCoeff = CY_AUTANALOG_SAR_CH_COEFF_DISABLED,
-        .hsLimit = CY_AUTANALOG_SAR_LIMIT_STATUS_DISABLED,
-        .fifoSel = CY_AUTANALOG_FIFO_DISABLED,
-    },
-};
-cy_stc_autanalog_sar_sta_hs_t CYBSP_SAR_ADC_sta_hs_cfg =
-{
-    .hsVref = CY_AUTANALOG_SAR_VREF_VDDA,
-    .hsSampleTime =
-    {
-        31U,
-        31U,
-        31U,
-        31U,
-    },
-    .hsGpioChan =
-    {
-        &CYBSP_SAR_ADC_gpio_ch_cfg[0U],
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-    },
-    .hsGpioResultMask =
-        CY_AUTANALOG_SAR_CHAN_MASK_GPIO0,
-};
-cy_stc_autanalog_sar_sta_t CYBSP_SAR_ADC_sta_cfg =
-{
-    .lpStaCfg = NULL,
-    .hsStaCfg = &CYBSP_SAR_ADC_sta_hs_cfg,
-    .posBufPwr = CY_AUTANALOG_SAR_BUF_PWR_OFF,
-    .negBufPwr = CY_AUTANALOG_SAR_BUF_PWR_OFF,
-    .accMode = CY_AUTANALOG_SAR_ACC_DISABLED,
-    .startupCal = CY_AUTANALOG_SAR_CAL_DISABLED,
-    .chanID = false,
-    .shiftMode = false,
-    .intMuxChan =
-    {
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-    },
-    .limitCond =
-    {
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-    },
-    .muxResultMask =
-        CY_AUTANALOG_SAR_CHAN_MASK_MUX_DISABLED,
-    .firResultMask =
-        CY_AUTANALOG_SAR_MASK_FIR_DISABLED,
-};
-cy_stc_autanalog_sar_seq_tab_hs_t CYBSP_SAR_ADC_seq_hs_cfg[] =
-{
-    {
-        .chanEn = CY_AUTANALOG_SAR_CHAN_MASK_GPIO0,
-        .muxMode = CY_AUTANALOG_SAR_CHAN_CFG_MUX_DISABLED,
-        .mux0Sel = CY_AUTANALOG_SAR_CHAN_CFG_MUX0,
-        .mux1Sel = CY_AUTANALOG_SAR_CHAN_CFG_MUX0,
-        .sampleTimeEn = true,
-        .sampleTime = CY_AUTANALOG_SAR_SAMPLE_TIME0,
-        .accEn = false,
-        .accCount = CY_AUTANALOG_SAR_ACC_CNT2,
-        .calReq = CY_AUTANALOG_SAR_CAL_DISABLED,
-        .nextAction = CY_AUTANALOG_SAR_NEXT_ACTION_GO_TO_ENTRY_ADDR,
-    },
-};
-cy_stc_autanalog_sar_t CYBSP_SAR_ADC_cfg =
-{
-    .sarStaCfg = &CYBSP_SAR_ADC_sta_cfg,
-    .hsSeqTabNum = sizeof(CYBSP_SAR_ADC_seq_hs_cfg) / sizeof(CYBSP_SAR_ADC_seq_hs_cfg[0U]),
-    .hsSeqTabArr = &CYBSP_SAR_ADC_seq_hs_cfg[0U],
-    .lpSeqTabNum = 0U,
-    .lpSeqTabArr = NULL,
-    .firNum = 0U,
-    .firCfg = NULL,
-    .fifoCfg = NULL,
-};
-cy_stc_autanalog_stt_sar_t CYBSP_SAR_ADC_stt[] =
-{
-    {
-        .unlock = true,
-        .enable = true,
-        .trigger = false,
-        .entryState = 0U,
-    },
-    {
-        .unlock = true,
-        .enable = true,
-        .trigger = true,
-        .entryState = 0U,
-    },
-    {
-        .unlock = true,
-        .enable = true,
-        .trigger = false,
-        .entryState = 0U,
-    },
-};
-
-#if defined(COMPONENT_MTB_HAL) && (MTB_HAL_DRIVER_AVAILABLE_ADC)
-mtb_hal_adc_configurator_t CYBSP_SAR_ADC_hal_config =
-{
-    .config = &CYBSP_SAR_ADC_cfg,
-    .num_channels = sizeof(CYBSP_SAR_ADC_seq_hs_cfg) / sizeof(CYBSP_SAR_ADC_seq_hs_cfg[0U]),
-    .clock = NULL,
-    .adc_index = 0U,
-};
-#endif /* defined (COMPONENT_MTB_HAL) && (MTB_HAL_DRIVER_AVAILABLE_ADC) */
-
 const cy_stc_i3c_config_t CYBSP_I3C_CONTROLLER_config =
 {
     .i3cMode = CY_I3C_CONTROLLER,
@@ -1348,4 +1211,8 @@ void init_cycfg_peripheral_s_minimal(void) {
     #endif /* defined (CY_DEVICE_CONFIGURATOR_IP_ENABLE_FEATURE) */
     Cy_SysClk_PeriPclkAssignDivider(PCLK_SDHC0_CLK_HF, CY_SYSCLK_DIV_8_BIT, 0U);
     Cy_SysClk_PeriGroupSlaveInit(CY_MMIO_SMIF01_PERI_NR, CY_MMIO_SMIF01_GROUP_NR, CY_MMIO_SMIF01_SLAVE_NR, CY_MMIO_SMIF01_CLK_HF_NR);
+
+    // Added for voice assistant
+    Cy_SysClk_PeriGroupSlaveInit(CY_MMIO_PDM0_PERI_NR, CY_MMIO_PDM0_GROUP_NR, CY_MMIO_PDM0_SLAVE_NR, CY_MMIO_PDM0_CLK_HF_NR);
+    Cy_SysClk_PeriPclkAssignDivider(PCLK_PDM0_CLK_IF_SRSS, CY_SYSCLK_DIV_16_5_BIT, 1U);
 }
