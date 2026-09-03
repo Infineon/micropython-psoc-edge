@@ -1,0 +1,25 @@
+*****Oneshot Timer Execution*****
+Oneshot timer triggered
+*****Periodic Timer Execution*****
+Periodic timer triggered: True
+*****Multiple Timers Execution*****
+Oneshot timer triggered
+Periodic timer triggered: True
+Frequency-based timer triggered
+*****Negative Timer Parameter Tests*****
+invalid_id_-1: Timer id must be in range 0-31
+invalid_id_32: Timer id must be in range 0-31
+id_8_16bit_limit: 16-bit Timer(8) period exceeds 65535 ticks; use a shorter period/higher freq, or use a 32-bit Timer (id 0-7)
+timer_vs_timer_conflict: Timer(2) already created.
+invalid_mode: invalid mode
+invalid_callback: callback must be callable
+freq_zero: freq must be > 0
+period_zero: period must be > 0
+missing_freq_period: either freq or period must be specified
+period_ticks_zero: period out of range for 32-bit counter
+Recreate Timer(0) after deinit: OK
+*****Timer hard Parameter Tests*****
+default_soft: OK
+hard_true tested: OK
+hard_bool_validation: OK
+hard_bool_values: OK
