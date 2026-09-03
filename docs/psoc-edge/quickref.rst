@@ -898,15 +898,14 @@ Constructor
    The following parameters are supported with limited configuration:
    
    - ``bits``. Only 8 bits.
-
 .. Note::
 
    These parameters are not implemented:
 
    - ``txbuf``
    - ``invert`` 
-
-
+  
+  
 Methods
 ^^^^^^^
 
