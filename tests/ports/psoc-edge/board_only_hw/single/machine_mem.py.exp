@@ -1,0 +1,38 @@
+*** machine.mem Tests ***
+
+mem8 write/readback:
+True
+True
+True
+True
+True
+True
+True
+True
+
+mem16 write/readback:
+True
+True
+
+mem32 write/readback:
+True
+
+Width consistency (LE):
+True
+True
+True
+True
+True
+True
+
+Reverse width (mem8 -> mem16/mem32):
+True
+True
+True
+
+Real HW register (CPUID):
+True
+True
+True
+
+Done.
