@@ -36,6 +36,8 @@ typedef enum {
     MACHINE_PIN_AF_FN_UART,
 
     MACHINE_PIN_AF_FN_PDM,
+    MACHINE_PIN_AF_FN_TCPWM,
+    MACHINE_PIN_AF_FN_PERI_TR_IO,
     /* TODO: Add additional functionalities */
 
     MACHINE_PIN_AF_FN_NONE = 0xFF
@@ -60,6 +62,10 @@ typedef enum {
 
     MACHINE_PIN_AF_SIGNAL_PDM_CLK,
     MACHINE_PIN_AF_SIGNAL_PDM_DATA,
+
+    MACHINE_PIN_AF_SIGNAL_TCPWM_LINE,
+    MACHINE_PIN_AF_SIGNAL_PERI_TR_IO_INPUT,
+    MACHINE_PIN_AF_SIGNAL_PERI_TR_IO_OUTPUT,
 
     /* TODO: Add additional types */
 } machine_pin_af_signal_t;
