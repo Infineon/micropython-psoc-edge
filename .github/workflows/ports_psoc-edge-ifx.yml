@@ -19,6 +19,7 @@ concurrency:
 
 env:
   mpy_hex_file: firmware.hex
+  mpy_zip_file: firmware.zip
 
 jobs:
   server-build:
@@ -45,7 +46,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with: 
           name: mpy-psoc-edge_${{ matrix.board }}_${{ steps.commit_sha.outputs.sha_short }}
-          path: ports/psoc-edge/build-${{ matrix.board }}/${{ env.mpy_hex_file }}
+          path: |
+            ports/psoc-edge/build-${{ matrix.board }}/${{ env.mpy_hex_file }}
+            ports/psoc-edge/build-${{ matrix.board }}/${{ env.mpy_zip_file }}
 
   on-target-test:
     runs-on: 
@@ -125,6 +128,7 @@ jobs:
       run: | 
         cd mpy-psoc-edge_${{ matrix.board }}_${{ needs.server-build.outputs.commit_sha }}
         mv ${{ env.mpy_hex_file }} ../mpy-psoc-edge_${{ matrix.board }}.hex
+        mv ${{ env.mpy_zip_file }} ../mpy-psoc-edge_${{ matrix.board }}.zip
     - name: Build release changelog
       id: build_changelog
       uses: mikepenz/release-changelog-builder-action@v3
@@ -134,5 +138,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         name: MicroPython PSOC Edge ${{  github.ref_name  }}
-        files: mpy-psoc-edge_${{ matrix.board }}.hex
+        files: |
+          mpy-psoc-edge_${{ matrix.board }}.hex
+          mpy-psoc-edge_${{ matrix.board }}.zip
         body: ${{steps.build_changelog.outputs.changelog}}
