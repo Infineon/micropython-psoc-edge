@@ -1,0 +1,33 @@
+- name: KIT_PSE84_AI
+  uid: 0F16025A012D2400
+  features:
+    - pin
+    - i2c
+    - pwm
+    - counter
+    - wifi-idn-b0653ac13e11
+
+- name: KIT_PSE84_AI
+  uid: 111B1698012D2400
+  features:
+    - i2c
+
+- name: KIT_PSE84_AI
+  uid: 101A1398012D2400
+  features:
+    - uart
+
+- name: KIT_PSE84_AI
+  uid: 0E240C98012D2400
+  features:
+    - spi
+    - bitstream
+    - time-pulse
+
+- name: KIT_PSE84_AI
+  uid: 1D1B1398012D2400
+  features:
+    - spi
+    - bitstream
+    - time-pulse
+    - adc
