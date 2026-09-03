@@ -41,6 +41,17 @@ extern int machine_uart_repl_readchar(void);
 extern void machine_uart_repl_write(const void *buf_in, mp_uint_t size);
 extern uintptr_t machine_uart_repl_ioctl(uintptr_t arg);
 
+void mp_hal_get_random(size_t n, uint8_t *buf) {
+    uint32_t r = 0;
+    for (size_t i = 0; i < n; i++) {
+        if ((i & 3) == 0) {
+            Cy_Crypto_Core_Trng_Ext(CRYPTO, 32U, &r);
+        }
+        buf[i] = (uint8_t)r;
+        r >>= 8;
+    }
+}
+
 void mp_hal_stdio_init(void) {
     machine_uart_repl_init();
 }
