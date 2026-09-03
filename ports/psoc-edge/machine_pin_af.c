@@ -31,6 +31,7 @@ const char *machine_pin_af_fn_str[] = {
     [MACHINE_PIN_AF_FN_SPI] = "SPI",
     [MACHINE_PIN_AF_FN_UART] = "UART",
     [MACHINE_PIN_AF_FN_PDM] = "PDM",
+    [MACHINE_PIN_AF_FN_TCPWM] = "TCPWM",
     /* TODO: Add additional functionalities */
 };
 
@@ -51,6 +52,9 @@ const char *machine_pin_af_signal_str[] = {
 
     [MACHINE_PIN_AF_SIGNAL_PDM_CLK] = "PDM_CLK",
     [MACHINE_PIN_AF_SIGNAL_PDM_DATA] = "PDM_DATA",
+
+    [MACHINE_PIN_AF_SIGNAL_TCPWM_LINE] = "TCPWM_LINE",
+    [MACHINE_PIN_AF_SIGNAL_PERI_TR_IO_INPUT] = "PERI_TR_IO_INPUT",
 
     /* TODO: Add additional types */
 };
