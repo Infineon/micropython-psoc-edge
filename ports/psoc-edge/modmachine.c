@@ -25,8 +25,6 @@
  */
 
 // std includes
-#include <stdio.h>
-#include <stdlib.h>
 
 // mpy includes
 #include "py/obj.h"
@@ -38,13 +36,90 @@
 
 // port-specific includes
 #include "cybsp.h"
+#include "cy_syslib.h"
 #include "modmachine.h"
-#include "modpsocedge.h"
 
 enum clock_freq_type PLL0_freq = AUDIO_SYS_CLOCK_73_728_000_HZ;
 enum clock_freq_type freq_peri;
 
 #if MICROPY_PY_MACHINE
+
+#if MICROPY_PY_MACHINE_SPI_TARGET
+#define MICROPY_PY_MACHINE_SPITARGET_GLOBAL \
+    { MP_ROM_QSTR(MP_QSTR_SPITarget), MP_ROM_PTR(&machine_spi_target_type) },
+#else
+#define MICROPY_PY_MACHINE_SPITARGET_GLOBAL
+#endif
+
+#if MICROPY_PY_MACHINE_ADC
+#define MICROPY_PY_MACHINE_ADC_GLOBAL \
+    { MP_ROM_QSTR(MP_QSTR_ADC), MP_ROM_PTR(&machine_adc_type) },
+#else
+#define MICROPY_PY_MACHINE_ADC_GLOBAL
+#endif
+
+#if MICROPY_PY_MACHINE_ADC_BLOCK
+#define MICROPY_PY_MACHINE_ADC_BLOCK_GLOBAL \
+    { MP_ROM_QSTR(MP_QSTR_ADCBlock), MP_ROM_PTR(&machine_adc_block_type) },
+#else
+#define MICROPY_PY_MACHINE_ADC_BLOCK_GLOBAL
+#endif
+
+// Reset cause values: PWRON=0 matches the C zero-initialisation of
+// reset_cause. SOFT must be non-zero so machine_deinit() can mark a
+// soft reset unambiguously.
+#define MACHINE_PWRON_RESET     (0)
+#define MACHINE_HARD_RESET      (1)
+#define MACHINE_WDT_RESET       (2)
+#define MACHINE_DEEPSLEEP_RESET (3)
+#define MACHINE_SOFT_RESET      (4)
+
+static uint32_t reset_cause;
+static uint32_t hw_reset_reason; // raw Cy_SysLib_GetResetReason() captured at boot
+
+// Called once at hardware boot (before the soft_reset loop in main.c) to
+// capture the reset cause from hardware. Clears the sticky SRSS_RES_CAUSE
+// register immediately so the bits do not persist into subsequent resets
+// (e.g. machine.reset() must not inherit a stale WDT bit).
+// hw_reset_reason keeps the raw value so psocedge_system_reset_cause() can
+// read it later without going back to hardware.
+void machine_init(void) {
+    hw_reset_reason = Cy_SysLib_GetResetReason();
+    Cy_SysLib_ClearResetReason();
+    if (hw_reset_reason & CY_SYSLIB_RESET_HWWDT) {
+        reset_cause = MACHINE_WDT_RESET;
+    } else if (hw_reset_reason & CY_SYSLIB_RESET_DPSLP_FAULT) {
+        reset_cause = MACHINE_DEEPSLEEP_RESET;
+    } else if (hw_reset_reason & (CY_SYSLIB_RESET_XRES | CY_SYSLIB_RESET_SOFT)) {
+        reset_cause = MACHINE_HARD_RESET;
+    }
+    // else stays MACHINE_PWRON_RESET (0 = C zero-initialisation)
+}
+
+uint32_t machine_get_hw_reset_reason(void) {
+    return hw_reset_reason;
+}
+
+// Called before each MicroPython soft reset so the next call to
+// machine.reset_cause() returns machine.SOFT_RESET.
+void machine_deinit(void) {
+    reset_cause = MACHINE_SOFT_RESET;
+    machine_pin_irq_deinit_all();
+    machine_uart_deinit_all();
+    machine_i2c_deinit_all();
+    machine_spi_deinit_all();
+    #if MICROPY_PY_MACHINE_SPI_TARGET
+    machine_spi_target_deinit_all();
+    #endif
+    #if MICROPY_PY_MACHINE_ADC
+    machine_adc_deinit_all();
+    #endif
+    machine_pdm_pcm_deinit_all();
+    machine_ipc_deinit_all();
+    machine_counter_deinit_all();
+    machine_timer_deinit_all();
+    machine_wdt_deinit();
+}
 
 // machine.idle()
 // This executies a wfi machine instruction which reduces power consumption
@@ -52,6 +127,47 @@ enum clock_freq_type freq_peri;
 static void mp_machine_idle(void) {
     __WFI(); // standard ARM instruction
 }
+
+static mp_obj_t mp_machine_unique_id(void) {
+    uint64_t id = Cy_SysLib_GetUniqueId();
+    return mp_obj_new_bytes((const byte *)&id, sizeof(id));
+}
+
+static mp_obj_t mp_machine_get_freq(void) {
+    return mp_obj_new_int(SystemCoreClock);
+}
+
+static void mp_machine_set_freq(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    (void)args;
+    mp_raise_NotImplementedError(MP_ERROR_TEXT("machine.freq set not implemented"));
+}
+
+static void mp_machine_lightsleep(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    (void)args;
+    mp_raise_NotImplementedError(MP_ERROR_TEXT("machine.lightsleep not implemented"));
+}
+
+MP_NORETURN static void mp_machine_deepsleep(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    (void)args;
+    mp_raise_NotImplementedError(MP_ERROR_TEXT("machine.deepsleep not implemented"));
+}
+
+#if MICROPY_PY_MACHINE_RESET
+
+MP_NORETURN static void mp_machine_reset(void) {
+    NVIC_SystemReset();
+    for (;;) {
+    }
+}
+
+static mp_int_t mp_machine_reset_cause(void) {
+    return reset_cause;
+}
+
+#endif // MICROPY_PY_MACHINE_RESET
 /* TODO: currently unused
 static void mp_machine_set_freq(size_t n_args, const mp_obj_t *args) {
     freq_peri = mp_obj_get_int(args[0]); // Assuming the enum values are used as integers
@@ -71,8 +187,23 @@ static void mp_machine_set_freq(size_t n_args, const mp_obj_t *args) {
 
 #define MICROPY_PY_MACHINE_EXTRA_GLOBALS \
     /* Modules */ \
+    MICROPY_PY_MACHINE_ADC_GLOBAL \
+    MICROPY_PY_MACHINE_ADC_BLOCK_GLOBAL \
     { MP_ROM_QSTR(MP_QSTR_Pin),                 MP_ROM_PTR(&machine_pin_type) }, \
+    { MP_ROM_QSTR(MP_QSTR_PDM_PCM),             MP_ROM_PTR(&machine_pdm_pcm_type) }, \
     { MP_ROM_QSTR(MP_QSTR_RTC),                 MP_ROM_PTR(&machine_rtc_type) }, \
+    { MP_ROM_QSTR(MP_QSTR_IPC),                 MP_ROM_PTR(&machine_ipc_type) }, \
     { MP_ROM_QSTR(MP_QSTR_UART),                MP_ROM_PTR(&machine_uart_type) }, \
+    { MP_ROM_QSTR(MP_QSTR_PWM),                 MP_ROM_PTR(&machine_pwm_type) }, \
+    { MP_ROM_QSTR(MP_QSTR_Timer),               MP_ROM_PTR(&machine_timer_type) }, \
+    { MP_ROM_QSTR(MP_QSTR_Counter),             MP_ROM_PTR(&machine_counter_type) }, \
+    { MP_ROM_QSTR(MP_QSTR_WDT),                 MP_ROM_PTR(&machine_wdt_type) }, \
+    MICROPY_PY_MACHINE_SPITARGET_GLOBAL \
+    /* Reset cause constants */ \
+    { MP_ROM_QSTR(MP_QSTR_PWRON_RESET),         MP_ROM_INT(MACHINE_PWRON_RESET) }, \
+    { MP_ROM_QSTR(MP_QSTR_HARD_RESET),          MP_ROM_INT(MACHINE_HARD_RESET) }, \
+    { MP_ROM_QSTR(MP_QSTR_WDT_RESET),           MP_ROM_INT(MACHINE_WDT_RESET) }, \
+    { MP_ROM_QSTR(MP_QSTR_DEEPSLEEP_RESET),     MP_ROM_INT(MACHINE_DEEPSLEEP_RESET) }, \
+    { MP_ROM_QSTR(MP_QSTR_SOFT_RESET),          MP_ROM_INT(MACHINE_SOFT_RESET) }
 
 #endif // MICROPY_PY_MACHINE
