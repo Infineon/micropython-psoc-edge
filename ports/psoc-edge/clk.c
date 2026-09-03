@@ -181,26 +181,40 @@ static uint8_t  pclk_div_get_max_num_for_peri_group(en_clk_dst_t clk_dst, cy_en_
     return max_num;
 }
 
-static uint8_t pclk_div_get_free_num(en_clk_dst_t clk_dst, cy_en_divider_types_t div_type) {
-    uint8_t peri_gr_div_max_num = pclk_div_get_max_num_for_peri_group(clk_dst, div_type);
-
-    for (uint8_t i = 0; i < peri_gr_div_max_num; i++) {
-        bool used = false;
-        for (uint8_t j = 0; j < PERI_PCLK_DIVIDER_MAX_NUM; j++) {
-            if (pclk_div_obj[j] != NULL) {
-                if (pclk_div_obj[j]->peri_inst == CLK_DEST_INST(clk_dst) &&
-                    pclk_div_obj[j]->group == CLK_DEST_GROUP(clk_dst) &&
-                    pclk_div_obj[j]->type == div_type &&
-                    pclk_div_obj[j]->number == i) {
-                    used = true;
-                    break;
+static uint8_t pclk_div_get_free_num(en_clk_dst_t clk_dst, cy_en_divider_types_t *div_type) {
+    /**
+     * Allow for usage of higher resolution divider when the
+     * required one is not free.
+     * An 8 bits can use 16 bits or 16.5 bits or 24.5 bits.
+     * A 16 bits can use 16.5 bits or 24.5 bits
+     * A 16.5 bits can use 24.5 bits.
+     * A 24.5 bits can only use 24.5 bits.
+     * As the cy_en_divider_types_t is an enum from 0 to 3,
+     * it can be used to iterate through the available divider types.
+     */
+    cy_en_divider_types_t min_available_div_type = *div_type;
+    do {
+        *div_type = min_available_div_type;
+        uint8_t peri_gr_div_max_num = pclk_div_get_max_num_for_peri_group(clk_dst, *div_type);
+        for (uint8_t i = 0; i < peri_gr_div_max_num; i++) {
+            bool used = false;
+            for (uint8_t j = 0; j < PERI_PCLK_DIVIDER_MAX_NUM; j++) {
+                if (pclk_div_obj[j] != NULL) {
+                    if (pclk_div_obj[j]->peri_inst == CLK_DEST_INST(clk_dst) &&
+                        pclk_div_obj[j]->group == CLK_DEST_GROUP(clk_dst) &&
+                        pclk_div_obj[j]->type == *div_type &&
+                        pclk_div_obj[j]->number == i) {
+                        used = true;
+                        break;
+                    }
                 }
             }
+            if (!used) {
+                return i;
+            }
         }
-        if (!used) {
-            return i;
-        }
-    }
+    } while (++min_available_div_type <= CY_SYSCLK_DIV_24_5_BIT);
+
 
     return PCLK_DIV_NO_FREE_DIVIDER;
 }
@@ -208,19 +222,15 @@ static uint8_t pclk_div_get_free_num(en_clk_dst_t clk_dst, cy_en_divider_types_t
 /******************************************************************************/
 /** -- Peripheral Clock Divider API -- **/
 
-void pclk_div_slave_init(en_clk_dst_t clk_dst, pclk_mmio_slave_num_t clk_slave_num) {
-    uint32_t peri_inst = CLK_DEST_INST(clk_dst);
-    uint32_t group = CLK_DEST_GROUP(clk_dst);
-    if (!Cy_SysClk_IsPeriGroupSlaveEnabled(peri_inst, group, clk_slave_num)) {
-        Cy_SysClk_PeriGroupSlaveInit(peri_inst, group, clk_slave_num, Cy_Sysclk_PeriPclkGetClkHfNum(clk_dst));
+void pclk_div_slave_init(en_clk_dst_t clk_dst, uint32_t mmio_peri_nr, uint32_t mmio_group_nr, pclk_mmio_slave_num_t clk_slave_num) {
+    if (!Cy_SysClk_IsPeriGroupSlaveEnabled(mmio_peri_nr, mmio_group_nr, clk_slave_num)) {
+        Cy_SysClk_PeriGroupSlaveInit(mmio_peri_nr, mmio_group_nr, clk_slave_num, Cy_Sysclk_PeriPclkGetClkHfNum(clk_dst));
     }
 }
 
-void pclk_div_slave_deinit(en_clk_dst_t clk_dst, pclk_mmio_slave_num_t clk_slave_num) {
-    uint32_t peri_inst = CLK_DEST_INST(clk_dst);
-    uint32_t group = CLK_DEST_GROUP(clk_dst);
-    if (Cy_SysClk_IsPeriGroupSlaveEnabled(peri_inst, group, clk_slave_num)) {
-        Cy_SysClk_PeriGroupSlaveDeinit(peri_inst, group, clk_slave_num);
+void pclk_div_slave_deinit(uint32_t mmio_peri_nr, uint32_t mmio_group_nr, pclk_mmio_slave_num_t clk_slave_num) {
+    if (Cy_SysClk_IsPeriGroupSlaveEnabled(mmio_peri_nr, mmio_group_nr, clk_slave_num)) {
+        Cy_SysClk_PeriGroupSlaveDeinit(mmio_peri_nr, mmio_group_nr, clk_slave_num);
     }
 }
 
@@ -259,7 +269,7 @@ pclk_div_obj_t *pclk_div_init(en_clk_dst_t clk_dst, uint32_t divider, uint8_t di
     cy_en_divider_types_t div_type = pclk_div_get_type(divider, divider_frac);
 
     /* Get the a free peri-group divider number*/
-    uint8_t div_num = pclk_div_get_free_num(clk_dst, div_type);
+    uint8_t div_num = pclk_div_get_free_num(clk_dst, &div_type);
     if (div_num == PCLK_DIV_NO_FREE_DIVIDER) {
         return NULL;
     }
@@ -291,15 +301,14 @@ void pclk_div_deinit(pclk_div_obj_t *clk) {
 /******************************************************************************/
 /** -- Static PCLK Divider instance enablement for REPL UART-- **/
 
-
-static pclk_div_obj_t pclk_div_obj_uart_repl;
-void pclk_div_uart_repl_init(void) {
-    pclk_div_obj_t *pclk = &pclk_div_obj_uart_repl;
+static pclk_div_obj_t pclk_div_obj_repl_uart;
+void pclk_div_repl_uart_init(void) {
+    pclk_div_obj_t *pclk = &pclk_div_obj_repl_uart;
     pclk->group = CLK_DEST_GROUP(PCLK_SCB2_CLOCK_SCB_EN);
     pclk->peri_inst = CLK_DEST_INST(PCLK_SCB2_CLOCK_SCB_EN);
     pclk->type = CY_SYSCLK_DIV_8_BIT;
     pclk->number = 0;
-    pclk->value = 72U; // From retarget-io: floor(100000000/(115200*12)) = 72
+    pclk->value = 72U; // From retarget-io: floor(10000000/(115200*12)) - 1 = 72
     pclk->value_frac = 0;
     pclk->owner_count = 1;
 
@@ -310,5 +319,6 @@ void pclk_div_uart_repl_init(void) {
 
     uint32_t ip_block = (pclk->peri_inst << PERI_PCLK_INST_NUM_Pos) | (pclk->group << PERI_PCLK_GR_NUM_Pos);
     Cy_SysClk_PeriPclkSetDivider(ip_block, CY_SYSCLK_DIV_8_BIT, 0U, 72U);
+    Cy_SysClk_PeriPclkSetDivider(ip_block, CY_SYSCLK_DIV_8_BIT, 0U, pclk->value);
     Cy_SysClk_PeriPclkEnableDivider(ip_block, CY_SYSCLK_DIV_8_BIT, 0U);
 }
