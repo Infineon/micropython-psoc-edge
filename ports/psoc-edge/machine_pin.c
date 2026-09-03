@@ -37,8 +37,6 @@
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT(msg), ret); \
 }
 
-#define MACHINE_PIN_OUT_VAL_UNDEF    0xFFU
-
 uint8_t pin_get_mode(const machine_pin_obj_t *self) {
     uint32_t drive_mode = Cy_GPIO_GetDrivemode(Cy_GPIO_PortToAddr(self->port), self->pin);
 
