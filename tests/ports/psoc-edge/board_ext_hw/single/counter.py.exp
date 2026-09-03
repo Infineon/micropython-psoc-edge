@@ -1,0 +1,45 @@
+*****Counter tests*****
+rising_count: True
+falling_count: True
+down_count: True
+value_reset: True
+cycles_default: True
+cycles_set_prev: True
+cycles_after_set: True
+range_max_value: True
+range_max_cycles: True
+range_min_nonzero_initial_value: True
+range_min_nonzero_value: True
+range_min_nonzero_cycles: True
+negative_range_value: True
+negative_range_down_count: True
+negative_value_set: True
+invalid_id_-1: Counter id must be in range 0-31
+invalid_id_32: Counter id must be in range 0-31
+invalid_edge: invalid edge
+invalid_direction: invalid direction
+invalid_src_pin: Pin 'P20_5' does not support 'PERI_TR_IO_INPUT'.
+invalid_min_ge_max: min must be < max
+range_span_out_of_range: range span out of range
+filter_ns_not_supported: filter_ns not supported
+index_active: True
+reset_active: True
+match_init: True
+match_value_reached: True
+irq_obj_reuse: True
+irq_trigger_get: True
+irq_trigger_set_prev: True
+irq_rollover_cb: True
+irq_flags_rollover: True
+irq_match_one_shot_cb: True
+irq_match_flags: True
+irq_match_rearm_cb: True
+irq_index_cb: True
+irq_bad_handler: handler must be None or callable
+irq_not_initialised: not initialised
+match_pin_not_supported: match_pin not supported
+duplicate_counter_id: Counter(6) already created.
+hard_callback_fires: True
+hard_cannot_allocate: True
+soft_callback_fires: True
+soft_can_allocate: True
