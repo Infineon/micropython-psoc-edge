@@ -26,24 +26,25 @@
 
 #include "mpconfigport.h"
 
-#if MICROPY_PY_MACHINE_I2C || MICROPY_PY_MACHINE_I2C_TARGET || MICROPY_PY_MACHINE_SPI || MICROPY_PY_MACHINE_UART
+#if MICROPY_PY_MACHINE_I2C || MICROPY_PY_MACHINE_I2C_TARGET || MICROPY_PY_MACHINE_SPI || MICROPY_PY_MACHINE_SPI_TARGET || MICROPY_PY_MACHINE_UART
 
 #include "py/runtime.h"
 #include "genhdr/pins_af.h"
-#include "machine_scb.h"
+#include "scb.h"
+#include "clk.h"
 
 /* Forward declaration */
-static void machine_scb_irq_handler(uint8_t scb);
+static void scb_irq_handler(uint8_t scb);
 
 #define DEFINE_SCB_IRQ_HANDLER(scb) \
     void SCB##scb##_IRQ_Handler(void) { \
-        machine_scb_irq_handler(scb); \
+        scb_irq_handler(scb); \
     }
 
 /**
  * The file build-<board>/genhdr/pins_af.h contains the macro
  *
- *  MICROPY_PY_MACHINE_FOR_ALL_SCB(DO)
+ *  MICROPY_PY_FOR_ALL_SCB(DO)
  *
  *  which uses the X-macro (as argument) pattern to pass a worker
  *  macro DO(port) for the list of all user available ports.
@@ -58,9 +59,9 @@ static void machine_scb_irq_handler(uint8_t scb);
  * for more information.
  */
 
-MICROPY_PY_MACHINE_FOR_ALL_SCB(DEFINE_SCB_IRQ_HANDLER)
+MICROPY_PY_FOR_ALL_SCB(DEFINE_SCB_IRQ_HANDLER)
 
-#define MAP_SCB_IRQ_CONFIG(scb) \
+#define MAP_SCB_CONFIG(scb) \
     [scb] = { \
         scb, \
         SCB##scb, \
@@ -70,39 +71,47 @@ MICROPY_PY_MACHINE_FOR_ALL_SCB(DEFINE_SCB_IRQ_HANDLER)
             SCB##scb##_IRQ_Handler \
         }, \
         PCLK_SCB##scb##_CLOCK_SCB_EN, \
+        CY_MMIO_SCB##scb##_PERI_NR, \
+        CY_MMIO_SCB##scb##_GROUP_NR, \
         CY_MMIO_SCB##scb##_SLAVE_NR, \
         NULL, \
         NULL, \
     },
 
-static machine_scb_obj_t machine_scb_obj[MICROPY_PY_MACHINE_SCB_NUM_ENTRIES] = {
-    MICROPY_PY_MACHINE_FOR_ALL_SCB(MAP_SCB_IRQ_CONFIG)
+static scb_obj_t scb_obj[MICROPY_PY_SCB_NUM_ENTRIES] = {
+    MICROPY_PY_FOR_ALL_SCB(MAP_SCB_CONFIG)
 };
 
-static void machine_scb_irq_handler(uint8_t scb) {
-    machine_scb_obj_t *scb_obj = &machine_scb_obj[scb];
-    if (scb_obj->parent != NULL && scb_obj->parent_handler != NULL) {
-        scb_obj->parent_handler(scb_obj->parent);
+static void scb_irq_handler(uint8_t scb) {
+    scb_obj_t *obj = &scb_obj[scb];
+    if (obj->parent != NULL && obj->parent_handler != NULL) {
+        obj->parent_handler(obj->parent);
     }
 }
 
-machine_scb_obj_t *machine_scb_obj_alloc(uint8_t scb, mp_obj_t parent, machine_scb_parent_irq_handler_t handler) {
-    machine_scb_obj_t *obj = &machine_scb_obj[scb];
+scb_obj_t *scb_obj_alloc(uint8_t scb, mp_obj_t parent, scb_parent_irq_handler_t handler) {
+    scb_obj_t *obj = &scb_obj[scb];
     if (obj->parent != NULL) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("SCB %u is already in use by another I2C, SPI or UART instance."), scb);
     }
+    ;
+
     obj->parent = parent;
     obj->parent_handler = handler;
-    return &machine_scb_obj[scb];
+    pclk_div_slave_init(obj->clk, obj->mmio_peri_nr, obj->mmio_group_nr, obj->mmio_slave_nr);
+
+    return &scb_obj[scb];
 }
 
-void machine_scb_obj_free(machine_scb_obj_t *scb) {
+void scb_obj_free(scb_obj_t *scb) {
+    pclk_div_slave_deinit(scb->mmio_peri_nr, scb->mmio_group_nr, scb->mmio_slave_nr);
     scb->parent = NULL;
     scb->parent_handler = NULL;
 }
 
-bool machine_scb_is_free(uint8_t scb) {
-    return machine_scb_obj[scb].parent == NULL;
+bool scb_is_free(uint8_t scb) {
+    return scb_obj[scb].parent == NULL;
+
 }
 
-#endif // MICROPY_PY_MACHINE_I2C || MICROPY_PY_MACHINE_I2C_TARGET || MICROPY_PY_MACHINE_SPI || MICROPY_PY_MACHINE_UART
+#endif // MICROPY_PY_MACHINE_I2C || MICROPY_PY_MACHINE_I2C_TARGET || MICROPY_PY_MACHINE_SPI || MICROPY_PY_MACHINE_SPI_TARGET || MICROPY_PY_MACHINE_UART
