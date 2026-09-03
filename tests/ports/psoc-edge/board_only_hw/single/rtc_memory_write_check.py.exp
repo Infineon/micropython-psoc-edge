@@ -1,0 +1,3 @@
+*** RTC memory write test ***
+
+RTC memory retrieved post soft-reset is same as previously set :  True
