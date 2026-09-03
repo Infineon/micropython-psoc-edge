@@ -29,6 +29,11 @@ include ../../py/mkenv.mk
 include mpconfigport.mk
 include $(BOARD_DIR)/mpconfigboard.mk
 
+# extmod/extmod.mk enables mbedTLS sources based on MICROPY_SSL_MBEDTLS.
+ifeq ($(MICROPY_SSL_MBEDTLS),1)
+MBEDTLS_CONFIG_FILE = \"mbedtls/mbedtls_config_port.h\"
+endif
+
 # Include py core make definitions.
 include $(TOP)/py/py.mk
 include $(TOP)/extmod/extmod.mk
@@ -37,17 +42,43 @@ include $(TOP)/extmod/extmod.mk
 # Project specific settings and compiler/linker flags
 
 # Required git submodules.
-GIT_SUBMODULES += lib/CMSIS_6
+GIT_SUBMODULES += \
+	lib/CMSIS_6 \
+	lib/mbedtls \
+
 GIT_SUBMODULES += $(addprefix lib/psoc-edge/,\
+	abstraction-rtos \
     async-transfer \
+	clib-support \
+	connectivity-utilities \
 	core-lib \
+	cy-mbedtls-acceleration \
+	freertos \
+	lwip \
+	lwip-freertos-integration \
+	lwip-network-interface-integration \
 	mtb-dsl-pse8xxgp \
 	mtb-ipc \
 	mtb-srf \
+	secure-sockets \
 	se-rt-services-utils \
 	serial-memory \
 	TARGET_KIT_PSE84_AI \
+	whd-bsp-integration \
+	wifi-connection-manager \
+	wifi-host-driver \
+	wifi-resources \
+	wpa3-external-supplicant \
 )
+
+GIT_SUBMODULES += lib/mpy-test-ext
+
+ifeq ($(MICROPY_PY_DEEPCRAFT),1)
+GIT_SUBMODULES += lib/psoc-edge/micropython-deepcraft-model-interface
+DEEPCRAFT_MODEL_LIB_DIR := $(TOP)/lib/psoc-edge/micropython-deepcraft-model-interface/
+-include $(TOP)/lib/psoc-edge/micropython-deepcraft-model-interface/deepcraft_interface.mk
+endif
+
 
 # Define toolchain and other tools.
 CROSS_COMPILE ?= arm-none-eabi-
@@ -75,7 +106,7 @@ GEN_PINS_AF_HDR= $(HEADER_BUILD)/pins_af.h
 # any of the objects. The normal dependency generation will deal with the
 # case when pins.h is modified. But when it doesn't exist, we don't know
 # which source files might need it.
-$(OBJ): | $(GEN_PINS_HDR)
+$(OBJ): | $(GEN_PINS_HDR) $(GEN_PINS_AF_HDR)
 
 # With conditional pins, we may need to regenerate qstrdefs.h when config
 # options change.
@@ -110,6 +141,38 @@ DEFINES = \
 	-DCOMPONENT_MW_MTB_SRF \
 	-DCOMPONENT_NON_SECURE_DEVICE \
 	-DCYBSP_MCUBOOT_HEADER_SIZE=0x400 \
+	-DCY_RETARGET_IO_CONVERT_LF_TO_CRLF \
+
+ifeq ($(MICROPY_PY_FREERTOS),1)
+DEFINES += \
+	-DCOMPONENT_FREERTOS \
+	-DCY_RTOS_AWARE
+endif
+
+ifeq ($(MICROPY_PY_NETWORK_IFX_WCM),1)
+# WHD resource configuration for standalone MicroPython build.
+WHD_FW_FILE ?= $(TOP)/$(PSE_LIB_TOP_DIR)/wifi-host-driver/WHD/COMPONENT_WIFI6/resources/firmware/COMPONENT_55500/COMPONENT_SM/55500A1.trxcse
+WHD_NVRAM_FILE ?= $(TOP)/$(PSE_LIB_TOP_DIR)/wifi-resources/nvram/COMPONENT_WIFI6/COMPONENT_55500/COMPONENT_MURATA-2FY/cyw55500-sdio-mur-2FY.txt
+WHD_CLM_FILE ?= $(TOP)/$(PSE_LIB_TOP_DIR)/wifi-resources/clm/COMPONENT_WIFI6/COMPONENT_55500/COMPONENT_CYW55513_MOD_PSE84_SOM/55500A1.clm_blob
+
+WHD_FW_SIZE := $(shell stat -c%s $(WHD_FW_FILE))
+WHD_NVRAM_SIZE := $(shell stat -c%s $(WHD_NVRAM_FILE))
+WHD_CLM_SIZE := $(shell stat -c%s $(WHD_CLM_FILE))
+
+DEFINES += \
+	-DCOMPONENT_PSE84 \
+	-DCYBSP_WIFI_CAPABLE \
+	-DCOMPONENT_WIFI_INTERFACE_SDIO \
+	-DBLHS_SUPPORT \
+	-DCY_WIFI_COUNTRY=WHD_COUNTRY_UNITED_STATES \
+	-DCYBSP_WIFI_WL_HOSTWAKE_DRIVE_MODE=MTB_HAL_GPIO_DRIVE_OPENDRAINDRIVESLOW \
+	-DCYBSP_WIFI_WL_HOSTWAKE_INIT_STATE=WHD_TRUE \
+	-DFW_IMAGE_SIZE=$(WHD_FW_SIZE) -DFW_IMAGE_NAME=\"$(WHD_FW_FILE)\" \
+	-DNVRAM_IMAGE_SIZE=$(WHD_NVRAM_SIZE) -DNVRAM_IMAGE_NAME=\"$(WHD_NVRAM_FILE)\" \
+	-DCLM_IMAGE_SIZE=$(WHD_CLM_SIZE) -DCLM_IMAGE_NAME=\"$(WHD_CLM_FILE)\" \
+	-UWHD_PRINT_VERSION_ENABLE \
+	-DWHD_PRINT_DISABLE 
+endif
 
 INC += $(addprefix -I$(PSE_LIB_DIR)/,\
 	async-transfer/include \
@@ -146,7 +209,50 @@ INC += $(addprefix -I$(PSE_LIB_DIR)/,\
 INC += \
     -I$(BOARD_DIR) \
     -I$(BOARD_DIR)/bsp-cfg \
+	-I$(BOARD_DIR)/mtb-prj \
 	-Idualcore/include
+
+ifeq ($(MICROPY_PY_FREERTOS),1)
+INC += \
+	-I$(PSE_LIB_DIR)/abstraction-rtos/include \
+	-I$(PSE_LIB_DIR)/abstraction-rtos/include/COMPONENT_FREERTOS \
+	-I$(PSE_LIB_DIR)/freertos/Source/include \
+	-I$(PSE_LIB_DIR)/freertos/Source/portable/COMPONENT_CM33 \
+	-I$(PSE_LIB_DIR)/freertos/Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_NTZ 
+endif
+
+ifeq ($(MICROPY_PSOC_EDGE_LWIP),1)
+INC += \
+	-I$(PSE_LIB_DIR)/lwip-network-interface-integration/include \
+	-I$(PSE_LIB_DIR)/lwip-network-interface-integration/source \
+	\
+	-I$(PSE_LIB_DIR)/lwip-freertos-integration/arch \
+	\
+	-I$(PSE_LIB_DIR)/lwip/src/include
+endif
+
+ifeq ($(MICROPY_PY_NETWORK_IFX_WCM),1)
+INC += \
+	-I$(PSE_LIB_DIR)/clib-support/include \
+	-I$(PSE_LIB_DIR)/clib-support/source/TOOLCHAIN_GCC_ARM \
+	\
+	-I$(PSE_LIB_DIR)/connectivity-utilities \
+	-I$(PSE_LIB_DIR)/connectivity-utilities/cy_log \
+	-I$(PSE_LIB_DIR)/connectivity-utilities/network \
+	\
+	-I$(PSE_LIB_DIR)/whd-bsp-integration \
+	\
+	-I$(PSE_LIB_DIR)/wifi-connection-manager/include \
+	-I$(PSE_LIB_DIR)/wifi-connection-manager/source/COMPONENT_55500 \
+	\
+	-I$(PSE_LIB_DIR)/wifi-host-driver \
+	-I$(PSE_LIB_DIR)/wifi-host-driver/WHD/COMPONENT_WIFI6/inc \
+	-I$(PSE_LIB_DIR)/wifi-host-driver/WHD/COMPONENT_WIFI6/resources \
+	-I$(PSE_LIB_DIR)/wifi-host-driver/WHD/COMPONENT_WIFI6/resources/firmware \
+	-I$(PSE_LIB_DIR)/wifi-host-driver/WHD/COMPONENT_WIFI6/resources/resource_imp \
+	-I$(PSE_LIB_DIR)/wifi-host-driver/WHD/COMPONENT_WIFI6/src \
+	-I$(PSE_LIB_DIR)/wifi-host-driver/WHD/COMPONENT_WIFI6/src/include 
+endif
 
 MACHINE_FLAGS = \
 	-mcpu=cortex-m33 \
@@ -161,19 +267,15 @@ CFLAGS += -c $(MACHINE_FLAGS) \
 	-g \
 	-Wall \
 	-pipe \
-	$(DEFINES) \
-
-# Increase the default stack size from (4 KB) to (16 KB).
-APP_MSP_STACK_SIZE ?= 0x4000
+	$(DEFINES) 
 
 LDFLAGS += $(MACHINE_FLAGS) \
 	-Wl,--gc-sections \
 	-Wl,--print-memory-usage \
-	-Wl,--defsym=APP_MSP_STACK_SIZE=$(APP_MSP_STACK_SIZE) \
 	-Xlinker -L $(PSE_LIB_DIR)/TARGET_$(BOARD)/COMPONENT_CM33/TOOLCHAIN_GCC_ARM \
 	-Xlinker -L $(BOARD_DIR)/bsp-cfg \
 	-T$(PSE_LIB_DIR)/TARGET_$(BOARD)/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/pse84_ns_cm33.ld \
-	-Wl,-Map,$(BUILD)/firmware.map \
+	-Wl,-Map,$(BUILD)/firmware.map
 
 PSE_BSP_CFG_C += $(addprefix $(BOARD_DIR)/bsp-cfg/,\
 	cycfg.c \
@@ -188,13 +290,21 @@ PSE_BSP_CFG_C += $(addprefix $(BOARD_DIR)/bsp-cfg/,\
 	cycfg_system.c \
 	)
 
+PSE_BSP_SRC_C += \
+	dualcore/source/COMPONENT_CM33/cm33_ipc_communication.c \
+
 PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
 	async-transfer/source/mtb_async_transfer.c \
 	\
 	mtb-dsl-pse8xxgp/device-utils/syspm/source/mtb_syspm_callbacks_scb_uart.c \
 	\
+	mtb-dsl-pse8xxgp/hal/source/mtb_hal_adc_sar.c \
 	mtb-dsl-pse8xxgp/hal/source/mtb_hal_clock.c \
 	mtb-dsl-pse8xxgp/hal/source/mtb_hal_gpio.c \
+	mtb-dsl-pse8xxgp/hal/source/mtb_hal_lptimer.c \
+	mtb-dsl-pse8xxgp/hal/source/mtb_hal_lptimer_common.c \
+	mtb-dsl-pse8xxgp/hal/source/mtb_hal_sdhc.c \
+	mtb-dsl-pse8xxgp/hal/source/mtb_hal_syspm.c \
 	mtb-dsl-pse8xxgp/hal/source/mtb_hal_system.c \
 	mtb-dsl-pse8xxgp/hal/source/mtb_hal_timer.c \
 	mtb-dsl-pse8xxgp/hal/source/mtb_hal_uart.c \
@@ -206,15 +316,28 @@ PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_ipc_pipe.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_ipc_sema.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_pdm_pcm_v2.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_crypto_core_hw.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_crypto_core_trng.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_rtc.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_wdt.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_scb_common.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_scb_i2c.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_sd_host.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_scb_spi.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_scb_uart.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_smif.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_smif_hb_flash.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_smif_memnum.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_smif_memslot.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_smif_sfdp.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_ac.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_sar.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_ctb.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_dac.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_autanalog_ptc.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_systrimm.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_rram.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_sysclk_v2.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_sysint_v2.c \
     mtb-dsl-pse8xxgp/pdl/drivers/source/cy_syslib.c \
@@ -223,6 +346,8 @@ PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_syspm_v4.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_systick_v2.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_tcpwm_counter.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_tcpwm_pwm.c \
+	mtb-dsl-pse8xxgp/pdl/drivers/source/cy_trigmux.c \
 	mtb-dsl-pse8xxgp/pdl/drivers/source/ppu_v1.c \
 	\
 	mtb-dsl-pse8xxgp/support/source/mtb_stdlib_stubs.c \
@@ -239,6 +364,108 @@ PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
     TARGET_$(BOARD)/COMPONENT_CM33/COMPONENT_NON_SECURE_DEVICE/ns_start_pse84.c \
     TARGET_$(BOARD)/COMPONENT_CM33/COMPONENT_NON_SECURE_DEVICE/ns_system_pse84.c \
 	)
+
+ifeq ($(MICROPY_PY_FREERTOS),1)
+PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
+	abstraction-rtos/source/cy_worker_thread.c \
+	abstraction-rtos/source/COMPONENT_FREERTOS/cyabs_freertos_common.c \
+	abstraction-rtos/source/COMPONENT_FREERTOS/cyabs_freertos_helpers.c \
+	abstraction-rtos/source/COMPONENT_FREERTOS/cyabs_rtos_freertos.c \
+	\
+	freertos/Source/croutine.c \
+	freertos/Source/event_groups.c \
+	freertos/Source/list.c \
+	freertos/Source/queue.c \
+	freertos/Source/stream_buffer.c \
+	freertos/Source/tasks.c \
+	freertos/Source/timers.c \
+	freertos/Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_NTZ/port.c \
+	freertos/Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_NTZ/portasm.c \
+	freertos/Source/portable/COMPONENT_CM33/TOOLCHAIN_GCC_ARM/COMPONENT_FREERTOS_NTZ/portdsram.c \
+	freertos/Source/portable/MemMang/heap_3.c \
+	)
+endif
+
+ifeq ($(MICROPY_PSOC_EDGE_LWIP), 1)
+PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
+	lwip-network-interface-integration/source/cy_ethernetif.c \
+	lwip-network-interface-integration/source/cy_lwip_dhcp_server.c \
+	lwip-network-interface-integration/source/cy_network_mw_core.c \
+	\
+	lwip-freertos-integration/arch/sys_arch.c \
+	\
+	lwip/src/api/api_lib.c \
+	lwip/src/api/api_msg.c \
+	lwip/src/api/err.c \
+	lwip/src/api/netbuf.c \
+	lwip/src/api/netdb.c \
+	lwip/src/api/netifapi.c \
+	lwip/src/api/sockets.c \
+	lwip/src/api/tcpip.c \
+	lwip/src/core/def.c \
+	lwip/src/core/dns.c \
+	lwip/src/core/inet_chksum.c \
+	lwip/src/core/init.c \
+	lwip/src/core/ip.c \
+	lwip/src/core/mem.c \
+	lwip/src/core/memp.c \
+	lwip/src/core/netif.c \
+	lwip/src/core/pbuf.c \
+	lwip/src/core/raw.c \
+	lwip/src/core/tcp.c \
+	lwip/src/core/tcp_in.c \
+	lwip/src/core/tcp_out.c \
+	lwip/src/core/timeouts.c \
+	lwip/src/core/udp.c \
+	lwip/src/core/ipv4/acd.c \
+	lwip/src/core/ipv4/dhcp.c \
+	lwip/src/core/ipv4/etharp.c \
+	lwip/src/core/ipv4/icmp.c \
+	lwip/src/core/ipv4/igmp.c \
+	lwip/src/core/ipv4/ip4.c \
+	lwip/src/core/ipv4/ip4_addr.c \
+	lwip/src/core/ipv4/ip4_frag.c \
+	lwip/src/netif/ethernet.c \
+	)
+endif
+
+ifeq ($(MICROPY_PY_NETWORK_IFX_WCM),1)
+PSE_LIB_SRC_C += $(addprefix $(PSE_LIB_TOP_DIR)/, \
+	clib-support/source/cy_time.c \
+	clib-support/source/COMPONENT_FREERTOS/cy_mutex_pool.c \
+	clib-support/source/TOOLCHAIN_GCC_ARM/cy_clib_support_newlib.c \
+	\
+	connectivity-utilities/network/cy_nw_helper_common.c \
+	\
+	wifi-connection-manager/source/cy_wcm.c \
+	\
+	whd-bsp-integration/COMPONENT_LWIP/cy_network_buffer_lwip.c \
+	whd-bsp-integration/cybsp_wifi.c \
+	\
+	wifi-host-driver/WHD/COMPONENT_WIFI6/resources/resource_imp/whd_resources.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_ap.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_buffer_api.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_cdc_bdc.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_chip.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_chip_constants.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_clm.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_debug.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_events.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_hal_port.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_management.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_network_if.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_proto.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_resource_if.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_sdpcm.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_thread.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_utils.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_wifi.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/whd_wifi_api.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/bus_protocols/whd_bus.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/bus_protocols/whd_bus_common.c \
+	wifi-host-driver/WHD/COMPONENT_WIFI6/src/bus_protocols/whd_bus_sdio_protocol.c \
+	)
+endif
 
 PSE_SRC_ASM = $(PSE_LIB_TOP_DIR)/mtb-dsl-pse8xxgp/pdl/drivers/source/TOOLCHAIN_GCC_ARM/cy_syslib_ext.S \
 
@@ -257,7 +484,37 @@ INC += -I.
 INC += -I$(TOP)
 INC += -I$(BUILD)
 
+ifeq ($(MICROPY_PSOC_EDGE_LWIP),1)
+INC += -Ilwip_inc
+endif
+
+ifeq ($(MICROPY_SSL_MBEDTLS),1)
+INC += -I$(TOP)/extmod/mbedtls
+INC += -I$(TOP)/ports/psoc-edge/mbedtls
+endif
+
 CFLAGS += $(INC)
+
+ifeq ($(MICROPY_PY_FREERTOS),1)
+CFLAGS += -DMICROPY_PY_FREERTOS=1
+endif
+
+ifeq ($(MICROPY_PY_EXT_FLASH),1)
+CFLAGS += -DMICROPY_ENABLE_EXT_QSPI_FLASH=1
+endif
+
+ifeq ($(MICROPY_PY_NETWORK_IFX_WCM),1)
+CFLAGS += \
+	-DMICROPY_PY_NETWORK=1 \
+	-DMICROPY_PY_NETWORK_IFX_WCM=1 \
+	-Wno-stringop-truncation
+endif
+
+ifeq ($(MICROPY_SSL_MBEDTLS),1)
+CFLAGS += \
+	-DMICROPY_SSL_MBEDTLS=1 \
+	-DMICROPY_MBEDTLS_USE_MTB_ENTROPY=1
+endif
 
 # Select debugging or optimisation build.
 ifeq ($(DEBUG), 1)
@@ -270,6 +527,29 @@ endif
 AFLAGS = -mthumb -march=armv8.1-m.main+fp+mve.fp
 
 LDFLAGS +=
+
+ifeq ($(MICROPY_PY_FREERTOS),1)
+# Size of the C-malloc heap carved from the linker .heap zone (sbrk/malloc).
+# FreeRTOS uses its own static heap (configTOTAL_HEAP_SIZE) and does NOT draw
+# from this zone.  WiFi (WHD/WCM/LwIP) does, so it needs a larger reservation.
+# The GC heap receives the remainder: [__HeapBase+MICROPY_C_HEAP_SIZE .. __HeapLimit].
+# Defaults can be overridden on the make command line, e.g. make MICROPY_C_HEAP_SIZE=0x20000.
+ifeq ($(MICROPY_PY_NETWORK_IFX_WCM),1)
+MICROPY_C_HEAP_SIZE ?= 0x16000
+else
+MICROPY_C_HEAP_SIZE ?= 0x8000
+endif
+
+# GC heap split: carve [__HeapBase .. __HeapBase+MICROPY_C_HEAP_SIZE) for C malloc
+# and give the remainder to the MicroPython GC heap.
+LDFLAGS += -Wl,--defsym=__GcHeapStart=__HeapBase+$(MICROPY_C_HEAP_SIZE)
+LDFLAGS += -Wl,--defsym=__GcHeapEnd=__HeapLimit
+LDFLAGS += -T$(TOP)/ports/psoc-edge/mpy_gc_assert.ld 
+endif
+
+# Increase the default stack size from (4 KB) to (16 KB).
+APP_MSP_STACK_SIZE ?= 0x4000
+LDFLAGS +=-Wl,--defsym=APP_MSP_STACK_SIZE=$(APP_MSP_STACK_SIZE) \
 
 LIBS += -lm
 
@@ -294,17 +574,37 @@ SHARED_SRC_C += $(addprefix shared/,\
 	timeutils/timeutils.c \
 	)
 
+ifeq ($(MICROPY_PSOC_EDGE_LWIP),1)
+SHARED_SRC_C += $(addprefix shared/,\
+	netutils/dhcpserver.c \
+	netutils/netutils.c \
+	netutils/trace.c \
+	)
+endif
+
 MOD_SRC_C += \
 	machine_pin.c \
 	machine_pin_af.c \
 	machine_pin_irq.c \
+	machine_pdm_pcm_extmod.c\
+	machine_i2c.c\
+	machine_spi.c \
+	machine_spi_target.c \
 	machine_rtc.c \
+	machine_ipc.c \
+	machine_timer.c \
+	machine_counter.c \
+	machine_bitstream.c \
 	modpsocedge.c \
-	machine_scb.c \
 
 ifeq ($(MICROPY_PY_EXT_FLASH),1)
-	CFLAGS += -DMICROPY_ENABLE_EXT_QSPI_FLASH=1
-	MOD_SRC_C += psoc_edge_qspi_flash.c 
+MOD_SRC_C += psoc_edge_qspi_flash.c 
+endif
+
+ifeq ($(MICROPY_PY_NETWORK_IFX_WCM),1)
+MOD_SRC_C += \
+	network_ifx_wcm.c \
+	modsocket.c
 endif
 
 SRC_C += \
@@ -312,8 +612,11 @@ SRC_C += \
 	help.c \
 	main.c \
 	mphalport.c \
+	scb.c \
 	systick.c \
 	sys_int.c \
+	tcpwm.c \
+
 
 # List of sources for qstr extraction
 SRC_QSTR += $(SRC_C) $(SHARED_SRC_C) $(MOD_SRC_C) $(GEN_PINS_SRC)
@@ -377,6 +680,22 @@ deploy_ns: $(BUILD)/firmware.shifted.hex
 	$(call flash_target,$<)
 
 .PHONY: build_ns shift_ns deploy_ns
+
+## Dual core targets
+DUALCORE ?= 0
+CM55_APP ?= ipc_echo
+CM55_APP_HEX ?= $(BUILD)/dualcore/apps/${CM55_APP}/${CM55_APP}.hex
+build_cm55: $(CM55_APP_HEX)
+
+$(CM55_APP_HEX):
+	$(Q)$(MAKE) -C dualcore/apps/$(CM55_APP) BOARD=$(BOARD) BUILD=$(abspath $(BUILD)/dualcore/apps/$(CM55_APP))
+
+deploy_cm55: $(CM55_APP_HEX)
+	$(call flash_target,$<)
+
+clean_cm55:
+	$(Q)$(MAKE) -C dualcore/apps/$(CM55_APP) BOARD=$(BOARD) BUILD=$(abspath $(BUILD)/dualcore/apps/$(CM55_APP)) clean
+
 
 ## Openocd reusable flashing target
 
@@ -467,14 +786,25 @@ $(BUILD)/firmware.unshifted.hex: $(BUILD)/firmware.unshifted.elf
 	$(ECHO) "Create $@"
 	@$(Q)$(OBJCOPY) -O ihex $^ $@
 
+
+# Include optional CM55 dual core app.
+CONFIG_SIGN_MERGE_JSON = config/sign_shift_merge.json
+CM55_HEX ?=
+ifeq ($(DUALCORE),1)
+CONFIG_SIGN_MERGE_JSON = config/sign_shift_merge_dual.json
+CM55_HEX = $(CM55_APP_HEX)
+EDGEPT_CM55_SET = --set cm55_hex $(CM55_HEX)
+endif
+
 sign_merge: $(BUILD)/firmware.hex
-$(BUILD)/firmware.hex: $(BUILD)/secboot/secboot.hex $(BUILD)/firmware.unshifted.hex 
+$(BUILD)/firmware.hex: $(BUILD)/secboot/secboot.hex $(BUILD)/firmware.unshifted.hex ${CM55_HEX} 
 	@echo "Signing and combining hex files..."
-	@$(EDGEPROTECTTOOLS) run-config -i config/sign_shift_merge.json \
+	@$(EDGEPROTECTTOOLS) run-config -i $(CONFIG_SIGN_MERGE_JSON) \
 	--set s_hex $(word 1,$^) \
 	--set s_signed_hex $(BUILD)/secboot/secboot.signed.hex \
 	--set ns_hex $(word 2,$^) \
 	--set ns_shifted_hex $(BUILD)/firmware.shifted.hex \
+	$(EDGEPT_CM55_SET) \
 	--set signed_merged_hex $@ \
 	--symbol-search $(BOARD_DIR)/bsp-cfg
 
@@ -512,7 +842,10 @@ help:
 	$(info sign_s                   Sign the secure boot firmware)
 	$(info shift_ns                 Reallocate the non secure firmware )		
 	$(info sign_merge               Sign the secure boot firmware, reallocate the non)
-	$(info ..                       secure firmware, and merge them into a single file) 
+	$(info ..                       secure firmware, and merge them into a single file)
+	$(info build_cm55               Build the CM55 dual core application)
+	$(info deploy_cm55              Deploy the CM55 dual core application)
+	$(info clean_cm55               Remove the CM55 dual core application build directory)
 	$(info )
 	$(info Test and CI support targets:)
 	$(info )
