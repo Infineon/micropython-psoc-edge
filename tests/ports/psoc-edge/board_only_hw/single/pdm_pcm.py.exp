@@ -1,0 +1,11 @@
+1. blocking read implementation 
+data received for format = 1, bits = 16, rate = 16000 : 64 bytes read
+data received for format = 1, bits = 32, rate = 16000 : 64 bytes read
+data received for format = 2, bits = 16, rate = 16000 : 64 bytes read
+data received for format = 2, bits = 32, rate = 16000 : 64 bytes read
+
+2. irq non-blocking read implementation 
+rx blocking done
+
+3. Set/Get gain
+Get gain equal set gain: True
