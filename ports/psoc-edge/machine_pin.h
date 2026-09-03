@@ -34,6 +34,8 @@ enum {GPIO_MODE_NONE = 0, GPIO_MODE_IN, GPIO_MODE_OUT, GPIO_MODE_OPEN_DRAIN};
 
 enum {GPIO_PULL_NONE = 0, GPIO_PULL_UP, GPIO_PULL_DOWN};
 
+#define MACHINE_PIN_OUT_VAL_UNDEF    0xFFU
+
 typedef struct _machine_pin_obj_t {
     mp_obj_base_t base;
     qstr name;
