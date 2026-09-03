@@ -87,7 +87,7 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(machine_adc_block_init_obj, 1, machine_adc_blo
 static mp_obj_t machine_adc_block_connect(size_t n_pos_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     machine_adc_block_obj_t *self = MP_OBJ_TO_PTR(pos_args[0]);
     mp_int_t channel_id = -1;
-    mp_hal_pin_obj_t pin = -1;
+    mp_hal_pin_obj_t pin = MP_HAL_PIN_OBJ_NULL;
     if (n_pos_args == 2) {
         if (mp_obj_is_int(pos_args[1])) {
             channel_id = mp_obj_get_int(pos_args[1]);
