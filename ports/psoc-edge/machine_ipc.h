@@ -53,6 +53,8 @@
 // ToDo: How can this be generic and not hardcoded?
 #define IPC_CMD_START                   (0x82)
 #define IPC_CMD_STOP                    (0x83)
+// Doorbell: bulk bytes are available in the sender's shared ring buffer
+#define IPC_CMD_DATA_AVAIL              (0x84)
 
 /* Sentinel value meaning a slot in sender_clients_arr is free (not yet registered) */
 #define IPC_CLIENT_ID_UNREGISTERED      (0xFFU)
