@@ -35,6 +35,7 @@
 
 // port-specific includes
 #include "machine_ipc.h"
+#include "ipc_ring.h"
 
 /*******************************************************************************
 * Macros
@@ -56,6 +57,8 @@
 *******************************************************************************/
 static bool cm55_enabled = false;
 CY_SECTION_SHAREDMEM static ipc_msg_t ipc_msg_buffer;
+/* Non-shared scratch used to drain the inbound ring in the pipe ISR. */
+static uint8_t cm33_rx_scratch[IPC_RING_CAPACITY];
 machine_ipc_obj_t *machine_ipc_obj[IPC_MAX_CLIENTS_PER_EP] = {NULL};
 
 /*******************************************************************************
@@ -413,6 +416,17 @@ void cm33_msg_callback(uint32_t *msg_data) {
         return;
     }
     ipc_msg_t *ipc_recv_msg = (ipc_msg_t *)msg_data;
+
+    if (ipc_recv_msg->cmd == IPC_CMD_DATA_AVAIL) {
+        /* Drain the target->host ring to keep it flowing. A Python-visible
+         * consumer API will be added in a later phase. */
+        while (ipc_ring_read(IPC_RING_TARGET_TO_HOST, cm33_rx_scratch,
+            sizeof(cm33_rx_scratch)) > 0U) {
+            ;
+        }
+        return;
+    }
+
     uint8_t client_id = ipc_recv_msg->client_id;
 
     if (client_id >= IPC_MAX_CLIENTS_PER_EP) {
@@ -504,6 +518,9 @@ static mp_obj_t machine_ipc_init(mp_obj_t self_in) {
     if (!init_ok) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("IPC pipe initialization failed"));
     }
+
+    /* CM33 owns the host -> target ring (m33_allocatable_shared). */
+    ipc_ring_init(IPC_RING_HOST_TO_TARGET);
 
     Cy_SysLib_Delay(CM33_APP_DELAY_MS);
 
