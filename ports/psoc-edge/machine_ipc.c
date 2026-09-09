@@ -42,6 +42,20 @@
 *******************************************************************************/
 #define IPC_MAX_CLIENTS_PER_EP      (8UL)
 #define IPC_MAX_ENDPOINTS           (5UL)
+
+/* SRAM drain window: the persistent host buffer that target->host bytes are
+ * copied into. Deliberately decoupled from (and smaller than) IPC_RING_T2H_CAPACITY
+ * so a large SOCMEM result ring does not pin a large block of the MicroPython SRAM heap. */
+#define IPC_T2H_CHUNK               (8192UL)
+
+/* Back-pressure while streaming a host->target payload: when the ring is full
+ * wait (bounded) for CM55 to drain before writing the remainder, so payloads
+ * larger than the ring transfer losslessly instead of being rejected. */
+#define IPC_TX_BACKPRESSURE_MAX_SPINS  (1000UL)
+#define IPC_TX_BACKPRESSURE_DELAY_US   (100UL)
+
+#define IPC_SEND_MAX_RETRIES        (100UL)
+#define IPC_SEND_RETRY_DELAY_US     (1000UL)
 #define CM55_APP_BOOT_ADDR          (CYMEM_CM33_0_m55_nvm_START + CYBSP_MCUBOOT_HEADER_SIZE)
 #define CM55_BOOT_WAIT_TIME_USEC    (10U)
 #define CM55_APP_DELAY_MS           (50U)
@@ -57,8 +71,6 @@
 *******************************************************************************/
 static bool cm55_enabled = false;
 CY_SECTION_SHAREDMEM static ipc_msg_t ipc_msg_buffer;
-/* Non-shared scratch used to drain the inbound ring in the pipe ISR. */
-static uint8_t cm33_rx_scratch[IPC_RING_CAPACITY];
 machine_ipc_obj_t *machine_ipc_obj[IPC_MAX_CLIENTS_PER_EP] = {NULL};
 
 /*******************************************************************************
@@ -98,14 +110,38 @@ static void machine_ipc_client_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest)
         dest[0] = mp_obj_new_int_from_uint(self->last_value);
     } else if (attr == MP_QSTR_id) {
         dest[0] = MP_OBJ_NEW_SMALL_INT(self->client_id);
+    } else {
+        // Not a property: fall through to locals_dict so methods (read) resolve.
+        dest[1] = MP_OBJ_SENTINEL;
     }
 }
+
+/* client.read() — drain up to IPC_T2H_CHUNK bytes of the announced result from
+ * the target->host ring into the persistent SRAM window and return them as a
+ * memoryview (reused every call, so copy out to retain). Returns empty when
+ * nothing is available yet; loop until `value` bytes have been read. */
+static mp_obj_t machine_ipc_client_read(mp_obj_t self_in) {
+    (void)self_in;
+    uint8_t *buf = MP_STATE_PORT(machine_ipc_rx_buf);
+    if (buf == NULL) {
+        return mp_const_empty_bytes;
+    }
+    size_t n = ipc_ring_read(IPC_RING_TARGET_TO_HOST, buf, IPC_T2H_CHUNK);
+    return (n > 0u) ? mp_obj_new_memoryview('B', n, buf) : mp_const_empty_bytes;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(machine_ipc_client_read_obj, machine_ipc_client_read);
+
+static const mp_rom_map_elem_t machine_ipc_client_locals_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&machine_ipc_client_read_obj) },
+};
+static MP_DEFINE_CONST_DICT(machine_ipc_client_locals_dict, machine_ipc_client_locals_dict_table);
 
 MP_DEFINE_CONST_OBJ_TYPE(
     machine_ipc_client_type,
     MP_QSTR_IPCClient,
     MP_TYPE_FLAG_NONE,
-    attr, machine_ipc_client_attr);
+    attr, machine_ipc_client_attr,
+    locals_dict, &machine_ipc_client_locals_dict);
 
 /*******************************************************************************
 * IPC Helper functions
@@ -264,7 +300,6 @@ static bool ipc_send_message(uint32_t src_endpoint_addr,
     // Wait for channel to be free, then send
     cy_en_ipc_pipe_status_t status;
     uint32_t retry_count = 0;
-    const uint32_t MAX_RETRIES = 100000;  // Allow retry to avoid intermittent failure
 
     do {
         status = Cy_IPC_Pipe_SendMessage(
@@ -280,14 +315,14 @@ static bool ipc_send_message(uint32_t src_endpoint_addr,
 
         // If channel is busy, wait a bit and retry
         if (status == CY_IPC_PIPE_ERROR_SEND_BUSY) {
-            Cy_SysLib_DelayUs(100);  // 100us delay
+            Cy_SysLib_DelayUs(IPC_SEND_RETRY_DELAY_US);
             retry_count++;
         } else {
             // Other error - fail immediately
             mp_printf(&mp_plat_print, "[CM33] Error: Cy_IPC_Pipe_SendMessage failed with status %d\r\n", status);
             return false;
         }
-    } while (retry_count < MAX_RETRIES);
+    } while (retry_count < IPC_SEND_MAX_RETRIES);
 
     if (status != CY_IPC_PIPE_SUCCESS) {
         mp_printf(&mp_plat_print, "[CM33] Error: Channel busy after %lu retries, status %d\r\n", retry_count, status);
@@ -384,6 +419,7 @@ static mp_obj_t machine_ipc_make_new(const mp_obj_type_t *type, size_t n_args, s
         sender_clients_arr[i].client_id = IPC_CLIENT_ID_UNREGISTERED;
         sender_clients_arr[i].last_cmd = 0;
         sender_clients_arr[i].last_value = 0;
+        sender_clients_arr[i].last_data_len = 0;
         MP_STATE_PORT(machine_ipc_client_handlers)[i] = mp_const_none;
     }
 
@@ -404,6 +440,20 @@ static mp_obj_t machine_ipc_make_new(const mp_obj_type_t *type, size_t n_args, s
     return MP_OBJ_FROM_PTR(self);
 }
 
+/* Scheduled in the MicroPython VM (scheduler) context from the pipe ISR for an
+ * IPC_CMD_DATA_AVAIL doorbell. The doorbell only announces the total length
+ * (client.value); the handler pulls the bytes with client.read() in <=IPC_T2H_CHUNK
+ * chunks, so the ring is drained in VM context (never the ISR) and the result
+ * ring can be far larger than the host SRAM window. */
+static mp_obj_t ipc_data_dispatch(mp_obj_t client_in) {
+    machine_ipc_client_obj_t *client = MP_OBJ_TO_PTR(client_in);
+    if (client->base.handler != mp_const_none) {
+        mp_call_function_1_protected(client->base.handler, client_in);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(ipc_data_dispatch_obj, ipc_data_dispatch);
+
 /* Callback to handle messages received from CM55 in CM33-NS. Registered with
 *  the IPC driver for the CM33 source endpoint; called from the IPC ISR
 *  (cm33_ipc_pipe_isr) when a message arrives from CM55.
@@ -418,11 +468,20 @@ void cm33_msg_callback(uint32_t *msg_data) {
     ipc_msg_t *ipc_recv_msg = (ipc_msg_t *)msg_data;
 
     if (ipc_recv_msg->cmd == IPC_CMD_DATA_AVAIL) {
-        /* Drain the target->host ring to keep it flowing. A Python-visible
-         * consumer API will be added in a later phase. */
-        while (ipc_ring_read(IPC_RING_TARGET_TO_HOST, cm33_rx_scratch,
-            sizeof(cm33_rx_scratch)) > 0U) {
-            ;
+        /* Bulk data doorbell: value carries the total payload length (which may
+         * exceed the ring; the host pulls it out in chunks). GC allocation is
+         * not allowed in the pipe ISR, so defer to scheduler (VM) context. */
+        uint32_t len = ipc_recv_msg->value;
+
+        uint8_t data_client_id = ipc_recv_msg->client_id;
+        if (data_client_id < IPC_MAX_CLIENTS_PER_EP) {
+            machine_ipc_client_obj_t *data_client = &sender_clients_arr[data_client_id];
+            if (data_client->base.handler != mp_const_none) {
+                data_client->last_cmd = IPC_CMD_DATA_AVAIL;
+                data_client->last_value = len;
+                data_client->last_data_len = len;
+                mp_sched_schedule(MP_OBJ_FROM_PTR(&ipc_data_dispatch_obj), data_client->base.parent);
+            }
         }
         return;
     }
@@ -519,8 +578,14 @@ static mp_obj_t machine_ipc_init(mp_obj_t self_in) {
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("IPC pipe initialization failed"));
     }
 
-    /* CM33 owns the host -> target ring (m33_allocatable_shared). */
-    ipc_ring_init(IPC_RING_HOST_TO_TARGET);
+    /* CM33 owns the host -> target ring (m33_m55_shared SOCMEM region). */
+    ipc_ring_init(IPC_RING_HOST_TO_TARGET, IPC_RING_H2T_CAPACITY);
+
+    /* Receive: one persistent fixed SRAM window (IPC_T2H_CHUNK), allocated once
+     * and rooted, reused for every client.read() drain. */
+    if (MP_STATE_PORT(machine_ipc_rx_buf) == NULL) {
+        MP_STATE_PORT(machine_ipc_rx_buf) = m_new(uint8_t, IPC_T2H_CHUNK);
+    }
 
     Cy_SysLib_Delay(CM33_APP_DELAY_MS);
 
@@ -576,11 +641,44 @@ static mp_obj_t machine_ipc_send(size_t n_args, const mp_obj_t *args) {
 
     // Parse arguments
     uint32_t cmd = mp_obj_get_int(args[1]);
-    uint32_t value = (n_args > 2) ? mp_obj_get_int(args[2]) : 0;
     uint8_t client_id = mp_obj_get_int(args[3]);
 
     uint32_t src_ep_addr = self->sender_endpoint->ep_addr;
     uint32_t target_ep_addr = get_ep_addr_for_core(self->target_core);
+
+    // Bulk data path: when the payload argument is a buffer (bytes/bytearray/
+    // memoryview), stream it to the host->target ring losslessly. Write what
+    // fits, announce the total via the DATA_AVAIL doorbell, then keep writing
+    // the remainder, blocking (bounded) while the ring is full until CM55
+    // drains. This allows payloads larger than the ring, which CM55 picks up
+    // in chunks.
+    mp_buffer_info_t bufinfo;
+    if (n_args > 2 && mp_get_buffer(args[2], &bufinfo, MP_BUFFER_READ)) {
+        const uint8_t *base = (const uint8_t *)bufinfo.buf;
+        size_t total = bufinfo.len;
+        size_t sent = ipc_ring_write(IPC_RING_HOST_TO_TARGET, base, total);
+        if (!ipc_send_message(src_ep_addr, target_ep_addr, client_id,
+            IPC_CMD_DATA_AVAIL, (uint32_t)total)) {
+            mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("[CM33] IPC send failed"));
+        }
+        uint32_t spins = 0;
+        while (sent < total) {
+            size_t n = ipc_ring_write(IPC_RING_HOST_TO_TARGET, base + sent, total - sent);
+            if (n > 0) {
+                sent += n;
+                spins = 0;
+                continue;
+            }
+            if (++spins > IPC_TX_BACKPRESSURE_MAX_SPINS) {
+                mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("[CM33] IPC ring stalled"));
+            }
+            Cy_SysLib_DelayUs(IPC_TX_BACKPRESSURE_DELAY_US);
+        }
+        return mp_const_none;
+    }
+
+    // Control message path: fixed cmd + 32-bit value.
+    uint32_t value = (n_args > 2) ? mp_obj_get_int(args[2]) : 0;
 
     // Use helper function to send message
     bool success = ipc_send_message(
@@ -592,7 +690,7 @@ static mp_obj_t machine_ipc_send(size_t n_args, const mp_obj_t *args) {
         );
 
     if (!success) {
-        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("IPC send failed"));
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("[CM33] IPC send failed"));
     }
 
     return mp_const_none;
@@ -638,11 +736,13 @@ static const mp_rom_map_elem_t machine_ipc_locals_dict_table[] = {
     // Command constants
     { MP_ROM_QSTR(MP_QSTR_CMD_START), MP_ROM_INT(IPC_CMD_START) },
     { MP_ROM_QSTR(MP_QSTR_CMD_STOP), MP_ROM_INT(IPC_CMD_STOP) },
+    { MP_ROM_QSTR(MP_QSTR_CMD_DATA_AVAIL), MP_ROM_INT(IPC_CMD_DATA_AVAIL) },
 };
 static MP_DEFINE_CONST_DICT(machine_ipc_locals_dict, machine_ipc_locals_dict_table);
 
 MP_REGISTER_ROOT_POINTER(struct _machine_ipc_obj_t *machine_ipc_obj[IPC_MAX_CLIENTS_PER_EP]);
 MP_REGISTER_ROOT_POINTER(mp_obj_t machine_ipc_client_handlers[IPC_MAX_CLIENTS_PER_EP]);
+MP_REGISTER_ROOT_POINTER(uint8_t * machine_ipc_rx_buf);
 
 void machine_ipc_deinit_all(void) {
     cm55_enabled = false;
