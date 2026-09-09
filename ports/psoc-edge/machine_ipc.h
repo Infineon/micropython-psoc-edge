@@ -66,6 +66,7 @@ typedef struct _machine_ipc_client_obj_t {
     uint32_t ep_addr;
     uint8_t last_cmd;    // last received command (set in ISR before mp_irq_handler)
     uint32_t last_value; // last received value
+    uint32_t last_data_len; // bytes drained into the shared rx buffer for DATA_AVAIL
 } machine_ipc_client_obj_t;
 
 // Array of registered clients, max IPC_MAX_CLIENTS_PER_EP entries
