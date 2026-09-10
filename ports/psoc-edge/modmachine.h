@@ -71,6 +71,9 @@ extern const mp_obj_type_t machine_pwm_type;
 extern const mp_obj_type_t machine_timer_type;
 extern const mp_obj_type_t machine_counter_type;
 extern const mp_obj_type_t machine_wdt_type;
+#if MICROPY_ENABLE_EXT_QSPI_FLASH
+extern const mp_obj_type_t machine_external_flash_type;
+#endif
 
 #if MICROPY_PY_MACHINE_SPI_TARGET
 extern const mp_obj_type_t machine_spi_target_type;

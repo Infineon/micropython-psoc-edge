@@ -65,6 +65,13 @@ enum clock_freq_type freq_peri;
 #define MICROPY_PY_MACHINE_ADC_BLOCK_GLOBAL
 #endif
 
+#if MICROPY_ENABLE_EXT_QSPI_FLASH
+#define MICROPY_PY_MACHINE_EXT_FLASH_GLOBAL \
+    { MP_ROM_QSTR(MP_QSTR_ExternalFlash),       MP_ROM_PTR(&machine_external_flash_type) },
+#else
+#define MICROPY_PY_MACHINE_EXT_FLASH_GLOBAL
+#endif
+
 // Reset cause values: PWRON=0 matches the C zero-initialisation of
 // reset_cause. SOFT must be non-zero so machine_deinit() can mark a
 // soft reset unambiguously.
@@ -198,6 +205,7 @@ static void mp_machine_set_freq(size_t n_args, const mp_obj_t *args) {
     { MP_ROM_QSTR(MP_QSTR_Timer),               MP_ROM_PTR(&machine_timer_type) }, \
     { MP_ROM_QSTR(MP_QSTR_Counter),             MP_ROM_PTR(&machine_counter_type) }, \
     { MP_ROM_QSTR(MP_QSTR_WDT),                 MP_ROM_PTR(&machine_wdt_type) }, \
+    MICROPY_PY_MACHINE_EXT_FLASH_GLOBAL \
     MICROPY_PY_MACHINE_SPITARGET_GLOBAL \
     /* Reset cause constants */ \
     { MP_ROM_QSTR(MP_QSTR_PWRON_RESET),         MP_ROM_INT(MACHINE_PWRON_RESET) }, \

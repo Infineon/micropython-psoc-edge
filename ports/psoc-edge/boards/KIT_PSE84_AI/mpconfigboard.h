@@ -43,8 +43,11 @@
 // CRITICAL: Base address MUST be aligned to 256KB (0x40000) sector boundary!
 #define EXT_FLASH_BASE              (0x00900000)  // Aligned to sector 36
 
-// Usable filesystem space: 64MB - 9MB = 55MB (0x03700000 bytes)
-#define EXT_FLASH_SIZE              (0x04000000 - EXT_FLASH_BASE)
+// LittleFS uses the first 23MB after the firmware area. The final 32MB is
+// reserved for shared data storage accessible by CM33 and CM55.
+#define EXT_FLASH_SHARED_DATA_BASE  (0x02000000)
+#define EXT_FLASH_SHARED_DATA_SIZE  (0x02000000)
+#define EXT_FLASH_SIZE              (EXT_FLASH_SHARED_DATA_BASE - EXT_FLASH_BASE)
 
 // erase sector size : 256KB, fixed by flash chip hardware in Region 2.
 #define EXT_FLASH_SECTOR_SIZE        (0x40000)       /** 256KB*/
