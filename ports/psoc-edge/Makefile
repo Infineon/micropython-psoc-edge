@@ -598,7 +598,9 @@ MOD_SRC_C += \
 	modpsocedge.c \
 
 ifeq ($(MICROPY_PY_EXT_FLASH),1)
-MOD_SRC_C += psoc_edge_qspi_flash.c 
+MOD_SRC_C += \
+	psoc_edge_qspi_flash.c \
+	machine_external_flash.c
 endif
 
 ifeq ($(MICROPY_PY_NETWORK_IFX_WCM),1)
