@@ -70,6 +70,7 @@
 * Global Variables
 *******************************************************************************/
 static bool cm55_enabled = false;
+static uint8_t machine_ipc_rx_buf[IPC_T2H_CHUNK];
 CY_SECTION_SHAREDMEM static ipc_msg_t ipc_msg_buffer;
 machine_ipc_obj_t *machine_ipc_obj[IPC_MAX_CLIENTS_PER_EP] = {NULL};
 
@@ -122,12 +123,8 @@ static void machine_ipc_client_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest)
  * nothing is available yet; loop until `value` bytes have been read. */
 static mp_obj_t machine_ipc_client_read(mp_obj_t self_in) {
     (void)self_in;
-    uint8_t *buf = MP_STATE_PORT(machine_ipc_rx_buf);
-    if (buf == NULL) {
-        return mp_const_empty_bytes;
-    }
-    size_t n = ipc_ring_read(IPC_RING_TARGET_TO_HOST, buf, IPC_T2H_CHUNK);
-    return (n > 0u) ? mp_obj_new_memoryview('B', n, buf) : mp_const_empty_bytes;
+    size_t n = ipc_ring_read(IPC_RING_TARGET_TO_HOST, machine_ipc_rx_buf, IPC_T2H_CHUNK);
+    return (n > 0u) ? mp_obj_new_memoryview('B', n, machine_ipc_rx_buf) : mp_const_empty_bytes;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(machine_ipc_client_read_obj, machine_ipc_client_read);
 
@@ -581,12 +578,6 @@ static mp_obj_t machine_ipc_init(mp_obj_t self_in) {
     /* CM33 owns the host -> target ring (m33_m55_shared SOCMEM region). */
     ipc_ring_init(IPC_RING_HOST_TO_TARGET, IPC_RING_H2T_CAPACITY);
 
-    /* Receive: one persistent fixed SRAM window (IPC_T2H_CHUNK), allocated once
-     * and rooted, reused for every client.read() drain. */
-    if (MP_STATE_PORT(machine_ipc_rx_buf) == NULL) {
-        MP_STATE_PORT(machine_ipc_rx_buf) = m_new(uint8_t, IPC_T2H_CHUNK);
-    }
-
     Cy_SysLib_Delay(CM33_APP_DELAY_MS);
 
     mp_printf(&mp_plat_print, "IPC initialized successfully\r\n");
@@ -607,15 +598,14 @@ static mp_obj_t machine_ipc_enable_core(size_t n_args, const mp_obj_t *args) {
 
     // Currently only CM55 (CM55) is supported
     if (core_id == CM55) {
+        /* The CM55 core keeps running across a CM33 soft reset, so cm55_enabled
+         * persists and a second enable_core() is a no-op. */
         if (cm55_enabled) {
-            mp_printf(&mp_plat_print, "CM55 already enabled\r\n");
             return mp_const_true;
         }
         Cy_SysEnableCM55(MXCM55, CM55_APP_BOOT_ADDR, CM55_BOOT_WAIT_TIME_USEC);
         cm55_enabled = true;
         Cy_SysLib_Delay(CM33_APP_DELAY_MS);
-
-        mp_printf(&mp_plat_print, "Enabling CM55 core at boot address: 0x%08X\r\n", CM55_APP_BOOT_ADDR);
 
         return mp_const_true;
     } else if (core_id == CM33) {
@@ -742,10 +732,8 @@ static MP_DEFINE_CONST_DICT(machine_ipc_locals_dict, machine_ipc_locals_dict_tab
 
 MP_REGISTER_ROOT_POINTER(struct _machine_ipc_obj_t *machine_ipc_obj[IPC_MAX_CLIENTS_PER_EP]);
 MP_REGISTER_ROOT_POINTER(mp_obj_t machine_ipc_client_handlers[IPC_MAX_CLIENTS_PER_EP]);
-MP_REGISTER_ROOT_POINTER(uint8_t * machine_ipc_rx_buf);
 
 void machine_ipc_deinit_all(void) {
-    cm55_enabled = false;
     for (uint8_t i = 0; i < IPC_MAX_CLIENTS_PER_EP; i++) {
         sender_clients_arr[i].client_id = IPC_CLIENT_ID_UNREGISTERED;
         sender_clients_arr[i].base.handler = mp_const_none;
