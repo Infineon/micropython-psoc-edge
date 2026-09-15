@@ -11,7 +11,7 @@ jobs:
 
     steps:
     - name: Checkout target repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: master
         token: ${{ secrets.GH_ACT_SYNCH_UPSTREAM }}
@@ -44,7 +44,7 @@ jobs:
 
     steps:
     - name: Checkout target repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: psoc-edge-main
         token: ${{ secrets.GH_ACT_SYNCH_UPSTREAM }}
