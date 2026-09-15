@@ -81,6 +81,8 @@ set(MICROPY_SOURCE_PORT
     zephyr_device.c
     zephyr_storage.c
     zephyr_filesystem.c
+    zephyr_display.c
+    zephyr_regulator.c
     mpthreadport.c
 )
 list(TRANSFORM MICROPY_SOURCE_PORT PREPEND ${MICROPY_PORT_DIR}/)
@@ -185,7 +187,6 @@ add_dependencies(BUILD_VERSION_HEADER zephyr_generated_headers)
 add_dependencies(${MICROPY_TARGET} zephyr_generated_headers)
 
 target_sources(app PRIVATE
-    src/zephyr_start.c
     src/zephyr_getchar.c
     src/usbd.c
 )

@@ -123,6 +123,7 @@ function ci_code_size_build {
             OUTFILE=$2
             IGNORE_ERRORS=$3
 
+            git restore ports/esp32/lockfiles/*  # esp32 port may update local lockfile
             git checkout --detach $COMMIT
             git submodule update --init $SUBMODULES
             git show -s
@@ -582,6 +583,7 @@ function ci_qemu_build_arm_thumb_softfp {
 
 function ci_qemu_build_arm_thumb_hardfp {
     ci_qemu_build_arm_prepare
+    make BOARD=MPS2_AN500 ${MAKEOPTS} -C ports/qemu submodules
     make BOARD=MPS2_AN500 ${MAKEOPTS} -C ports/qemu test_full
 
     # Test building native .mpy with all ARM-M hardfp architectures.

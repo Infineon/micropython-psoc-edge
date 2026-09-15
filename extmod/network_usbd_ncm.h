@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2016 Linaro Limited
+ * Copyright (c) 2026 Andrew Leech
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,19 +23,18 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include <zephyr/kernel.h>
-#include "zephyr_getchar.h"
 
-int real_main(void);
-int mp_console_init(void);
+#ifndef MICROPY_INCLUDED_EXTMOD_NETWORK_USBD_NCM_H
+#define MICROPY_INCLUDED_EXTMOD_NETWORK_USBD_NCM_H
 
-int main(void) {
-    #ifdef CONFIG_CONSOLE_SUBSYS
-    mp_console_init();
-    #else
-    zephyr_getchar_init();
-    #endif
-    real_main();
+// Start dhcp server on this interface by default as this allows the host computer
+// to be automatically / quickly allocated a suitable ip address to be able to
+// communicate over the usb network link.
+#ifndef MICROPY_PY_NETWORK_USBD_NCM_DHCP_SERVER
+#define MICROPY_PY_NETWORK_USBD_NCM_DHCP_SERVER  (1)
+#endif
 
-    return 0;
-}
+// Initialise the NCM netif early (before USB enumeration).
+void ncm_auto_init(void);
+
+#endif // MICROPY_INCLUDED_EXTMOD_NETWORK_USBD_NCM_H

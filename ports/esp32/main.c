@@ -150,8 +150,11 @@ soft_reset:
     machine_i2s_init0();
     #endif
 
-    // run boot-up scripts
-    pyexec_frozen_module("_boot.py", false);
+    // Run optional frozen boot code.
+    #ifdef MICROPY_BOARD_FROZEN_BOOT_FILE
+    pyexec_frozen_module(MICROPY_BOARD_FROZEN_BOOT_FILE, false);
+    #endif
+
     int ret = pyexec_file_if_exists("boot.py");
 
     #if MICROPY_HW_ENABLE_USBDEV
@@ -228,6 +231,9 @@ soft_reset_exit:
     machine_pins_deinit();
     #if MICROPY_PY_MACHINE_I2C_TARGET
     mp_machine_i2c_target_deinit_all();
+    #endif
+    #if SOC_GP_LDO_SUPPORTED
+    esp32_ldo_deinit_all();
     #endif
     machine_deinit();
 

@@ -82,6 +82,7 @@ int main(void) {
     MICROPY_BOARD_EARLY_INIT();
 
     lptimer_init();
+    machine_init();
     machine_rtc_init();
 
     #if MICROPY_HW_ENABLE_UART_REPL
@@ -179,6 +180,7 @@ int main(void) {
         soft_timer_deinit();
         machine_pwm_deinit_all();
         machine_pin_irq_deinit();
+        machine_set_soft_reset();
         gc_sweep_all();
         mp_deinit();
     }
@@ -200,7 +202,7 @@ void nlr_jump_fail(void *val) {
 
 #ifndef NDEBUG
 void MP_WEAK __assert_func(const char *file, int line, const char *func, const char *expr) {
-    printf("Assertion '%s' failed, at file %s:%d\n", expr, file, line);
+    mp_printf(&mp_plat_print, "Assertion '%s' failed, at file %s:%d\n", expr, file, line);
     panic("Assertion failed");
 }
 #endif
