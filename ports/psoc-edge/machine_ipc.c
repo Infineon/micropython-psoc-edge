@@ -739,6 +739,11 @@ void machine_ipc_deinit_all(void) {
         sender_clients_arr[i].base.handler = mp_const_none;
         MP_STATE_PORT(machine_ipc_client_handlers)[i] = mp_const_none;
     }
+    // Release the IPC instance registry so a fresh IPC() after a soft reset
+    // reallocates slot 0 (otherwise each soft reset leaks an endpoint slot).
+    for (uint8_t i = 0; i < IPC_MAX_ENDPOINTS; i++) {
+        MP_STATE_PORT(machine_ipc_obj[i]) = NULL;
+    }
 }
 
 MP_DEFINE_CONST_OBJ_TYPE(
