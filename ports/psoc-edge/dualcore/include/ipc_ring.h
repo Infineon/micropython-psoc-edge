@@ -22,19 +22,31 @@
 #include <string.h>
 #include "cmsis_compiler.h"   /* __DMB() */
 
+/* Base/size of the m33_m55_shared SOCMEM region come from the BSP-generated
+ * memory map so the rings track the linker region if it is regenerated. */
+#if defined(COMPONENT_CM55)
+#include "cymem_CM55_0.h"
+#define IPC_RING_REGION_START  (CYMEM_CM55_0_m33_m55_shared_START)
+#define IPC_RING_REGION_SIZE   (CYMEM_CM55_0_m33_m55_shared_SIZE)
+#else
+#include "cymem_CM33_0.h"
+#define IPC_RING_REGION_START  (CYMEM_CM33_0_m33_m55_shared_START)
+#define IPC_RING_REGION_SIZE   (CYMEM_CM33_0_m33_m55_shared_SIZE)
+#endif
+
 /* Each ipc_ring_t is a 16-byte header followed by `capacity` payload bytes.
- * host->target is placed first; target->host is spaced past the header + the
- * 64 KB host->target payload. */
-#define IPC_RING_HOST_TO_TARGET_ADDR   (0x262FC000u)
-#define IPC_RING_TARGET_TO_HOST_ADDR   (0x2630D000u)
+ * host->target sits at the region base; target->host is spaced one 0x11000
+ * page past it (clears the header + 64 KB host->target payload). */
+#define IPC_RING_HOST_TO_TARGET_ADDR   (IPC_RING_REGION_START)
+#define IPC_RING_TARGET_TO_HOST_ADDR   (IPC_RING_REGION_START + 0x11000u)
 
 #define IPC_RING_MAGIC       (0x52494E47u)  /* 'RING' */
 
 #define IPC_RING_H2T_CAPACITY  (65536u)     /* CM33 -> CM55 input  (bytes) */
 #define IPC_RING_T2H_CAPACITY  (65536u)     /* CM55 -> CM33 result (bytes) */
 
-/* End of the m33_m55_shared SOCMEM region (0x262FC000 + 0x40000). */
-#define IPC_RING_REGION_END    (0x2633C000u)
+/* End of the m33_m55_shared SOCMEM region (base + size). */
+#define IPC_RING_REGION_END    (IPC_RING_REGION_START + IPC_RING_REGION_SIZE)
 
 /*
  * head/tail are free-running byte counters.
