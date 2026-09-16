@@ -16,7 +16,6 @@
   uid: 101A1398012D2400
   features:
     - uart
-    - ipc
 
 - name: KIT_PSE84_AI
   uid: 0E240C98012D2400
