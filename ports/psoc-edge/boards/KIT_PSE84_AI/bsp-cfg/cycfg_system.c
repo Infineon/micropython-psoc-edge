@@ -233,6 +233,20 @@ const cy_stc_mpc_regions_t M33_M55_mpc_regions[] =
         .offset = 0x0003D000,
         .size = 0x00043000,
     },
+    /* EXT_FLASH_SHARED_DATA_BASE/SIZE (mpconfigboard.h) -- grants CM33+CM55
+     * non-secure access to the shared-data flash partition. Without this,
+     * the region has no MPC entry at all (in any domain) and any AHB read
+     * of it bus-faults, regardless of SMIF XIP/memory-map configuration. */
+    {
+        .base = (MPC_Type *)SMIF0_CACHE_BLOCK_CACHEBLK_AHB_MPC0,
+        .offset = 0x02000000,
+        .size = 0x02000000,
+    },
+    {
+        .base = (MPC_Type *)SMIF0_CORE_AXI_MPC0,
+        .offset = 0x02000000,
+        .size = 0x02000000,
+    },
 };
 const cy_stc_mpc_resp_cfg_t cy_response_mpcs[] =
 {
