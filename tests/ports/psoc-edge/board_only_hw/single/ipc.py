@@ -165,7 +165,7 @@ def send_and_verify(payload, label, state=rx):
 
     if state["count"] == before:
         print("FAIL: {} - no echo received".format(label))
-    elif state["ok"]:
+    elif state["ok"] and state["len"] == total:
         print("PASS: {} - {} bytes echoed intact".format(label, state["len"]))
     else:
         print("FAIL: {} - mismatch/short (got {} of {})".format(label, state["len"], total))
