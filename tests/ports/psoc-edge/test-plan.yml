@@ -32,17 +32,8 @@
     exclude:
       - ports/psoc-edge/board_only_hw/single/wdt.py
       - ports/psoc-edge/board_only_hw/single/wdt_reset_cause_check.py
-      - ports/psoc-edge/board_only_hw/single/ipc.py
     device: 
       - board: KIT_PSE84_AI
-
-- name: ipc
-  test:
-    script: ports/psoc-edge/board_only_hw/single/ipc.py
-    device:
-      - board: KIT_PSE84_AI
-        features:
-          - ipc
 
 - name: watchdog
   test:
