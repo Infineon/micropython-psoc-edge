@@ -119,6 +119,12 @@ static void cm55_svc2_callback(uint32_t *msg_data) {
 }
 
 int main(void) {
+    // The CM55 startup enables the D-cache, but this standalone app does not run
+    // the BSP MPU config that marks the m33_m55_shared ring region non-cacheable,
+    // so polled ring reads would hit stale cache lines. Disable the D-cache to
+    // keep the shared rings coherent with CM33.
+    SCB_DisableDCache();
+
     // Enable global interrupts so the IPC notify interrupt can fire.
     __enable_irq();
 
