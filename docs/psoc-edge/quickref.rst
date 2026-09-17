@@ -646,10 +646,15 @@ Methods
 
         - ``cmd``: Command byte. Use ``IPC.CMD_START``, ``IPC.CMD_STOP``, or any
           application-defined value.
-        - ``value``: Optional 32-bit data payload. Default is ``0``.
+        - ``value``: Either a 32-bit integer payload (default ``0``) for a control
+          message, or a buffer (``bytes``, ``bytearray`` or ``memoryview``) to stream a
+          bulk payload. When a buffer is given the call takes the bulk data path
+          described in `Bulk data transfer`_ below, and the ``cmd`` argument is ignored
+          (the wire command is always ``IPC.CMD_DATA_AVAIL``).
         - ``client_id``: Client ID on the target core.
 
-    Raises ``OSError`` if the send fails after the maximum number of retries
+    Raises ``OSError`` if the send fails after the maximum number of retries, or if the
+    bulk ring stalls while streaming a payload::
 
         ipc.send(IPC.CMD_START, 0, 5)   # Send CMD_START to CM55 client 5
         ipc.send(IPC.CMD_STOP,  0, 6)   # Send CMD_STOP  to CM55 client 6
@@ -706,6 +711,84 @@ with each service using its own client IDs on both the CM33 and CM55 sides::
 
     # Send CMD_STOP to CM55 Service 2 (client_id=6); echo comes back to CM33 client_id=4
     ipc.send(IPC.CMD_STOP, 0, 6)
+
+Bulk data transfer
+^^^^^^^^^^^^^^^^^^
+
+In addition to fixed ``cmd`` + 32-bit ``value`` control messages, the IPC channel can
+stream arbitrary byte buffers between the cores using a pair of lock-free ring buffers
+located in the shared ``m33_m55_shared`` memory region. This is useful for passing audio
+frames, tensors or any block of data that does not fit in a single control message.
+
+**Sending (CM33 → CM55)**
+
+Pass a buffer (``bytes``, ``bytearray`` or ``memoryview``) as the ``value`` argument of
+``IPC.send()``. The data is written to the host→target ring and the total length is
+announced to the target ``client_id`` with the ``IPC.CMD_DATA_AVAIL`` doorbell. Payloads
+larger than the 64 KB ring are supported: ``IPC.send()`` blocks (with a bounded back-off)
+and keeps streaming the remainder as the CM55 drains the ring. The ``cmd`` argument is
+ignored on this path (``IPC.CMD_DATA_AVAIL`` is always the wire command)::
+
+    # Bulk transfer: pass a buffer as ``value`` to stream it to CM55 client 5.
+    payload = bytes(range(256)) * 40         # 10240 bytes
+    ipc.send(IPC.CMD_DATA_AVAIL, payload, 5) # cmd ignored; DATA_AVAIL announces the length
+
+**Receiving (CM55 → CM33)**
+
+When the CM55 firmware sends data back it announces it with ``IPC.CMD_DATA_AVAIL`` to a
+CM33 client. Inside that client's callback, branch on the command and drain the
+target→host ring with ``client.read()``:
+
+    - ``client.value`` holds the total number of bytes being sent.
+    - ``client.read()`` returns up to one ring chunk as a ``memoryview``, or an empty
+      ``bytes`` object when no data is available yet. The underlying buffer is reused on
+      every call, so copy the bytes out (for example with ``bytearray.extend``) if you
+      need to retain them.
+    - Loop until ``client.value`` bytes have been read.
+
+Example — send a payload and verify the CM55 echo is received intact (assumes the shipped
+CM55 echo firmware, which returns whatever it receives)::
+
+    import time
+    from machine import IPC
+
+    ipc = IPC(src_core=IPC.CM33, target_core=IPC.CM55)
+    ipc.init()
+
+    rx = {"data": b"", "done": False}
+
+    def svc1_cb(client, state=rx):
+        # CM33 client 3 receives both command echoes and the bulk doorbell.
+        if client.cmd == IPC.CMD_DATA_AVAIL:
+            total = client.value          # bytes CM55 is sending back
+            buf = bytearray()
+            while len(buf) < total:
+                mv = client.read()        # <= one ring chunk
+                if len(mv) == 0:          # producer still streaming; wait briefly
+                    time.sleep_ms(1)
+                    continue
+                buf.extend(mv)            # copy out -- the memoryview is reused
+            state["data"] = bytes(buf)
+            state["done"] = True
+
+    ipc.register_client(3, svc1_cb, 1, 1)    # CM33 client_id=3
+    ipc.enable_core(IPC.CM55)
+    time.sleep(1)                            # wait for CM55 to initialise
+
+    payload = bytes(range(256)) * 40         # 10240 bytes, larger than one message
+    rx["done"] = False
+    ipc.send(IPC.CMD_DATA_AVAIL, payload, 5) # buffer -> bulk path, echoed to client 3
+
+    while not rx["done"]:                     # wait for the full echo
+        time.sleep_ms(10)
+
+    print("echoed", len(rx["data"]), "bytes, match:", rx["data"] == payload)
+
+.. note::
+
+    Each direction has its own 64 KB ring in the ``m33_m55_shared`` SOCMEM region, shared
+    coherently between the two cores, so sending and receiving can proceed concurrently
+    (full duplex).
 
 PDM - PCM bus
 --------------
