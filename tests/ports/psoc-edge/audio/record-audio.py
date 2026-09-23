@@ -64,12 +64,13 @@ def play_audio(file, bits_per_sample, rate, channels):
     """
     Play it using ffplay:
 
-        ffplay -nodisp -f $format -ar $rate -ac $channels -autoexit $file
+        ffplay -nodisp -f $format -ar $rate -ch_layout $layout -autoexit $file
 
-    ffmpeg (6.1.1-3ubuntu5) needs to be installed on the local machine
+    ffmpeg needs to be installed on the local machine.
     """
     pcm_fmt = "s16le" if bits_per_sample == 16 else "s32le"
-    command = f"ffplay -nodisp -f {pcm_fmt} -ar {rate} -ac {channels} -autoexit {file}"
+    ch_layout = "mono" if channels == 1 else "stereo"
+    command = f"ffplay -nodisp -f {pcm_fmt} -ar {rate} -ch_layout {ch_layout} -autoexit {file}"
     subprocess.run(command, shell=True)
 
 
