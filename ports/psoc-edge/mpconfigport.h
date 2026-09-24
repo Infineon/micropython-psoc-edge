@@ -27,6 +27,7 @@
 // Options controlling how MicroPython is built, overriding defaults in py/mpconfig.h
 #include <alloca.h>
 #include "mpconfigboard.h"
+#include "genhdr/pins_af.h"
 
 #define MICROPY_CONFIG_ROM_LEVEL                (MICROPY_CONFIG_ROM_LEVEL_FULL_FEATURES)
 
@@ -99,7 +100,7 @@
 #define MICROPY_STREAMS_NON_BLOCK               (1)
 
 #define MICROPY_PY_MACHINE_I2C_TARGET           (1)
-#define MICROPY_PY_MACHINE_I2C_TARGET_MAX       (1)
+#define MICROPY_PY_MACHINE_I2C_TARGET_MAX       (MICROPY_PY_MACHINE_I2C_NUM_ENTRIES)
 #define MICROPY_PY_MACHINE_I2C_TARGET_HARD_IRQ  (1)
 #define MICROPY_PY_MACHINE_I2C_TARGET_INCLUDEFILE "ports/psoc-edge/machine_i2c_target.c"
 
