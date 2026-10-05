@@ -610,6 +610,7 @@ endif
 SRC_C += \
 	clk.c \
 	help.c \
+	i2c.c \
 	main.c \
 	mphalport.c \
 	scb.c \
