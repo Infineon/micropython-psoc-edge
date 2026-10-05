@@ -39,33 +39,33 @@
 #include "clk.h"
 #include "genhdr/pins_af.h"
 #include "modmachine.h"
-#include "scb.h"
+// #include "scb.h"
+#include "i2c.h"
 
 #define DEBUG_printf(...) // printf(__VA_ARGS__)
 
 typedef struct _machine_i2c_target_obj_t {
     mp_obj_base_t base;
-    uint8_t id;  // id matches the SCB id.
     mp_hal_pin_obj_t scl;
     mp_hal_pin_obj_t sda;
-    uint32_t slave_addr;
+    uint32_t addr;
     uint8_t addrsize;
-    scb_obj_t *scb_obj;
-    pclk_div_obj_t *pclk_div;
-    cy_stc_scb_i2c_context_t ctx;
     mp_obj_t mem;
     size_t mem_addrsize;
     size_t tx_index;
     size_t rx_index;
+    i2c_obj_t *i2c_obj;
 } machine_i2c_target_obj_t;
 
 static machine_i2c_target_obj_t *machine_i2c_target_obj[MICROPY_PY_MACHINE_I2C_NUM_ENTRIES] = {NULL};
 
-static void i2c_slave_obj_event_callback(uint8_t scb, uint32_t events);
+static machine_i2c_target_obj_t *machine_i2c_target_obj_get(uint8_t id);
+static void i2c_target_obj_event_callback(machine_i2c_target_obj_t *self, uint32_t events);
 
-#define DEFINE_I2C_SLAVE_EVENT_CALLBACK(scb) \
-    void i2c_##scb##_slave_event_callback(uint32_t events) { \
-        i2c_slave_obj_event_callback(scb, events); \
+#define DEFINE_I2C_TARGET_EVENT_CALLBACK(scb) \
+    void i2c_##scb##_target_event_callback(uint32_t events) { \
+        machine_i2c_target_obj_t *self = machine_i2c_target_obj_get(scb); \
+        i2c_target_obj_event_callback(self, events); \
     }
 
 /**
@@ -86,16 +86,15 @@ static void i2c_slave_obj_event_callback(uint8_t scb, uint32_t events);
  * for more information.
  */
 
-MICROPY_PY_FOR_ALL_SCB(DEFINE_I2C_SLAVE_EVENT_CALLBACK)
+MICROPY_PY_FOR_ALL_SCB(DEFINE_I2C_TARGET_EVENT_CALLBACK)
 
-#define I2C_SLAVE_EVENT_CALLBACK_ENTRY(scb) \
-    [scb] = i2c_##scb##_slave_event_callback,
+#define I2C_TARGET_EVENT_CALLBACK_ENTRY(scb) \
+    [scb] = i2c_##scb##_target_event_callback,
 
-static cy_cb_scb_i2c_handle_events_t i2c_slave_event_callback[MICROPY_PY_SCB_NUM_ENTRIES] = {
-    MICROPY_PY_FOR_ALL_SCB(I2C_SLAVE_EVENT_CALLBACK_ENTRY)
+static cy_cb_scb_i2c_handle_events_t i2c_target_event_callback[MICROPY_PY_SCB_NUM_ENTRIES] = {
+    MICROPY_PY_FOR_ALL_SCB(I2C_TARGET_EVENT_CALLBACK_ENTRY)
 };
 
-static machine_i2c_target_obj_t *machine_i2c_target_obj_get(uint8_t id);
 
 /******************************************************************************/
 // PSOC PDL hardware bindings
@@ -112,14 +111,12 @@ static machine_i2c_target_obj_t *machine_i2c_target_obj_get(uint8_t id);
 // Note: Without buffer reconfiguration, next transaction continues from
 // where previous stopped (e.g., if master read 8 of 10 bytes, next read
 // starts at byte 9). This is PDL documented behavior.
-static void i2c_slave_obj_event_callback(uint8_t scb, uint32_t events) {
-    machine_i2c_target_obj_t *self = machine_i2c_target_obj_get(scb);
-
+static void i2c_target_obj_event_callback(machine_i2c_target_obj_t *self, uint32_t events) {
     if (self == NULL) {
         return;
     }
 
-    machine_i2c_target_data_t *data = &machine_i2c_target_data[self->id];
+    machine_i2c_target_data_t *data = &machine_i2c_target_data[i2c_get_id(self->i2c_obj)];
     // I2CTarget.IRQ_ADDR_MATCH_READ: master sent address with read bit.
     if (events & CY_SCB_I2C_SLAVE_READ_EVENT) {
         machine_i2c_target_data_addr_match(data, true);
@@ -141,10 +138,10 @@ static void i2c_slave_obj_event_callback(uint8_t scb, uint32_t events) {
 
     if (events & CY_SCB_I2C_SLAVE_RD_CMPLT_EVENT) {
         if (data->mem_buf != NULL && data->mem_len > 0) {
-            Cy_SCB_I2C_SlaveConfigReadBuf(self->scb_obj->scb, data->mem_buf, data->mem_len, &self->ctx);
+            i2c_hw_target_config_read_buff(self->i2c_obj, data->mem_buf, data->mem_len);
         }
 
-        Cy_SCB_I2C_SlaveClearReadStatus(self->scb_obj->scb, &self->ctx);
+        i2c_hw_target_clear_read_status(self->i2c_obj);
 
         // Reset index for next transaction
         self->tx_index = 0;
@@ -158,7 +155,7 @@ static void i2c_slave_obj_event_callback(uint8_t scb, uint32_t events) {
 
     if (events & CY_SCB_I2C_SLAVE_WR_CMPLT_EVENT) {
         if (!(events & CY_SCB_I2C_SLAVE_ERR_EVENT)) {
-            uint32_t bytes_received = Cy_SCB_I2C_SlaveGetWriteTransferCount(self->scb_obj->scb, &self->ctx);
+            uint32_t bytes_received = i2c_hw_target_get_write_count(self->i2c_obj);
             self->rx_index = 0;
             while (self->rx_index < bytes_received) {
                 // I2CTarget.IRQ_WRITE_REQ: incoming write payload available from master.
@@ -167,10 +164,10 @@ static void i2c_slave_obj_event_callback(uint8_t scb, uint32_t events) {
         }
 
         if (data->mem_buf != NULL && data->mem_len > 0) {
-            Cy_SCB_I2C_SlaveConfigWriteBuf(self->scb_obj->scb, data->mem_buf, data->mem_len, &self->ctx);
+            i2c_hw_target_config_write_buff(self->i2c_obj, data->mem_buf, data->mem_len);
         }
 
-        Cy_SCB_I2C_SlaveClearWriteStatus(self->scb_obj->scb, &self->ctx);
+        i2c_hw_target_clear_write_status(self->i2c_obj);
 
         // Ensure state is WRITING so extmod reset_helper triggers END_WRITE
         data->state = STATE_WRITING;
@@ -187,13 +184,13 @@ static void i2c_slave_obj_event_callback(uint8_t scb, uint32_t events) {
 
 static void machine_i2c_target_scb_isr(mp_obj_t i2c_target_obj) {
     machine_i2c_target_obj_t *self = MP_OBJ_TO_PTR(i2c_target_obj);
-    Cy_SCB_I2C_SlaveInterrupt(self->scb_obj->scb, &self->ctx);
+    i2c_hw_target_irq(self->i2c_obj);
 }
 
 static machine_i2c_target_obj_t *machine_i2c_target_obj_get(uint8_t id) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_I2C_NUM_ENTRIES; i++) {
         if (machine_i2c_target_obj[i] != NULL) {
-            if (machine_i2c_target_obj[i]->id == id) {
+            if (i2c_get_id(machine_i2c_target_obj[i]->i2c_obj) == id) {
                 return machine_i2c_target_obj[i];
             }
         }
@@ -221,108 +218,29 @@ static inline void machine_i2c_target_obj_free(machine_i2c_target_obj_t *i2c_tar
     }
 }
 
-static void machine_i2c_target_obj_make_or_reuse(machine_i2c_target_obj_t **self_ptr, uint8_t id, bool *is_new) {
-    /**
-     * I2CTarget() constructor path:
-     *
-     * Create or reuse and object based on the id.
-     * If the object for the given id already exists,
-     * reuse it and reinit the hardware with the new params.
-     * If the object is being created for the first time,
-     * allocate it and the associated SCB object.
-     */
-
-    /* Use object if it already exists */
-    (*self_ptr) = machine_i2c_target_obj_get(id);
-    (*is_new) = false;
-
-    if (*self_ptr == NULL) {
-        /* Create a new object and allocate the scb instance if free.*/
-        if (scb_is_free(id)) {
-            (*self_ptr) = machine_i2c_target_obj_alloc();
-            if (*self_ptr == NULL) {
-                mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to allocate I2C(%u) object"), id);
-            }
-            (*self_ptr)->id = id;
-            (*self_ptr)->pclk_div = NULL;
-            (*self_ptr)->scb_obj = scb_obj_alloc(id, *self_ptr, machine_i2c_target_scb_isr);
-        } else {
-            mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("SCB %u is already in use by a machine.UART or machine.SPI instance."), id);
-        }
-        (*is_new) = true;
-    }
-}
-
-static void machine_i2c_target_obj_destruct(machine_i2c_target_obj_t *self) {
-    if (self != NULL) {
-        if (self->scb_obj != NULL) {
-            scb_obj_free(self->scb_obj);
-        }
-        machine_i2c_target_obj_free(self);
-    }
-}
 
 static void machine_i2c_target_hw_init(machine_i2c_target_obj_t *self) {
-    cy_stc_scb_i2c_config_t cfg = {
-        .i2cMode = CY_SCB_I2C_SLAVE,
-        .useRxFifo = false,  // PDL recommends false for slave to avoid side effects
-        .useTxFifo = true,
-        .slaveAddress = self->slave_addr,
-        .slaveAddressMask = 0xFEU,
-        .acceptAddrInFifo = false,
-        .ackGeneralAddr = false,
-        .enableWakeFromSleep = false,
-        .enableDigitalFilter = false,
-        .lowPhaseDutyCycle = 0U,  // Not used for slave mode
-        .highPhaseDutyCycle = 0U, // Not used for slave mode
-    };
+    i2c_hw_target_init(self->i2c_obj, self->addr);
 
-    // Configure clock for I2C slave operation
-    // For 400 khz slave, clk_scb must be 7.82 – 15.38 MHz
-    // For 100 khz slave, clk_scb must be 1.55 – 12.8 MHz
-    // clk_peri = 100 MHz, divider = 7, clk_scb = 100/8 = 12.5 MHz
-    #define I2C_TARGET_SCB_CLK_FREQ_HZ (12500000UL)
+    i2c_hw_target_register_callback(self->i2c_obj, i2c_target_event_callback[i2c_get_id(self->i2c_obj)]);
 
-    uint32_t input_freq = pclk_div_get_input_freq(self->scb_obj->clk);
-    uint32_t divider = input_freq / I2C_TARGET_SCB_CLK_FREQ_HZ - 1;
-    self->pclk_div = pclk_div_init(self->scb_obj->clk, divider, 0);
-    if (self->pclk_div == NULL) {
-        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to initialize clock divider for I2CTarget(%u)"), self->id);
-    }
+    MP_STATE_PORT(machine_i2c_target_mem_obj)[i2c_get_id(self->i2c_obj)] = self->mem;
+    machine_i2c_target_data_init(&machine_i2c_target_data[i2c_get_id(self->i2c_obj)], self->mem, self->mem_addrsize);
 
-    cy_rslt_t result = Cy_SCB_I2C_Init(self->scb_obj->scb, &cfg, &self->ctx);
-    if (result != CY_RSLT_SUCCESS) {
-        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("I2C target init failed: 0x%lx"), result);
-    }
-
-    sys_int_init(&(self->scb_obj->irq));
-    Cy_SCB_I2C_Enable(self->scb_obj->scb);
-
-    Cy_SCB_I2C_RegisterEventCallback(self->scb_obj->scb, i2c_slave_event_callback[self->id], &self->ctx);
-
-    MP_STATE_PORT(machine_i2c_target_mem_obj)[self->id] = self->mem;
-    machine_i2c_target_data_init(&machine_i2c_target_data[self->id], self->mem, self->mem_addrsize);
-
-    machine_i2c_target_data_t *data = &machine_i2c_target_data[self->id];
+    machine_i2c_target_data_t *data = &machine_i2c_target_data[i2c_get_id(self->i2c_obj)];
     if (data->mem_buf != NULL && data->mem_len > 0) {
-        Cy_SCB_I2C_SlaveConfigReadBuf(self->scb_obj->scb, data->mem_buf, data->mem_len, &self->ctx);
-        Cy_SCB_I2C_SlaveConfigWriteBuf(self->scb_obj->scb, data->mem_buf, data->mem_len, &self->ctx);
+        i2c_hw_target_config_read_buff(self->i2c_obj, data->mem_buf, data->mem_len);
+        i2c_hw_target_config_write_buff(self->i2c_obj, data->mem_buf, data->mem_len);
     }
 
-    DEBUG_printf("I2C Target initialized: addr=0x%02X, addrsize=%u-bit\n", self->slave_addr, self->addrsize);
-}
-
-static void machine_i2c_target_hw_deinit(machine_i2c_target_obj_t *self) {
-    Cy_SCB_I2C_Disable(self->scb_obj->scb, &self->ctx);
-    sys_int_deinit(&self->scb_obj->irq);
-    pclk_div_deinit(self->pclk_div);
+    DEBUG_printf("I2C Target initialized: addr=0x%02X, addrsize=%u-bit\n", self->addr, self->addrsize);
 }
 
 /******************************************************************************/
 // I2CTarget port implementation
 
 static inline size_t mp_machine_i2c_target_get_index(machine_i2c_target_obj_t *self) {
-    return self->id;
+    return i2c_get_id(self->i2c_obj);
 }
 
 // IRQ event callback - called from extmod to trigger Python IRQ handler
@@ -334,13 +252,12 @@ static void mp_machine_i2c_target_event_callback(machine_i2c_target_irq_obj_t *i
 }
 
 static size_t mp_machine_i2c_target_read_bytes(machine_i2c_target_obj_t *self, size_t len, uint8_t *buf) {
-    machine_i2c_target_data_t *data = &machine_i2c_target_data[self->id];
+    machine_i2c_target_data_t *data = &machine_i2c_target_data[i2c_get_id(self->i2c_obj)];
     size_t read_len = 0;
 
-    sys_int_disable(&(self->scb_obj->irq));
+    i2c_hw_target_irq_disable(self->i2c_obj);
 
-    // Read from write buffer (data written by master into slave write buffer)
-    uint32_t available = Cy_SCB_I2C_SlaveGetWriteTransferCount(self->scb_obj->scb, &self->ctx);
+    uint32_t available = i2c_hw_target_get_write_count(self->i2c_obj);
     read_len = (len < available) ? len : available;
 
     if (data->mem_buf != NULL) {
@@ -351,16 +268,16 @@ static size_t mp_machine_i2c_target_read_bytes(machine_i2c_target_obj_t *self, s
         }
     }
 
-    sys_int_enable(&(self->scb_obj->irq));
+    i2c_hw_target_irq_enable(self->i2c_obj);
 
     return read_len;
 }
 
 static size_t mp_machine_i2c_target_write_bytes(machine_i2c_target_obj_t *self, size_t len, const uint8_t *buf) {
-    machine_i2c_target_data_t *data = &machine_i2c_target_data[self->id];
+    machine_i2c_target_data_t *data = &machine_i2c_target_data[i2c_get_id(self->i2c_obj)];
     size_t write_len = 0;
 
-    sys_int_disable(&(self->scb_obj->irq));
+    i2c_hw_target_irq_disable(self->i2c_obj);
 
     if (data->mem_buf != NULL) {
         for (size_t i = 0; i < len; i++) {
@@ -371,10 +288,10 @@ static size_t mp_machine_i2c_target_write_bytes(machine_i2c_target_obj_t *self, 
         }
 
         // Update slave read buffer to reflect new data (per PDL documentation)
-        Cy_SCB_I2C_SlaveConfigReadBuf(self->scb_obj->scb, data->mem_buf, self->tx_index, &self->ctx);
+        i2c_hw_target_config_read_buff(self->i2c_obj, data->mem_buf, self->tx_index);
     }
 
-    sys_int_enable(&(self->scb_obj->irq));
+    i2c_hw_target_irq_enable(self->i2c_obj);
 
     return write_len;
 }
@@ -394,7 +311,7 @@ static const mp_arg_t allowed_args[] = {
     { MP_QSTR_sda, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
 };
 
-static void machine_i2c_target_init_impl(machine_i2c_target_obj_t **self_ptr, int i2c_id, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+static void machine_i2c_target_init_impl(machine_i2c_target_obj_t *self, int i2c_id, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
 
@@ -433,26 +350,19 @@ static void machine_i2c_target_init_impl(machine_i2c_target_obj_t **self_ptr, in
     uint32_t mem_addrsize = args[ARG_mem_addrsize].u_int;
 
     /* -- Object allocation -- */
-    machine_i2c_target_obj_t *self = *self_ptr;
-
     bool is_new = false;
-    bool is_make_obj_required = (*self_ptr == NULL) ? true : false;
-    if (is_make_obj_required) {
-        machine_i2c_target_obj_make_or_reuse(self_ptr, fn_unit, &is_new);
-        self = *self_ptr;
-    }
+    self->i2c_obj = i2c_alloc(fn_unit, &is_new, self, machine_i2c_target_scb_isr);
 
     /* -- Reinitialization reset -- */
-    /* For reused I2C() object or init() path */
     if (!is_new) {
-        machine_i2c_target_hw_deinit(self);
+        i2c_hw_deinit(self->i2c_obj);
     }
 
     /* -- I2C params init -- */
     self->scl = i2c_pins_af_config[0].pin;
     self->sda = i2c_pins_af_config[1].pin;
     self->mem = args[ARG_mem].u_obj;
-    self->slave_addr = args[ARG_addr].u_int;
+    self->addr = args[ARG_addr].u_int;
     self->addrsize = addrsize;
     self->mem_addrsize = mem_addrsize;
     self->tx_index = 0;
@@ -466,7 +376,8 @@ static void machine_i2c_target_init_impl(machine_i2c_target_obj_t **self_ptr, in
         nlr_pop();
     } else {
         // Ensure partially-initialized instances are fully released on init failure.
-        machine_i2c_target_hw_deinit(self);
+        i2c_hw_deinit(self->i2c_obj);
+        i2c_free(self->i2c_obj);
         nlr_raise(nlr.ret_val);
     }
 }
@@ -492,16 +403,26 @@ static mp_obj_t mp_machine_i2c_target_make_new(const mp_obj_type_t *type, size_t
         mp_raise_TypeError(MP_ERROR_TEXT("I2C id must be an integer"));
     }
 
-    machine_i2c_target_obj_t *self = NULL;
+    machine_i2c_target_obj_t *self = machine_i2c_target_obj_get(i2c_id);
+    bool is_new = self == NULL;
+    if (is_new) {
+        self = machine_i2c_target_obj_alloc();
+    }
+    if (self == NULL) {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to allocate I2CTarget object"));
+    }
     mp_map_t kw_args;
     mp_map_init_fixed_table(&kw_args, n_kw, args + n_args);
 
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
-        machine_i2c_target_init_impl(&self, i2c_id, init_n_args, init_args, &kw_args);
+        self->i2c_obj = NULL;
+        machine_i2c_target_init_impl(self, i2c_id, init_n_args, init_args, &kw_args);
         nlr_pop();
     } else {
-        machine_i2c_target_obj_destruct(self);
+        if (is_new) {
+            machine_i2c_target_obj_free(self);
+        }
         nlr_raise(nlr.ret_val);
     }
 
@@ -509,15 +430,23 @@ static mp_obj_t mp_machine_i2c_target_make_new(const mp_obj_type_t *type, size_t
 }
 
 static void mp_machine_i2c_target_deinit(machine_i2c_target_obj_t *self) {
-    machine_i2c_target_hw_deinit(self);
-    scb_obj_free(self->scb_obj);
+    i2c_hw_deinit(self->i2c_obj);
+    i2c_free(self->i2c_obj);
     machine_i2c_target_obj_free(self);
 
     DEBUG_printf("I2C Target deinitialized\n");
 }
 
+void machine_i2c_target_deinit_all(void) {
+    for (uint8_t i = 0; i < MICROPY_PY_MACHINE_I2C_NUM_ENTRIES; i++) {
+        if (machine_i2c_target_obj[i] != NULL) {
+            mp_machine_i2c_target_deinit(machine_i2c_target_obj[i]);
+        }
+    }
+}
+
 static void mp_machine_i2c_target_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     machine_i2c_target_obj_t *self = MP_OBJ_TO_PTR(self_in);
     mp_printf(print, "I2CTarget(%u, addr=0x%02X, scl='%q', sda='%q')",
-        self->id, self->slave_addr, self->scl->name, self->sda->name);
+        i2c_get_id(self->i2c_obj), self->addr, self->scl->name, self->sda->name);
 }
