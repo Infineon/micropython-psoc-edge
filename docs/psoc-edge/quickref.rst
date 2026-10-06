@@ -372,37 +372,12 @@ Use the ``I2CTarget`` class for target (slave) operations::
     i2c_target = I2CTarget(scl="P17_0", sda="P17_1", addr=0x43, mem=mem)
 
 
-The I2CTarget implementation on PSoC Edge has the following port-specific details:
+The I2CTarget implementation on PSOC Edge has the following port-specific details:
 
 **Memory Addressing:**
     - ``addrsize``: 7-bit and 10-bit addresses are accepted.
-    - ``mem_addrsize``: Only ``0`` is supported.
-    - EEPROM-like internal address phase (8/16/24/32-bit ``mem_addrsize``) is not implemented.
-
-**IRQ triggers:**
-
-The ``hard`` argument in ``i2c_target.irq(..., hard=True)`` is supported.
-When ``True``, the callback executes in ISR context — keep it short and allocation-free
-(no ``print``, no heap allocation).
-
-Current implementation notes for IRQ data-phase events:
-
-
-        - PSoC hardware events are limited and do not map
-            1:1 to MicroPython ``IRQ_READ_REQ``/ ``IRQ_WRITE_REQ`` semantics.
-        - Treat these two flags as optional notifications, not required control points.
-        - In the current PSOC Edge port implementation, data-path behavior is
-            strongly tied to ``mem`` buffer configuration. After address match, 
-            hardware/port state handling performs most data movement automatically (when ``mem`` is configured).
-       
-
-Practical guidance for this port:
-
-        - For robust target-mode operation, configure ``mem`` and size it to cover
-            expected master write payloads.
-        - With ``mem`` configured, explicit ``I2CTarget.readinto()``/
-          ``I2CTarget.write()`` calls are usually optional, and mainly needed for
-          custom protocol handling in IRQ callbacks.
+    - ``mem_addrsize``: ``0`` and ``8`` are supported. The default is ``8``.
+    - EEPROM-like internal address phases wider than 8 bits (16/24/32-bit ``mem_addrsize``) are not implemented.
 
 
 Hardware SPI bus
@@ -526,7 +501,7 @@ Methods:
 
     Deinitialise the SPITarget instance and release its underlying SCB resource.
 
-The SPITarget implementation on PSoC Edge has the following port-specific details:
+The SPITarget implementation on PSOC Edge has the following port-specific details:
 
 - ``sck``, ``mosi``, ``miso``, and ``ssel`` are all required.
 - ``bits`` is fixed to 8.
