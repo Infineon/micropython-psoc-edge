@@ -80,7 +80,7 @@ def instance1():
     # Test 2: Write
     print("\n***** Test 2: Write *****\n")
     try:
-        i2c.writeto(SLAVE_ADDR, b"\x01\x02\x03")
+        i2c.writeto_mem(SLAVE_ADDR, 0, b"\x01\x02\x03")
         write_pass = True
         print("Status: PASS")
     except Exception as e:
@@ -90,7 +90,7 @@ def instance1():
     # Test 3: Read
     print("\n***** Test 3: Read *****\n")
     try:
-        data = i2c.readfrom(SLAVE_ADDR, 4)
+        data = i2c.readfrom_mem(SLAVE_ADDR, 0, 4)
         print("Received:", data)
         read_pass = len(data) == 4
         print("Status:", "PASS" if read_pass else "FAIL")
