@@ -67,7 +67,10 @@
 - name: i2c
   type: multi
   test: 
-    script: ports/psoc-edge/board_ext_hw/multi/i2c_basic.py
+    script: 
+     - ports/psoc-edge/board_ext_hw/multi/i2c_basic.py
+     - multi_extmod/machine_i2c_target_irq.py
+     - multi_extmod/machine_i2c_target_memory.py
     device:
       - board: KIT_PSE84_AI
         features:
