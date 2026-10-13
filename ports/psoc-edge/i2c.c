@@ -26,7 +26,6 @@
 
 // std includes
 #include <stdio.h>
-#include <stdio.h>
 
 // mpy includes
 #include "py/runtime.h"
@@ -52,7 +51,7 @@ typedef struct _i2c_obj_t {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT(msg), ret); \
 }
 
-static i2c_obj_t *i2c_obj[MICROPY_PY_SCB_NUM_ENTRIES] = { NULL };
+static i2c_obj_t *i2c_obj[MICROPY_PY_MACHINE_I2C_NUM_ENTRIES] = { NULL };
 
 static i2c_obj_t *i2c_obj_get(uint8_t id) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_I2C_NUM_ENTRIES; i++) {
