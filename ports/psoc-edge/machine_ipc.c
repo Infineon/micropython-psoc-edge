@@ -553,8 +553,6 @@ static mp_obj_t machine_ipc_register_client(size_t n_args, const mp_obj_t *args)
         return mp_const_false;
     }
 
-    mp_printf(&mp_plat_print, "[CM33] -> Registered client with ID: %d successfully \r\n", client_id);
-
     return mp_const_true;
 
 }

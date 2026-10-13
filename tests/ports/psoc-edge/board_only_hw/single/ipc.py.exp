@@ -1,7 +1,5 @@
 IPC initialized successfully
-[CM33] -> Registered client with ID: 3 successfully 
 Service1 registered: True
-[CM33] -> Registered client with ID: 4 successfully 
 Service2 registered: True
 Error: Invalid client_id 8 (max 7)
 register bad id (8) rejected: True
