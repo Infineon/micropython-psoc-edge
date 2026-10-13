@@ -39,7 +39,6 @@
 #include "clk.h"
 #include "genhdr/pins_af.h"
 #include "modmachine.h"
-// #include "scb.h"
 #include "i2c.h"
 
 #define DEBUG_printf(...) // printf(__VA_ARGS__)
@@ -57,7 +56,7 @@ typedef struct _machine_i2c_target_obj_t {
     i2c_obj_t *i2c_obj;
 } machine_i2c_target_obj_t;
 
-static machine_i2c_target_obj_t *machine_i2c_target_obj[MICROPY_PY_MACHINE_I2C_NUM_ENTRIES] = {NULL};
+MP_REGISTER_ROOT_POINTER(struct _machine_i2c_target_obj_t *machine_i2c_target_obj[MICROPY_PY_MACHINE_I2C_NUM_ENTRIES]);
 
 static machine_i2c_target_obj_t *machine_i2c_target_obj_get(uint8_t id);
 static void i2c_target_obj_event_callback(machine_i2c_target_obj_t *self, uint32_t events);
@@ -189,9 +188,9 @@ static void machine_i2c_target_scb_isr(mp_obj_t i2c_target_obj) {
 
 static machine_i2c_target_obj_t *machine_i2c_target_obj_get(uint8_t id) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_I2C_NUM_ENTRIES; i++) {
-        if (machine_i2c_target_obj[i] != NULL) {
-            if (i2c_get_id(machine_i2c_target_obj[i]->i2c_obj) == id) {
-                return machine_i2c_target_obj[i];
+        if (MP_STATE_PORT(machine_i2c_target_obj[i]) != NULL) {
+            if (i2c_get_id(MP_STATE_PORT(machine_i2c_target_obj[i])->i2c_obj) == id) {
+                return MP_STATE_PORT(machine_i2c_target_obj[i]);
             }
         }
     }
@@ -201,9 +200,9 @@ static machine_i2c_target_obj_t *machine_i2c_target_obj_get(uint8_t id) {
 static inline machine_i2c_target_obj_t *machine_i2c_target_obj_alloc(void) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_I2C_NUM_ENTRIES; i++)
     {
-        if (machine_i2c_target_obj[i] == NULL) {
-            machine_i2c_target_obj[i] = mp_obj_malloc(machine_i2c_target_obj_t, &machine_i2c_target_type);
-            return machine_i2c_target_obj[i];
+        if (MP_STATE_PORT(machine_i2c_target_obj[i]) == NULL) {
+            MP_STATE_PORT(machine_i2c_target_obj[i]) = mp_obj_malloc(machine_i2c_target_obj_t, &machine_i2c_target_type);
+            return MP_STATE_PORT(machine_i2c_target_obj[i]);
         }
     }
     return NULL;
@@ -212,8 +211,8 @@ static inline machine_i2c_target_obj_t *machine_i2c_target_obj_alloc(void) {
 static inline void machine_i2c_target_obj_free(machine_i2c_target_obj_t *i2c_target_obj_ptr) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_I2C_NUM_ENTRIES; i++)
     {
-        if (machine_i2c_target_obj[i] == i2c_target_obj_ptr) {
-            machine_i2c_target_obj[i] = NULL;
+        if (MP_STATE_PORT(machine_i2c_target_obj[i]) == i2c_target_obj_ptr) {
+            MP_STATE_PORT(machine_i2c_target_obj[i]) = NULL;
         }
     }
 }
@@ -439,8 +438,8 @@ static void mp_machine_i2c_target_deinit(machine_i2c_target_obj_t *self) {
 
 void machine_i2c_target_deinit_all(void) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_I2C_NUM_ENTRIES; i++) {
-        if (machine_i2c_target_obj[i] != NULL) {
-            mp_machine_i2c_target_deinit(machine_i2c_target_obj[i]);
+        if (MP_STATE_PORT(machine_i2c_target_obj[i]) != NULL) {
+            mp_machine_i2c_target_deinit(MP_STATE_PORT(machine_i2c_target_obj[i]));
         }
     }
 }
