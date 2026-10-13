@@ -46,10 +46,6 @@
 
 #define DEBUG_printf(...) // printf(__VA_ARGS__)
 
-#define i2c_assert_raise_val(msg, ret)   if (ret != CY_RSLT_SUCCESS) { \
-        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT(msg), ret); \
-}
-
 typedef struct _machine_i2c_obj_t {
     mp_obj_base_t base;
     mp_hal_pin_obj_t scl;
