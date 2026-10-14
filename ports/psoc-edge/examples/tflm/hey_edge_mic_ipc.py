@@ -11,7 +11,7 @@ from machine import PDM_PCM, IPC, ExternalFlash, Pin
 #   PDM mic (CM33)  --  ~2 s mono int16 @16 kHz  -->  [H2T ring]  -->  CM55
 #   CM55 (framework/tflm): MFE DSP -> int8 quantize -> TFLM invoke
 #   CM55  --  raw output tensor bytes  -->  [T2H ring]  -->  CM33 (this script)
-#   CM33 (this script): dequantize the int8 logits -> threshold -> decision.
+#   CM33 (this script): dequantize the int8 softmax output -> threshold -> decision.
 #
 # The CM55 firmware is the generic TFLM engine (cm55_firmware/engine/tflm): it
 # applies the model's input preprocessing and returns the RAW output tensor --
@@ -30,10 +30,9 @@ from machine import PDM_PCM, IPC, ExternalFlash, Pin
 #   client.cmd / client.value         -> last control event from CM55
 #   client.read()                     -> drain result bytes from T2H ring
 #
-# The model sits at a fixed address in the shared-data flash partition, which
-# the CM55 firmware reads directly (address hardcoded in framework/tflm/main.c).
-# No model bytes cross IPC and no offset is sent -- only the live mic PCM.
-#   mpremote run hey_edge_mic_ipc.py
+# The model sits in the shared-data flash partition, which the CM55 firmware reads
+# directly.
+# mpremote run hey_edge_mic_ipc.py
 # ---------------------------------------------------------------------------
 
 # --- Model / audio geometry (Edge Impulse project 1128757, "hey_edge") -----
@@ -61,7 +60,7 @@ LED_BLINKS = 3
 LED_BLINK_MS = 80
 
 # --- TFLM engine wire protocol (cm55_firmware/engine/tflm/tflm_engine.h) ----
-TFLM_CMD_MODEL_LOAD = 0x90  # CM55 hardcodes the model address; value unused
+TFLM_CMD_MODEL_LOAD = 0x90  # value = byte offset of the model from the CM55's base; 0 here
 TFLM_CMD_MODEL_RUN = 0x92
 TFLM_CMD_RUN_INFERENCE = 0x94
 TFLM_CMD_MODEL_INFO = 0x95  # reply: input then output tensor info, 64 bytes
@@ -82,7 +81,7 @@ TFLITE_TYPE_INT8 = 9
 # tensor is int8 softmax over {hey_edge, noise}; element 0 is "hey_edge".
 KWS_THRESHOLD = 0.6
 
-# --- IPC client wiring (matches sine_model_ipc.py / ipc-audio) -------------
+# --- IPC client wiring (matches sine_model_ipc.py) -------------------------
 CM33_CLIENT_ID = 3  # our endpoint (CM55 doorbells replies here)
 CM55_CLIENT_ID = 5  # target client for commands + staged PCM
 CM33_EP_ID = 1
@@ -91,7 +90,7 @@ CM33_EP_ADDR = 1
 EVT_TIMEOUT_MS = 3000
 RESULT_TIMEOUT_MS = 3000
 
-RUN_SECONDS = 20  # listening duration before the summary
+RUN_SECONDS = 20  # listen at least this long
 EXPECTED_DETECTIONS = 5  # times "hey edge" is spoken during the run
 
 SUMMARY_FMT = """========== Runtime Summary ==========
@@ -196,7 +195,7 @@ def capture_and_stream(pdm, ipc, chunk):
     # Stream exactly PCM_BYTES of live mono int16 to CM55 in small chunks. The
     # engine accumulates every bulk send into its input buffer until
     # RUN_INFERENCE, so CM33 never has to hold the whole ~2 s window (the
-    # device heap is too small for a 63072-byte buffer).
+    # device heap is too small for a 63968-byte buffer).
     mv = memoryview(chunk)
     sent = 0
     while sent < PCM_BYTES:
@@ -220,8 +219,8 @@ model_size = os.stat(MODEL_FILE)[6]
 print("Model name :", MODEL_FILE)
 print("Model size :", model_size, "bytes")
 
-# Open the model first: open() needs a ~16.5 KB contiguous heap block, which
-# is no longer available once the IPC and flash drivers are up.
+# Open the model first: open() needs a ~16.5 KB contiguous heap block and raises
+# MemoryError once the heap is fragmented.
 source = open(MODEL_FILE, "rb")
 
 # machine.IPC.init() prints "IPC initialized successfully" itself.
@@ -229,11 +228,10 @@ print("Transport : ", end="")
 ipc = IPC(src_core=IPC.CM33, target_core=IPC.CM55)
 ipc.init()
 
-# --- Write the model into external shared flash (same pattern as
-# sine_model_ipc.py -- no separate flasher script). The model is NOT compiled
+# --- Write the model into external shared flash. The model is NOT compiled
 # into the firmware; CM55 loads it from flash (XIP) at runtime. Stream it from
 # the file in small chunks -- the tiny device heap can't hold it all at once --
-# then release the flash driver before the mic/IPC buffers are claimed. -------
+# then release the flash driver before the mic buffers are claimed. -------
 print("Loading model . . .")
 t0 = time.ticks_ms()
 header = None
@@ -288,7 +286,7 @@ ipc.send(TFLM_CMD_MODEL_LOAD, 0, CM55_CLIENT_ID)
 if not wait_event(TFLM_EVT_MODEL_LOADED, EVT_TIMEOUT_MS):
     raise SystemExit("MODEL_LOAD failed")
 
-# --- Query tensor metadata once (input + output tflm_adapter_tensor_info_t) --
+# --- Query tensor metadata once (reply holds input + output info; only output is used) --
 state["data"] = None
 ipc.send(TFLM_CMD_MODEL_INFO, 0, CM55_CLIENT_ID)
 info = wait_data(EVT_TIMEOUT_MS)
