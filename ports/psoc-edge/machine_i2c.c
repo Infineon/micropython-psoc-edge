@@ -52,7 +52,7 @@ typedef struct _machine_i2c_obj_t {
     mp_hal_pin_obj_t sda;
     uint32_t freq;
     uint32_t timeout;
-    i2c_obj_t *i2c_obj;
+    i2c_obj_t i2c_obj;
 } machine_i2c_obj_t;
 
 MP_REGISTER_ROOT_POINTER(struct _machine_i2c_obj_t *machine_i2c_obj[MICROPY_PY_MACHINE_I2C_NUM_ENTRIES]);
@@ -61,8 +61,7 @@ static inline machine_i2c_obj_t *machine_i2c_obj_get(uint8_t id) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_I2C_NUM_ENTRIES; i++)
     {
         if (MP_STATE_PORT(machine_i2c_obj[i]) != NULL
-            && MP_STATE_PORT(machine_i2c_obj[i])->i2c_obj != NULL
-            && i2c_get_id(MP_STATE_PORT(machine_i2c_obj[i])->i2c_obj) == id) {
+            && i2c_get_id(&MP_STATE_PORT(machine_i2c_obj[i])->i2c_obj) == id) {
             return MP_STATE_PORT(machine_i2c_obj[i]);
         }
     }
@@ -74,6 +73,7 @@ static inline machine_i2c_obj_t *machine_i2c_obj_alloc(void) {
     {
         if (MP_STATE_PORT(machine_i2c_obj[i]) == NULL) {
             MP_STATE_PORT(machine_i2c_obj[i]) = mp_obj_malloc(machine_i2c_obj_t, &machine_i2c_type);
+            memset(&MP_STATE_PORT(machine_i2c_obj[i])->i2c_obj, 0, sizeof(i2c_obj_t));
             return MP_STATE_PORT(machine_i2c_obj[i]);
         }
     }
@@ -91,7 +91,7 @@ static inline void machine_i2c_obj_free(machine_i2c_obj_t *i2c_obj_ptr) {
 
 static void machine_i2c_scb_isr(mp_obj_t hw_i2c_obj) {
     machine_i2c_obj_t *self = MP_OBJ_TO_PTR(hw_i2c_obj);
-    i2c_hw_controller_irq(self->i2c_obj);
+    i2c_hw_controller_irq(&self->i2c_obj);
 }
 
 #define DEFAULT_I2C_FREQ     (400000)
@@ -144,15 +144,6 @@ static void machine_i2c_init_impl(machine_i2c_obj_t *self, int i2c_id, size_t n_
     }
     uint32_t timeout = (uint32_t)args[ARG_timeout].u_int;
 
-    /* -- Object allocation -- */
-    bool is_new = false;
-    self->i2c_obj = i2c_alloc(fn_unit, &is_new, self, machine_i2c_scb_isr);
-
-    /* -- Reinitialization reset -- */
-    if (!is_new) {
-        i2c_hw_deinit(self->i2c_obj);
-    }
-
     /* -- I2C params init -- */
     self->scl = i2c_pins_af_config[0].pin;
     self->sda = i2c_pins_af_config[1].pin;
@@ -163,20 +154,24 @@ static void machine_i2c_init_impl(machine_i2c_obj_t *self, int i2c_id, size_t n_
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
         mp_hal_periph_pins_af_init(i2c_pins_af_config, 2);
-        i2c_hw_controller_init(self->i2c_obj, self->freq);
+        bool is_new;
+        i2c_alloc(&self->i2c_obj, fn_unit, self, machine_i2c_scb_isr, &is_new);
+        if (!is_new) {
+            i2c_hw_deinit(&self->i2c_obj);
+        }
+        i2c_hw_controller_init(&self->i2c_obj, self->freq);
         nlr_pop();
     } else {
         // Ensure partially-initialized instances are fully released on init failure.
-        i2c_hw_deinit(self->i2c_obj);
-        i2c_free(self->i2c_obj);
+        i2c_hw_deinit(&self->i2c_obj);
         nlr_raise(nlr.ret_val);
     }
 }
 
 static void machine_i2c_deinit(mp_obj_base_t *self_in) {
     machine_i2c_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    i2c_hw_deinit(self->i2c_obj);
-    i2c_free(self->i2c_obj);
+    i2c_hw_deinit(&self->i2c_obj);
+    i2c_free(&self->i2c_obj);
     machine_i2c_obj_free(self);
 }
 
@@ -195,9 +190,9 @@ static int machine_i2c_transfer(mp_obj_base_t *self_in, uint16_t addr, size_t le
     transfer.xferPending = !(flags & MP_MACHINE_I2C_FLAG_STOP);
 
     if (flags & MP_MACHINE_I2C_FLAG_READ) {
-        result = i2c_hw_controller_read(self->i2c_obj, &transfer);
+        result = i2c_hw_controller_read(&self->i2c_obj, &transfer);
     } else {
-        result = i2c_hw_controller_write(self->i2c_obj, &transfer);
+        result = i2c_hw_controller_write(&self->i2c_obj, &transfer);
     }
 
     if (result != CY_RSLT_SUCCESS) {
@@ -210,7 +205,7 @@ static int machine_i2c_transfer(mp_obj_base_t *self_in, uint16_t addr, size_t le
     uint32_t start_time = mp_hal_ticks_us();
     uint32_t timeout_end = start_time + self->timeout;  // Both in microseconds
 
-    while (0UL != (CY_SCB_I2C_MASTER_BUSY & i2c_hw_controller_get_status(self->i2c_obj))) {
+    while (0UL != (CY_SCB_I2C_MASTER_BUSY & i2c_hw_controller_get_status(&self->i2c_obj))) {
         // Yield to allow other tasks/interrupts to run
         mp_event_handle_nowait();
 
@@ -221,7 +216,7 @@ static int machine_i2c_transfer(mp_obj_base_t *self_in, uint16_t addr, size_t le
         }
     }
 
-    uint32_t master_status = i2c_hw_controller_get_status(self->i2c_obj);
+    uint32_t master_status = i2c_hw_controller_get_status(&self->i2c_obj);
 
     DEBUG_printf("I2C Transfer complete, status=0x%08lX\n", master_status);
 
@@ -249,7 +244,7 @@ static void machine_i2c_print(const mp_print_t *print, mp_obj_t self_in, mp_prin
     machine_i2c_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
     mp_printf(print, "I2C(id=%u, scl='%q', sda='%q', freq=%u, timeout=%u)",
-        i2c_get_id(self->i2c_obj),
+        i2c_get_id(&self->i2c_obj),
         self->scl->name,
         self->sda->name,
         self->freq,
@@ -280,25 +275,24 @@ static mp_obj_t machine_i2c_make_new(const mp_obj_type_t *type, size_t n_args, s
     }
 
     machine_i2c_obj_t *self = machine_i2c_obj_get(i2c_id);
-    bool is_new = self == NULL;
-    if (is_new) {
-        self = machine_i2c_obj_alloc();
-    }
     if (self == NULL) {
-        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to allocate I2C object"));
+        self = machine_i2c_obj_alloc();
+        if (self == NULL) {
+            mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to allocate I2C object"));
+        }
     }
+
     mp_map_t kw_args;
     mp_map_init_fixed_table(&kw_args, n_kw, args + n_args);
 
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
-        self->i2c_obj = NULL;
         machine_i2c_init_impl(self, i2c_id, init_n_args, init_args, &kw_args);
         nlr_pop();
     } else {
-        if (is_new) {
-            machine_i2c_obj_free(self);
-        }
+        i2c_hw_deinit(&self->i2c_obj);
+        i2c_free(&self->i2c_obj);
+        machine_i2c_obj_free(self);
         nlr_raise(nlr.ret_val);
     }
 
@@ -307,7 +301,7 @@ static mp_obj_t machine_i2c_make_new(const mp_obj_type_t *type, size_t n_args, s
 
 static void machine_i2c_init(mp_obj_base_t *self, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     machine_i2c_obj_t *self_in = MP_OBJ_TO_PTR(self);
-    machine_i2c_init_impl(self_in, i2c_get_id(self_in->i2c_obj), n_args, pos_args, kw_args);
+    machine_i2c_init_impl(self_in, i2c_get_id(&self_in->i2c_obj), n_args, pos_args, kw_args);
 }
 
 static const mp_machine_i2c_p_t machine_i2c_p = {
