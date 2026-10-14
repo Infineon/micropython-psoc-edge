@@ -36,14 +36,7 @@
 // port-specific includes
 #include "genhdr/pins_af.h"
 #include "clk.h"
-#include "scb.h"
-
-typedef struct _i2c_obj_t {
-    uint8_t id;
-    scb_obj_t *scb_obj;
-    pclk_div_obj_t *pclk_div;
-    cy_stc_scb_i2c_context_t ctx;
-} i2c_obj_t;
+#include "i2c.h"
 
 #define DEBUG_printf(...) // printf(__VA_ARGS__)
 
@@ -51,84 +44,34 @@ typedef struct _i2c_obj_t {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT(msg), ret); \
 }
 
-static i2c_obj_t *i2c_obj[MICROPY_PY_MACHINE_I2C_NUM_ENTRIES] = { NULL };
-
-static i2c_obj_t *i2c_obj_get(uint8_t id) {
-    for (uint8_t i = 0; i < MICROPY_PY_MACHINE_I2C_NUM_ENTRIES; i++) {
-        if (i2c_obj[i] != NULL) {
-            if (i2c_obj[i]->id == id) {
-                return i2c_obj[i];
-            }
-        }
-    }
-    return NULL;
+uint8_t i2c_get_id(i2c_obj_t *self) {
+    return self->id;
 }
 
-static inline i2c_obj_t *i2c_obj_alloc(void) {
-    for (uint8_t i = 0; i < MICROPY_PY_MACHINE_I2C_NUM_ENTRIES; i++)
-    {
-        if (i2c_obj[i] == NULL) {
-            i2c_obj[i] = m_new_obj(i2c_obj_t);
-            return i2c_obj[i];
-        }
-    }
-    return NULL;
-}
-
-static inline void i2c_obj_free(i2c_obj_t *i2c_obj_ptr) {
-    for (uint8_t i = 0; i < MICROPY_PY_MACHINE_I2C_NUM_ENTRIES; i++)
-    {
-        if (i2c_obj[i] == i2c_obj_ptr) {
-            m_free(i2c_obj[i]);
-            i2c_obj[i] = NULL;
-        }
-    }
-}
-
-i2c_obj_t *i2c_alloc(uint8_t id, bool *is_new, mp_obj_t parent, void (*scb_isr)(mp_obj_t)) {
-    /**
-     * I2C() constructor path:
-     *
-     * Create or reuse and object based on the id.
-     * If the object for the given id already exists,
-     * reuse it and reinit the hardware with the new params.
-     * If the object is being created for the first time,
-     * allocate it and the associated SCB object.
-     */
-
-    /* Use object if it already exists */
-    i2c_obj_t *self_ptr = i2c_obj_get(id);
-    (*is_new) = false;
-
-    if (self_ptr == NULL) {
-        /* Create a new object and allocate the scb instance if free.*/
-        if (scb_is_free(id)) {
-            self_ptr = i2c_obj_alloc();
-            if (self_ptr == NULL) {
-                mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to allocate I2C(%u) object"), id);
-            }
-            self_ptr->id = id;
-            self_ptr->pclk_div = NULL;
-            self_ptr->scb_obj = scb_obj_alloc(id, parent, scb_isr);
-        } else {
+void i2c_alloc(i2c_obj_t *self, uint8_t id, mp_obj_t parent, void (*scb_isr)(mp_obj_t), bool *is_new) {
+    if (self->scb_obj == NULL) {
+        *is_new = true;
+        if (!scb_is_free(id)) {
             mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("SCB %u is already in use by a machine.UART or machine.SPI instance."), id);
         }
-        (*is_new) = true;
+        self->id = id;
+        self->pclk_div = NULL;
+        self->scb_obj = scb_obj_alloc(id, parent, scb_isr);
+    } else if (self->scb_obj->parent == parent) {
+        /* The scb instance is already associated with this parent.
+           Notify the caller that the I2C object is not new.
+         */
+        *is_new = false;
+    } else {
+        mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("I2C object is already associated with another parent."));
     }
-    return self_ptr;
 }
 
 void i2c_free(i2c_obj_t *self) {
-    if (self != NULL) {
-        if (self->scb_obj != NULL) {
-            scb_obj_free(self->scb_obj);
-        }
-        i2c_obj_free(self);
+    if (self->scb_obj != NULL) {
+        scb_obj_free(self->scb_obj);
+        self->scb_obj = NULL;
     }
-}
-
-uint8_t i2c_get_id(i2c_obj_t *self) {
-    return self->id;
 }
 
 static void i2c_hw_init(i2c_obj_t *self, cy_en_scb_i2c_mode_t mode, uint8_t target_address) {
@@ -153,9 +96,14 @@ static void i2c_hw_init(i2c_obj_t *self, cy_en_scb_i2c_mode_t mode, uint8_t targ
 }
 
 void i2c_hw_deinit(i2c_obj_t *self) {
-    Cy_SCB_I2C_Disable(self->scb_obj->scb, &self->ctx);
-    sys_int_deinit(&self->scb_obj->irq);
-    pclk_div_deinit(self->pclk_div);
+    if (self->scb_obj != NULL) {
+        Cy_SCB_I2C_Disable(self->scb_obj->scb, &self->ctx);
+        sys_int_deinit(&self->scb_obj->irq);
+    }
+    if (self->pclk_div != NULL) {
+        pclk_div_deinit(self->pclk_div);
+        self->pclk_div = NULL;
+    }
 }
 
 static void i2c_hw_controller_clock_init(i2c_obj_t *self, uint32_t freq) {
