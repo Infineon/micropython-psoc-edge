@@ -30,11 +30,19 @@
 #include "sys_int.h"
 #include "py/obj.h"
 
-typedef struct _i2c_obj_t i2c_obj_t;
+#include "scb.h"
 
-i2c_obj_t *i2c_alloc(uint8_t id, bool *is_new, mp_obj_t parent, void (*scb_isr)(mp_obj_t));
-void i2c_free(i2c_obj_t *self);
+typedef struct _i2c_obj_t {
+    uint8_t id;
+    scb_obj_t *scb_obj;
+    pclk_div_obj_t *pclk_div;
+    cy_stc_scb_i2c_context_t ctx;
+} i2c_obj_t;
+
 uint8_t i2c_get_id(i2c_obj_t *self);
+
+void i2c_alloc(i2c_obj_t *self, uint8_t id, mp_obj_t parent, void (*scb_isr)(mp_obj_t), bool *is_new);
+void i2c_free(i2c_obj_t *self);
 
 void i2c_hw_controller_init(i2c_obj_t *self, uint32_t freq);
 cy_en_scb_i2c_status_t i2c_hw_controller_read(i2c_obj_t *self, cy_stc_scb_i2c_master_xfer_config_t *transfer);
