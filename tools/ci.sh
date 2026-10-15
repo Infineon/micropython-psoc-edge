@@ -496,7 +496,8 @@ function ci_psoc_edge_run_tests_hil {
             -e extmod/deflate_compress.py \
             -e extmod/machine_spi_rate.py \
             -e extmod/machine_timer.py \
-            -e stress/recursive_iternext.py)
+            -e stress/recursive_iternext.py \
+            -e ports/psoc-edge/i2c.py)
 
         if ! "${run_tests_cmd[@]}"; then
             if ! "${run_tests_cmd[@]}" --run-failures; then
