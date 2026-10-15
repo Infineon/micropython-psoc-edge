@@ -285,6 +285,7 @@ SHARED_SRC_C += \
 	shared/libc/printf.c \
 	shared/libc/string0.c \
 	shared/netutils/dhcpserver.c \
+	shared/netutils/get_mac_ascii.c \
 	shared/netutils/netutils.c \
 	shared/netutils/trace.c \
 	shared/readline/readline.c \
@@ -462,7 +463,7 @@ ifeq ($(MICROPY_FLOAT_IMPL),single)
     CFLAGS += \
         -DMICROPY_FLOAT_IMPL=MICROPY_FLOAT_IMPL_FLOAT \
         -fsingle-precision-constant \
-        -mfloat-abi=softfp \
+        -mfloat-abi=hard \
         -mfpu=fpv5-sp-d16
 else ifeq ($(MICROPY_FLOAT_IMPL),double)
     CFLAGS += \

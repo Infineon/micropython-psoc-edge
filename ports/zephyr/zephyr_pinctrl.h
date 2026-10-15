@@ -3,7 +3,7 @@
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2026 Infineon Technologies AG
+ * Copyright (c) 2026 MASSDRIVER EI (massdriver.space)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,26 +24,15 @@
  * THE SOFTWARE.
  */
 
-#ifndef MICROPY_INCLUDED_PSOC_EDGE_MACHINE_SCB_H
-#define MICROPY_INCLUDED_PSOC_EDGE_MACHINE_SCB_H
+#ifdef CONFIG_MICROPY_DYNAMIC_PINCTRL
 
-#include "sys_int.h"
-#include "py/obj.h"
+typedef struct _zephyr_pinctrl_obj_t {
+    mp_obj_base_t base;
+    mp_obj_t pinmux;
+    pinctrl_soc_pin_t pinctrl;
+} zephyr_pinctrl_obj_t;
 
-typedef void (*machine_scb_parent_irq_handler_t)(mp_obj_t scb_obj);
+extern const mp_obj_type_t zephyr_pinctrl_type;
+extern const mp_obj_type_t zephyr_pinmux_type;
 
-typedef struct _machine_scb_obj_t {
-    int8_t id;
-    CySCB_Type *scb;
-    sys_int_cfg_t irq;
-    en_clk_dst_t clk;
-    uint8_t mmio_slave_nr;
-    mp_obj_t parent;
-    machine_scb_parent_irq_handler_t parent_handler;
-} machine_scb_obj_t;
-
-machine_scb_obj_t *machine_scb_obj_alloc(uint8_t scb, mp_obj_t parent, machine_scb_parent_irq_handler_t handler);
-void machine_scb_obj_free(machine_scb_obj_t *scb);
-bool machine_scb_is_free(uint8_t scb);
-
-#endif // MICROPY_INCLUDED_PSOC_EDGE_MACHINE_SCB_H
+#endif /* CONFIG_MICROPY_DYNAMIC_PINCTRL */
