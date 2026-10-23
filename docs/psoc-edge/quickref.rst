@@ -396,7 +396,9 @@ Use the ``SPI`` class for controller-mode transfers::
 
     from machine import SPI, Pin
 
+    spi = SPI(10)                   # SCB10 with its default pins (P16_0, P16_1, P16_2)
     spi = SPI(
+        10,
         baudrate=1_000_000,
         polarity=0,
         phase=0,
@@ -406,6 +408,7 @@ Use the ``SPI`` class for controller-mode transfers::
         mosi='P16_1',
         miso='P16_2',
     )
+    spi.init(2_000_000, polarity=1) # reconfigure; omitted arguments are reset to defaults
 
     cs = Pin('P16_3', Pin.OUT, value=1)
     tx = b'\x9f\x00\x00\x00'
@@ -418,12 +421,19 @@ Use the ``SPI`` class for controller-mode transfers::
 
 Constructor arguments:
 
-    - ``id``: accepted for API compatibility, currently ignored.
+    - ``id``: SCB unit number. It identifies the SPI instance: constructing
+      ``SPI(id)`` again returns the same object. It can be omitted if the pins
+      are given, in which case it is resolved from the pins.
     - ``baudrate``: SPI clock in Hz. Default is ``1_000_000``.
-    - ``polarity`` / ``phase``: must be ``0`` or ``1``.
+    - ``polarity`` / ``phase``: must be ``0`` or ``1``. Default is ``0``.
     - ``bits``: only ``8`` is supported.
-    - ``firstbit``: ``SPI.MSB`` or ``SPI.LSB``.
-    - ``sck``, ``mosi``, ``miso``: required SPI signal pins.
+    - ``firstbit``: ``SPI.MSB`` (default) or ``SPI.LSB``.
+    - ``sck``, ``mosi``, ``miso``: SPI signal pins. Each pin not given is
+      resolved to the default pin of the ``id``. Pins given must belong to
+      the ``id``.
+
+``SPI.init()`` takes the same arguments except ``id``. The ``id`` set by the
+constructor cannot be changed, and any argument not given is reset to its default.
 
 .. note::
 
