@@ -1,7 +1,8 @@
 # SPI multi-device test
-# Tests SPI master and target communication between two boards
+# Tests SPI master and target communication between two boards.
+# The master instance also tests the SPI constructor (id/pins) and init() behaviour.
 #
-# KIT_PSE84_AI board Hardware connections:
+# KIT_PSE84_AI board Hardware connections (SCB10):
 #   Board 0 (Target)    Board 1 (Master)
 #   P16_0 (SCK)    <->  P16_0 (SCK)
 #   P16_1 (MOSI)   <->  P16_1 (MOSI)
@@ -13,23 +14,96 @@ import os
 import time
 
 
-def _get_spi_pins_for_board():
+def _get_spi_config_for_board():
     uname_fn = getattr(os, "uname", None)
     if uname_fn is None:
         # Some firmware builds do not expose os.uname(); default to KIT mapping.
-        return ("P16_0", "P16_1", "P16_2", "P16_3")
+        return (10, "P16_0", "P16_1", "P16_2", "P16_3")
 
     board = uname_fn().machine
     board_norm = board.upper().replace("-", "_")
 
     if "KIT_PSE84_AI" in board_norm or "PSE84" in board_norm:
-        return ("P16_0", "P16_1", "P16_2", "P16_3")
+        return (10, "P16_0", "P16_1", "P16_2", "P16_3")
 
     print("SKIP: Unsupported board for SPI multi-device test:", board)
     raise SystemExit
 
 
-SCK_PIN, MOSI_PIN, MISO_PIN, SSEL_PIN = _get_spi_pins_for_board()
+SPI_ID, SCK_PIN, MOSI_PIN, MISO_PIN, SSEL_PIN = _get_spi_config_for_board()
+
+
+def _check(fn):
+    try:
+        fn()
+        print("no error")
+    except Exception as e:
+        print(type(e).__name__, e)
+
+
+def _spi_api_test():
+    # SPI constructor (id/pins) and init() behaviour. No transfers are done here.
+    from machine import SPI, I2C
+
+    print("***** API: constructor and init() *****\n")
+
+    # The id alone is enough: pins are resolved from the id.
+    spi = SPI(SPI_ID)
+    print(spi)
+
+    # Constructing the same id again returns the same object.
+    print(SPI(SPI_ID) is spi)
+
+    # init() reconfigures the object. baudrate is the first positional argument.
+    spi.init(2_000_000, polarity=1, phase=1, firstbit=SPI.LSB)
+    print(spi)
+
+    # init() without arguments resets everything to defaults.
+    spi.init()
+    print(spi)
+    spi.deinit()
+
+    # Matching id and pins.
+    spi = SPI(SPI_ID, sck=SCK_PIN, mosi=MOSI_PIN, miso=MISO_PIN)
+    print(spi)
+    spi.deinit()
+
+    # Pins only: the id is resolved from the pins.
+    spi = SPI(sck=SCK_PIN, mosi=MOSI_PIN, miso=MISO_PIN)
+    print(spi)
+    spi.deinit()
+
+    # Invalid id and pin combinations.
+    _check(lambda: SPI("10"))
+    _check(lambda: SPI(-1))
+    _check(lambda: SPI(12))
+    _check(lambda: SPI())
+    _check(lambda: SPI(SPI_ID, sck="P17_0"))
+    _check(lambda: SPI(6))
+
+    # Invalid parameters.
+    _check(lambda: SPI(SPI_ID, baudrate=0))
+    _check(lambda: SPI(SPI_ID, polarity=2))
+    _check(lambda: SPI(SPI_ID, phase=2))
+    _check(lambda: SPI(SPI_ID, bits=16))
+    _check(lambda: SPI(SPI_ID, firstbit=5))
+
+    # A failed construction releases the SCB, so the id can be used again.
+    spi = SPI(SPI_ID)
+    print(spi)
+
+    # A failed init() keeps the object and the id: init() can be retried.
+    _check(lambda: spi.init(bits=16))
+    _check(lambda: spi.init(sck="P17_0"))
+    spi.init(baudrate=500_000)
+    print(spi)
+    spi.deinit()
+
+    # The SCB is shared with other peripherals.
+    i2c = I2C(SPI_ID)
+    _check(lambda: SPI(SPI_ID))
+    i2c.deinit()
+    print()
 
 
 def instance0():
@@ -106,7 +180,13 @@ def instance1():
 
     print("\n***** SPI Master Test *****\n")
 
+    # Keep the target deselected while the API is tested.
+    cs = Pin(SSEL_PIN, Pin.OUT, value=1)
+
+    _spi_api_test()
+
     spi = SPI(
+        SPI_ID,
         baudrate=1_000_000,
         polarity=0,
         phase=0,
@@ -116,7 +196,7 @@ def instance1():
         mosi=MOSI_PIN,
         miso=MISO_PIN,
     )
-    cs = Pin(SSEL_PIN, Pin.OUT, value=1)
+    print(spi)
 
     # Wait for target to be ready
     print("Waiting for target...")
@@ -156,6 +236,11 @@ def instance1():
 
     # Test 3: Simultaneous write and read
     print("\n***** Test 3: Transfer *****\n")
+
+    # Reconfigure the bus with init(): the transfer must still work afterwards.
+    spi.init(1_000_000)
+    print(spi)
+
     # Signal target to start write_readinto
     multitest.next()
 
