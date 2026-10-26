@@ -24,6 +24,12 @@ SPITarget(id=10, sck='P16_0', mosi='P16_1', miso='P16_2', ssel='P16_3', polarity
 ValueError bits must be 8
 ValueError the id does not match the discovered id from the provided pins.
 SPITarget(id=10, sck='P16_0', mosi='P16_1', miso='P16_2', ssel='P16_3', polarity=1, phase=0, bits=8, firstbit=MSB)
+ValueError bits must be 8
+ValueError the id does not match the discovered id from the provided pins.
+SPITarget(id=10, sck='P16_0', mosi='P16_1', miso='P16_2', ssel='P16_3', polarity=1, phase=0, bits=8, firstbit=MSB)
+ValueError SCB 10 is already in use by another I2C, SPI or UART instance.
+True
+SPITarget(id=10, sck='P16_0', mosi='P16_1', miso='P16_2', ssel='P16_3', polarity=0, phase=0, bits=8, firstbit=MSB)
 ValueError SCB 10 is already in use by another I2C, SPI or UART instance.
 ValueError SCB 10 is already in use by a machine.UART or machine.SPI instance.
 
@@ -78,6 +84,11 @@ SPI(id=10, baudrate=1000000, polarity=0, phase=0, bits=8, firstbit=MSB, sck='P16
 ValueError bits must be 8
 ValueError the id does not match the discovered id from the provided pins.
 SPI(id=10, baudrate=500000, polarity=0, phase=0, bits=8, firstbit=MSB, sck='P16_0', mosi='P16_1', miso='P16_2')
+ValueError bits must be 8
+ValueError the id does not match the discovered id from the provided pins.
+SPI(id=10, baudrate=500000, polarity=0, phase=0, bits=8, firstbit=MSB, sck='P16_0', mosi='P16_1', miso='P16_2')
+True
+SPI(id=10, baudrate=1000000, polarity=0, phase=0, bits=8, firstbit=MSB, sck='P16_0', mosi='P16_1', miso='P16_2')
 ValueError SCB 10 is already in use by another I2C, SPI or UART instance.
 
 SPI(id=10, baudrate=2000000, polarity=1, phase=1, bits=8, firstbit=LSB, sck='P16_0', mosi='P16_1', miso='P16_2')
