@@ -228,29 +228,37 @@ static const mp_arg_t allowed_args[] = {
     { MP_QSTR_miso,     MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
 };
 
-// (Re)configures the object. Arguments not given are reset to their defaults.
-static void machine_spi_init_impl(machine_spi_obj_t *self, machine_pin_af_unit_t spi_id, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
-    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
-    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+#define SPI_NUM_PINS (3)
 
+// Fills the pin AF config from the pins given (None if not given) and resolves the id.
+// Pins given must match spi_id (if not NONE), and pins not given are resolved from the id.
+static machine_pin_af_unit_t machine_spi_pins_resolve(mp_hal_pin_af_config_t *spi_pins_af_config, machine_pin_af_unit_t spi_id, const mp_obj_t *pins) {
     /* -- Pins (CS/SSEL is managed by the user via machine.Pin) -- */
-    mp_hal_pin_af_config_t spi_pins_af_config[] = {
-        /* SCK  */ MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_STRONG_IN_OFF, 1, MACHINE_PIN_AF_SIGNAL_SPI_CLK),
-        /* MOSI */ MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_STRONG_IN_OFF, 1, MACHINE_PIN_AF_SIGNAL_SPI_MOSI),
-        /* MISO */ MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_SPI_MISO),
-    };
-    const uint8_t pin_args[] = { ARG_sck, ARG_mosi, ARG_miso };
-    for (uint8_t i = 0; i < MP_ARRAY_SIZE(pin_args); i++) {
-        if (args[pin_args[i]].u_obj != mp_const_none) {
-            mp_hal_pin_obj_t pin = mp_hal_get_pin_obj(args[pin_args[i]].u_obj);
+    spi_pins_af_config[0] = MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_STRONG_IN_OFF, 1, MACHINE_PIN_AF_SIGNAL_SPI_CLK);
+    spi_pins_af_config[1] = MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_STRONG_IN_OFF, 1, MACHINE_PIN_AF_SIGNAL_SPI_MOSI);
+    spi_pins_af_config[2] = MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_SPI_MISO);
+    for (uint8_t i = 0; i < SPI_NUM_PINS; i++) {
+        if (pins[i] != mp_const_none) {
+            mp_hal_pin_obj_t pin = mp_hal_get_pin_obj(pins[i]);
             MP_HAL_PIN_AF_CONF_SET_PIN_AF(spi_pins_af_config[i], pin);
         }
     }
 
     /* -- Resolve ID - pin match, then the pins not provided -- */
     machine_pin_af_unit_t fn_unit = spi_id;
-    mp_hal_periph_pins_af_resolve_fn_unit(spi_pins_af_config, MP_ARRAY_SIZE(spi_pins_af_config), MACHINE_PIN_AF_FN_SPI, &fn_unit);
-    mp_hal_periph_pins_af_resolve_pin_af(spi_pins_af_config, MP_ARRAY_SIZE(spi_pins_af_config), fn_unit);
+    mp_hal_periph_pins_af_resolve_fn_unit(spi_pins_af_config, SPI_NUM_PINS, MACHINE_PIN_AF_FN_SPI, &fn_unit);
+    mp_hal_periph_pins_af_resolve_pin_af(spi_pins_af_config, SPI_NUM_PINS, fn_unit);
+    return fn_unit;
+}
+
+// (Re)configures the object. Arguments not given are reset to their defaults.
+static void machine_spi_init_impl(machine_spi_obj_t *self, machine_pin_af_unit_t spi_id, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    const mp_obj_t pins[SPI_NUM_PINS] = { args[ARG_sck].u_obj, args[ARG_mosi].u_obj, args[ARG_miso].u_obj };
+    mp_hal_pin_af_config_t spi_pins_af_config[SPI_NUM_PINS];
+    machine_pin_af_unit_t fn_unit = machine_spi_pins_resolve(spi_pins_af_config, spi_id, pins);
 
     /* -- Validate the remaining parameters before touching the hardware -- */
     if (args[ARG_baudrate].u_int <= 0) {
@@ -387,23 +395,39 @@ mp_obj_t mp_machine_spi_make_new(const mp_obj_type_t *type, size_t n_args, size_
         mp_raise_TypeError(MP_ERROR_TEXT("SPI id must be an integer"));
     }
 
+    mp_map_t kw_args;
+    mp_map_init_fixed_table(&kw_args, n_kw, all_args + n_args);
+
+    // No id given: resolve it from the pins, so that a live object for that id is reused.
+    if (spi_id == MACHINE_PIN_AF_UNIT_NONE) {
+        const qstr pin_names[SPI_NUM_PINS] = { MP_QSTR_sck, MP_QSTR_mosi, MP_QSTR_miso };
+        mp_obj_t pins[SPI_NUM_PINS];
+        for (uint8_t i = 0; i < SPI_NUM_PINS; i++) {
+            mp_map_elem_t *elem = mp_map_lookup(&kw_args, MP_OBJ_NEW_QSTR(pin_names[i]), MP_MAP_LOOKUP);
+            pins[i] = (elem != NULL) ? elem->value : mp_const_none;
+        }
+        mp_hal_pin_af_config_t spi_pins_af_config[SPI_NUM_PINS];
+        spi_id = machine_spi_pins_resolve(spi_pins_af_config, spi_id, pins);
+    }
+
     machine_spi_obj_t *self = machine_spi_obj_get(spi_id);
-    if (self == NULL) {
+    bool is_new_obj = (self == NULL);
+    if (is_new_obj) {
         self = machine_spi_obj_alloc();
         if (self == NULL) {
             mp_raise_ValueError(MP_ERROR_TEXT("failed to allocate SPI object"));
         }
     }
 
-    mp_map_t kw_args;
-    mp_map_init_fixed_table(&kw_args, n_kw, all_args + n_args);
-
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
         machine_spi_init_impl(self, spi_id, init_n_args, init_args, &kw_args);
         nlr_pop();
     } else {
-        machine_spi_deinit(&self->base);
+        // Only release an object created here. A live object is kept, as on a failed init().
+        if (is_new_obj) {
+            machine_spi_deinit(&self->base);
+        }
         nlr_raise(nlr.ret_val);
     }
 
