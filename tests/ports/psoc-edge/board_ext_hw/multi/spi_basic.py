@@ -1,6 +1,6 @@
 # SPI multi-device test
 # Tests SPI master and target communication between two boards.
-# The master instance also tests the SPI constructor (id/pins) and init() behaviour.
+# Both instances also test the SPI/SPITarget constructor (id/pins) and init() behaviour.
 #
 # KIT_PSE84_AI board Hardware connections (SCB10):
 #   Board 0 (Target)    Board 1 (Master)
@@ -106,13 +106,92 @@ def _spi_api_test():
     print()
 
 
+def _spi_target_api_test():
+    # SPITarget constructor (id/pins) and init() behaviour. No transfers are done here.
+    # Runs before the target's first multitest.next(), so the master is not started yet.
+    from machine import SPITarget, SPI, I2C
+
+    print("***** API: constructor and init() *****\n")
+
+    # The id alone is enough: pins are resolved from the id.
+    target = SPITarget(SPI_ID)
+    print(target)
+
+    # Constructing the same id again returns the same object.
+    print(SPITarget(SPI_ID) is target)
+
+    # init() reconfigures the object.
+    target.init(polarity=1, phase=1, firstbit=SPITarget.LSB)
+    print(target)
+
+    # init() without arguments resets everything to defaults.
+    target.init()
+    print(target)
+    target.deinit()
+
+    # Matching id and pins.
+    target = SPITarget(SPI_ID, sck=SCK_PIN, mosi=MOSI_PIN, miso=MISO_PIN, ssel=SSEL_PIN)
+    print(target)
+    target.deinit()
+
+    # Pins only: the id is resolved from the pins.
+    target = SPITarget(sck=SCK_PIN, mosi=MOSI_PIN, miso=MISO_PIN, ssel=SSEL_PIN)
+    print(target)
+    target.deinit()
+
+    # Invalid id and pin combinations.
+    _check(lambda: SPITarget("10"))
+    _check(lambda: SPITarget(-1))
+    _check(lambda: SPITarget(12))
+    _check(lambda: SPITarget())
+    _check(lambda: SPITarget(SPI_ID, sck="P17_0"))
+    _check(lambda: SPITarget(6))
+
+    # Invalid parameters.
+    _check(lambda: SPITarget(SPI_ID, polarity=2))
+    _check(lambda: SPITarget(SPI_ID, phase=2))
+    _check(lambda: SPITarget(SPI_ID, bits=16))
+    _check(lambda: SPITarget(SPI_ID, firstbit=5))
+
+    # A failed construction releases the SCB, so the id can be used again.
+    target = SPITarget(SPI_ID)
+    print(target)
+
+    # A failed init() keeps the object and the id: init() can be retried.
+    _check(lambda: target.init(bits=16))
+    _check(lambda: target.init(sck="P17_0"))
+    target.init(polarity=1)
+    print(target)
+
+    # The SCB is shared with other peripherals.
+    _check(lambda: SPI(SPI_ID))
+    _check(lambda: I2C(SPI_ID))
+    target.deinit()
+    print()
+
+
 def instance0():
     # SPI Target (Slave)
     from machine import SPITarget
 
     print("\n***** SPI Target Test *****\n")
 
+    _spi_target_api_test()
+
     target = SPITarget(
+        SPI_ID,
+        polarity=1,
+        phase=1,
+        bits=8,
+        firstbit=SPITarget.LSB,
+        sck=SCK_PIN,
+        mosi=MOSI_PIN,
+        miso=MISO_PIN,
+        ssel=SSEL_PIN,
+    )
+
+    # Reconfigure with init() to the mode used by the master, before any transfer.
+    target.init(
         polarity=0,
         phase=0,
         bits=8,
@@ -122,6 +201,7 @@ def instance0():
         miso=MISO_PIN,
         ssel=SSEL_PIN,
     )
+    print(target)
 
     # Signal to master that target is ready
     multitest.next()
