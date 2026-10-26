@@ -387,8 +387,7 @@ See :ref:`machine.SPI <machine.SPI>` for the complete SPI master API reference.
 ``SPITarget`` is a PSOC™ Edge-specific class and has no separate library page.
 
 Hardware SPI on PSOC™ Edge uses the SCB peripheral and supports both controller
-(master) and target (slave) modes. An SCB unit can only be used by one ``SPI``,
-``SPITarget``, ``I2C``, ``I2CTarget`` or ``UART`` instance at a time.
+(master) and target (slave) modes.
 
 Controller mode (Master)
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -397,25 +396,42 @@ Use the ``SPI`` class for controller-mode transfers::
 
     from machine import SPI, Pin
 
-    spi = SPI(10, baudrate=1_000_000)   # SCB10, default pins: sck=P16_0, mosi=P16_1, miso=P16_2
+    spi = SPI(
+        baudrate=1_000_000,
+        polarity=0,
+        phase=0,
+        bits=8,
+        firstbit=SPI.MSB,
+        sck='P16_0',
+        mosi='P16_1',
+        miso='P16_2',
+    )
+
     cs = Pin('P16_3', Pin.OUT, value=1)
+    tx = b'\x9f\x00\x00\x00'
+    rx = bytearray(4)
 
     cs(0)
-    spi.write(b'\x9f')
+    spi.write_readinto(tx, rx)
     cs(1)
+    print(rx)
 
-The SPI implementation on PSOC Edge has the following port-specific details:
+Constructor arguments:
 
-- ``id`` is the SCB unit number. ``sck``, ``mosi`` and ``miso`` are optional:
-  pins not given are resolved to the default pins of the ``id``, and pins given
-  must belong to the ``id``. The ``id`` can be omitted if pins are given, in
-  which case it is resolved from the pins.
-- Constructing ``SPI`` for an ``id`` that is already in use returns that same
-  object and initialises it again: arguments not given are reset to their
-  defaults, the settings of the previous initialisation are not kept.
-- ``bits`` is fixed to 8.
-- Chip select (CS/SS) is not driven by ``machine.SPI``. Control it from user
-  code with ``machine.Pin``.
+    - ``id``: SCB unit number. Constructing ``SPI`` for an ``id`` already in use
+      returns that same object. Can be omitted if the pins are given, in which
+      case it is resolved from the pins.
+    - ``baudrate``: SPI clock in Hz. Default is ``1_000_000``.
+    - ``polarity`` / ``phase``: must be ``0`` or ``1``.
+    - ``bits``: only ``8`` is supported.
+    - ``firstbit``: ``SPI.MSB`` or ``SPI.LSB``.
+    - ``sck``, ``mosi``, ``miso``: SPI signal pins. Pins not given are resolved
+      from the ``id``, and pins given must belong to the ``id``.
+
+.. note::
+
+    Chip select (CS/SS) is controlled by user code with ``machine.Pin``.
+    It is not driven automatically by ``machine.SPI``.
 
 
 Target mode (Slave)
@@ -425,7 +441,16 @@ Use the ``SPITarget`` class for target-mode communication::
 
     from machine import SPITarget
 
-    spi_t = SPITarget(10)   # SCB10, default pins: sck=P16_0, mosi=P16_1, miso=P16_2, ssel=P16_3
+    spi_t = SPITarget(
+        sck='P16_0',
+        mosi='P16_1',
+        miso='P16_2',
+        ssel='P16_3',
+        polarity=0,
+        phase=0,
+        bits=8,
+        firstbit=SPITarget.MSB,
+    )
 
     tx = b'\x11\x22\x33\x44'
     rx = bytearray(4)
@@ -435,16 +460,14 @@ Use the ``SPITarget`` class for target-mode communication::
 
 Constructor arguments:
 
-    - ``id``: SCB unit number. ``id`` and pins are resolved as for ``SPI``
-      (see the port-specific details above), and constructing ``SPITarget``
-      for an ``id`` already in use returns that same object.
-    - ``sck``: SPI clock input pin.
-    - ``mosi``: target RX pin (data from the controller).
-    - ``miso``: target TX pin (data to the controller).
+    - ``id``: SCB unit number, handled as for ``SPI``.
+    - ``sck``: SPI clock pin.
+    - ``mosi``: target TX pin.
+    - ``miso``: target RX pin.
     - ``ssel``: chip-select input pin.
-    - ``polarity`` / ``phase``: must be ``0`` or ``1``. Default is ``0``.
+    - ``polarity`` / ``phase``: must be ``0`` or ``1``.
     - ``bits``: only ``8`` is supported.
-    - ``firstbit``: ``SPITarget.MSB`` (default) or ``SPITarget.LSB``.
+    - ``firstbit``: ``SPITarget.MSB`` or ``SPITarget.LSB``.
 
 Constants:
 
@@ -455,9 +478,8 @@ Methods:
 
 .. method:: SPITarget.init(*, polarity=0, phase=0, bits=8, firstbit=SPITarget.MSB, sck=None, mosi=None, miso=None, ssel=None)
 
-    Reconfigure the SPITarget instance. Takes the same arguments as the
-    constructor except ``id``. The ``id`` set by the constructor cannot be
-    changed, and any argument not given is reset to its default.
+    Reconfigure the SPITarget instance with the constructor arguments except ``id``.
+    Arguments not given are reset to their defaults.
 
 .. method:: SPITarget.readinto(buf)
 
