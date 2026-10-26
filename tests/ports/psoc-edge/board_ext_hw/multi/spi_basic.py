@@ -97,6 +97,16 @@ def _spi_api_test():
     _check(lambda: spi.init(sck="P17_0"))
     spi.init(baudrate=500_000)
     print(spi)
+
+    # A failed constructor on a live id keeps the live object and its configuration.
+    _check(lambda: SPI(SPI_ID, bits=16))
+    _check(lambda: SPI(SPI_ID, sck="P17_0"))
+    print(spi)
+    spi.write(b"\x00")  # still functional (the target is deselected)
+
+    # Pins only while the id is live returns the same object.
+    print(SPI(sck=SCK_PIN, mosi=MOSI_PIN, miso=MISO_PIN) is spi)
+    print(spi)
     spi.deinit()
 
     # The SCB is shared with other peripherals.
@@ -161,6 +171,16 @@ def _spi_target_api_test():
     _check(lambda: target.init(bits=16))
     _check(lambda: target.init(sck="P17_0"))
     target.init(polarity=1)
+    print(target)
+
+    # A failed constructor on a live id keeps the live object and its configuration.
+    _check(lambda: SPITarget(SPI_ID, bits=16))
+    _check(lambda: SPITarget(SPI_ID, sck="P17_0"))
+    print(target)
+    _check(lambda: SPI(SPI_ID))  # the SCB is still owned by the live object
+
+    # Pins only while the id is live returns the same object.
+    print(SPITarget(sck=SCK_PIN, mosi=MOSI_PIN, miso=MISO_PIN, ssel=SSEL_PIN) is target)
     print(target)
 
     # The SCB is shared with other peripherals.
