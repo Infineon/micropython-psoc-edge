@@ -54,6 +54,7 @@ static inline uint32_t spi_target_elapsed_ms(uint32_t start_ms) {
 
 typedef struct _machine_spi_target_obj_t {
     mp_obj_base_t base;
+    machine_pin_af_unit_t id;
     mp_hal_pin_obj_t sck;
     mp_hal_pin_obj_t mosi;
     mp_hal_pin_obj_t miso;
@@ -69,13 +70,32 @@ typedef struct _machine_spi_target_obj_t {
     cy_stc_scb_spi_context_t ctx;
 } machine_spi_target_obj_t;
 
-machine_spi_target_obj_t *machine_spi_target_obj[MICROPY_PY_MACHINE_SPI_TARGET_MAX] = { NULL };
+MP_REGISTER_ROOT_POINTER(struct _machine_spi_target_obj_t *machine_spi_target_obj[MICROPY_PY_MACHINE_SPI_TARGET_MAX]);
+
+static inline machine_spi_target_obj_t *machine_spi_target_obj_get(machine_pin_af_unit_t id) {
+    for (uint8_t i = 0; i < MICROPY_PY_MACHINE_SPI_TARGET_MAX; i++) {
+        if (MP_STATE_PORT(machine_spi_target_obj[i]) != NULL
+            && MP_STATE_PORT(machine_spi_target_obj[i])->id == id) {
+            return MP_STATE_PORT(machine_spi_target_obj[i]);
+        }
+    }
+    return NULL;
+}
 
 static inline machine_spi_target_obj_t *machine_spi_target_obj_alloc(void) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_SPI_TARGET_MAX; i++) {
-        if (machine_spi_target_obj[i] == NULL) {
-            machine_spi_target_obj[i] = mp_obj_malloc(machine_spi_target_obj_t, &machine_spi_target_type);
-            return machine_spi_target_obj[i];
+        if (MP_STATE_PORT(machine_spi_target_obj[i]) == NULL) {
+            machine_spi_target_obj_t *self = mp_obj_malloc(machine_spi_target_obj_t, &machine_spi_target_type);
+            self->id = MACHINE_PIN_AF_UNIT_NONE;
+            self->sck = NULL;
+            self->mosi = NULL;
+            self->miso = NULL;
+            self->ssel = NULL;
+            self->timeout = DEFAULT_SPI_TARGET_TIMEOUT_MS;
+            self->pclk_div = NULL;
+            self->scb_obj = NULL;
+            MP_STATE_PORT(machine_spi_target_obj[i]) = self;
+            return self;
         }
     }
     return NULL;
@@ -83,8 +103,8 @@ static inline machine_spi_target_obj_t *machine_spi_target_obj_alloc(void) {
 
 static inline void machine_spi_target_obj_free(machine_spi_target_obj_t *obj) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_SPI_TARGET_MAX; i++) {
-        if (machine_spi_target_obj[i] == obj) {
-            machine_spi_target_obj[i] = NULL;
+        if (MP_STATE_PORT(machine_spi_target_obj[i]) == obj) {
+            MP_STATE_PORT(machine_spi_target_obj[i]) = NULL;
         }
     }
 }
@@ -94,62 +114,27 @@ static void machine_spi_target_scb_isr(mp_obj_t obj) {
     Cy_SCB_SPI_Interrupt(self->scb_obj->scb, &self->ctx);
 }
 
-// Configure SPI target (slave) pins and return SCB unit
-static uint8_t machine_spi_target_pins_config_and_get_scb_unit(
-    mp_hal_pin_obj_t sck,
-    mp_hal_pin_obj_t mosi,
-    mp_hal_pin_obj_t miso,
-    mp_hal_pin_obj_t ssel) {
-    // Pin config: SCK, MOSI, SSEL are inputs; MISO is output
-    const mp_hal_pin_af_config_t spi_pins_config[] = {
-        MP_HAL_PIN_AF_CONF_INIT(sck,
-            CY_GPIO_DM_HIGHZ, 0,
-            MACHINE_PIN_AF_SIGNAL_SPI_CLK),
-        MP_HAL_PIN_AF_CONF_INIT(mosi,
-            CY_GPIO_DM_HIGHZ, 0,
-            MACHINE_PIN_AF_SIGNAL_SPI_MOSI),
-        MP_HAL_PIN_AF_CONF_INIT(miso,
-            CY_GPIO_DM_STRONG_IN_OFF, 1,
-            MACHINE_PIN_AF_SIGNAL_SPI_MISO),
-        MP_HAL_PIN_AF_CONF_INIT(ssel,
-            CY_GPIO_DM_HIGHZ, 0,
-            MACHINE_PIN_AF_SIGNAL_SPI_SELECT0),
-    };
-
-    machine_pin_af_unit_t af_unit = MACHINE_PIN_AF_UNIT_NONE;
-    mp_hal_periph_pins_af_resolve_fn_unit(spi_pins_config, MP_ARRAY_SIZE(spi_pins_config), MACHINE_PIN_AF_FN_SPI, &af_unit);
-
-    uint8_t scb_unit = (uint8_t)af_unit;
-    mp_hal_periph_pins_af_init(spi_pins_config, MP_ARRAY_SIZE(spi_pins_config));
-    return scb_unit;
+// Claim the SCB unit for this object. Returns false if this object already owns it.
+static bool machine_spi_target_scb_alloc(machine_spi_target_obj_t *self, machine_pin_af_unit_t scb_unit) {
+    if (self->scb_obj != NULL) {
+        return false;
+    }
+    self->scb_obj = scb_obj_alloc((uint8_t)scb_unit, self, machine_spi_target_scb_isr);
+    self->id = scb_unit;
+    return true;
 }
 
-static void machine_spi_target_hw_init(machine_spi_target_obj_t *self) {
-    // Input validation
-    if ((self->polarity > 1U) || (self->phase > 1U)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("polarity/phase must be 0 or 1"));
-    }
-    if (self->bits != 8U) {
-        mp_raise_ValueError(MP_ERROR_TEXT("bits must be 8"));
-    }
-    if ((self->firstbit != MICROPY_PY_MACHINE_SPI_MSB) &&
-        (self->firstbit != MICROPY_PY_MACHINE_SPI_LSB)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("invalid firstbit"));
-    }
-
-    // Configure SPI target pins and discover SCB unit
-    uint8_t scb_unit = machine_spi_target_pins_config_and_get_scb_unit(
-        self->sck, self->mosi, self->miso, self->ssel);
-
-
-    // Allocate SCB
-    self->scb_obj = scb_obj_alloc(scb_unit, self,
-        machine_spi_target_scb_isr);
-
-    self->pclk_div = pclk_div_init(self->scb_obj->clk, SPI_TARGET_CLK_DIV_BASE, 0);
-    if (self->pclk_div == NULL) {
+static void machine_spi_target_scb_free(machine_spi_target_obj_t *self) {
+    if (self->scb_obj != NULL) {
         scb_obj_free(self->scb_obj);
         self->scb_obj = NULL;
+    }
+}
+
+// Requires the SCB to be claimed. Raises on failure, cleanup is done by the caller.
+static void machine_spi_target_hw_init(machine_spi_target_obj_t *self) {
+    self->pclk_div = pclk_div_init(self->scb_obj->clk, SPI_TARGET_CLK_DIV_BASE, 0);
+    if (self->pclk_div == NULL) {
         mp_raise_ValueError(MP_ERROR_TEXT("SPITarget clock dividers exhausted"));
     }
 
@@ -201,10 +186,6 @@ static void machine_spi_target_hw_init(machine_spi_target_obj_t *self) {
         Cy_SCB_SPI_Init(self->scb_obj->scb, &self->cfg, &self->ctx);
 
     if (result != CY_SCB_SPI_SUCCESS) {
-        pclk_div_deinit(self->pclk_div);
-        self->pclk_div = NULL;
-        scb_obj_free(self->scb_obj);
-        self->scb_obj = NULL;
         mp_raise_msg_varg(&mp_type_ValueError,
             MP_ERROR_TEXT("SPITarget init failed: 0x%lx"), (uint32_t)result);
     }
@@ -213,14 +194,94 @@ static void machine_spi_target_hw_init(machine_spi_target_obj_t *self) {
     Cy_SCB_SPI_Enable(self->scb_obj->scb);
 }
 
+// Stops the SPI hardware and releases the clock divider. The SCB stays claimed.
 static void machine_spi_target_hw_deinit(machine_spi_target_obj_t *self) {
-    Cy_SCB_SPI_Disable(self->scb_obj->scb, &self->ctx);
-    Cy_SCB_SPI_DeInit(self->scb_obj->scb);
-    sys_int_deinit(&self->scb_obj->irq);
-    pclk_div_deinit(self->pclk_div);
-    self->pclk_div = NULL;
-    scb_obj_free(self->scb_obj);
-    self->scb_obj = NULL;
+    if (self->scb_obj != NULL) {
+        Cy_SCB_SPI_Disable(self->scb_obj->scb, &self->ctx);
+        Cy_SCB_SPI_DeInit(self->scb_obj->scb);
+        sys_int_deinit(&self->scb_obj->irq);
+    }
+    if (self->pclk_div != NULL) {
+        pclk_div_deinit(self->pclk_div);
+        self->pclk_div = NULL;
+    }
+}
+
+enum { ARG_polarity, ARG_phase, ARG_bits, ARG_firstbit, ARG_sck, ARG_mosi, ARG_miso, ARG_ssel };
+
+static const mp_arg_t allowed_args[] = {
+    { MP_QSTR_polarity, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = DEFAULT_SPI_TARGET_POLARITY} },
+    { MP_QSTR_phase,    MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = DEFAULT_SPI_TARGET_PHASE} },
+    { MP_QSTR_bits,     MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = DEFAULT_SPI_TARGET_BITS} },
+    { MP_QSTR_firstbit, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = MICROPY_PY_MACHINE_SPI_MSB} },
+    { MP_QSTR_sck,      MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+    { MP_QSTR_mosi,     MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+    { MP_QSTR_miso,     MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+    { MP_QSTR_ssel,     MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+};
+
+// (Re)configures the object. Arguments not given are reset to their defaults.
+static void machine_spi_target_init_impl(machine_spi_target_obj_t *self, machine_pin_af_unit_t spi_id, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    /* -- Pins: SCK, MOSI and SSEL are inputs, MISO is an output -- */
+    mp_hal_pin_af_config_t spi_pins_af_config[] = {
+        /* SCK  */ MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_SPI_CLK),
+        /* MOSI */ MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_SPI_MOSI),
+        /* MISO */ MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_STRONG_IN_OFF, 1, MACHINE_PIN_AF_SIGNAL_SPI_MISO),
+        /* SSEL */ MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_SPI_SELECT0),
+    };
+    const uint8_t pin_args[] = { ARG_sck, ARG_mosi, ARG_miso, ARG_ssel };
+    for (uint8_t i = 0; i < MP_ARRAY_SIZE(pin_args); i++) {
+        if (args[pin_args[i]].u_obj != mp_const_none) {
+            mp_hal_pin_obj_t pin = mp_hal_get_pin_obj(args[pin_args[i]].u_obj);
+            MP_HAL_PIN_AF_CONF_SET_PIN_AF(spi_pins_af_config[i], pin);
+        }
+    }
+
+    /* -- Resolve ID - pin match, then the pins not provided -- */
+    machine_pin_af_unit_t fn_unit = spi_id;
+    mp_hal_periph_pins_af_resolve_fn_unit(spi_pins_af_config, MP_ARRAY_SIZE(spi_pins_af_config), MACHINE_PIN_AF_FN_SPI, &fn_unit);
+    mp_hal_periph_pins_af_resolve_pin_af(spi_pins_af_config, MP_ARRAY_SIZE(spi_pins_af_config), fn_unit);
+
+    /* -- Validate the remaining parameters before touching the hardware -- */
+    if ((args[ARG_polarity].u_int & ~1) != 0 || (args[ARG_phase].u_int & ~1) != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("polarity/phase must be 0 or 1"));
+    }
+    if (args[ARG_bits].u_int != DEFAULT_SPI_TARGET_BITS) {
+        mp_raise_ValueError(MP_ERROR_TEXT("bits must be 8"));
+    }
+    if ((args[ARG_firstbit].u_int != MICROPY_PY_MACHINE_SPI_MSB) &&
+        (args[ARG_firstbit].u_int != MICROPY_PY_MACHINE_SPI_LSB)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("invalid firstbit"));
+    }
+
+    /* -- SPITarget params init -- */
+    self->sck = spi_pins_af_config[0].pin;
+    self->mosi = spi_pins_af_config[1].pin;
+    self->miso = spi_pins_af_config[2].pin;
+    self->ssel = spi_pins_af_config[3].pin;
+    self->polarity = (uint8_t)args[ARG_polarity].u_int;
+    self->phase = (uint8_t)args[ARG_phase].u_int;
+    self->bits = (uint8_t)args[ARG_bits].u_int;
+    self->firstbit = (uint8_t)args[ARG_firstbit].u_int;
+
+    /* -- Initialise hardware -- */
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        bool is_new = machine_spi_target_scb_alloc(self, fn_unit);
+        if (!is_new) {
+            machine_spi_target_hw_deinit(self);
+        }
+        mp_hal_periph_pins_af_init(spi_pins_af_config, MP_ARRAY_SIZE(spi_pins_af_config));
+        machine_spi_target_hw_init(self);
+        nlr_pop();
+    } else {
+        // Leave the SCB claimed so that init() can be retried on this object.
+        machine_spi_target_hw_deinit(self);
+        nlr_raise(nlr.ret_val);
+    }
 }
 
 /******************************************************************************/
@@ -228,68 +289,70 @@ static void machine_spi_target_hw_deinit(machine_spi_target_obj_t *self) {
 
 static void machine_spi_target_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     machine_spi_target_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    mp_printf(print, "SPITarget(sck='%q', mosi='%q', miso='%q', ssel='%q', polarity=%u, phase=%u, bits=%u)",
-        self->sck->name, self->mosi->name, self->miso->name, self->ssel->name,
-        self->polarity, self->phase, self->bits);
+    mp_printf(print, "SPITarget(id=%u, sck='%q', mosi='%q', miso='%q', ssel='%q', polarity=%u, phase=%u, bits=%u, firstbit=%s)",
+        self->id, self->sck->name, self->mosi->name, self->miso->name, self->ssel->name,
+        self->polarity, self->phase, self->bits,
+        self->firstbit == MICROPY_PY_MACHINE_SPI_MSB ? "MSB" : "LSB");
 }
 
+static mp_obj_t machine_spi_target_deinit(mp_obj_t self_in) {
+    machine_spi_target_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    machine_spi_target_hw_deinit(self);
+    machine_spi_target_scb_free(self);
+    machine_spi_target_obj_free(self);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(machine_spi_target_deinit_obj, machine_spi_target_deinit);
+
+// SPITarget([id], ...): the constructor sets the identity, everything else is delegated to init.
 static mp_obj_t machine_spi_target_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
-    mp_arg_check_num(n_args, n_kw, 0, 8, true);
+    mp_arg_check_num(n_args, n_kw, 0, MP_OBJ_FUN_ARGS_MAX, true);
 
-    enum { ARG_sck, ARG_mosi, ARG_miso, ARG_ssel, ARG_polarity, ARG_phase, ARG_bits, ARG_firstbit };
-
-    static const mp_arg_t allowed_args[] = {
-        { MP_QSTR_sck,      MP_ARG_KW_ONLY | MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
-        { MP_QSTR_mosi,     MP_ARG_KW_ONLY | MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
-        { MP_QSTR_miso,     MP_ARG_KW_ONLY | MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
-        { MP_QSTR_ssel,     MP_ARG_KW_ONLY | MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
-        { MP_QSTR_polarity, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = DEFAULT_SPI_TARGET_POLARITY} },
-        { MP_QSTR_phase,    MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = DEFAULT_SPI_TARGET_PHASE} },
-        { MP_QSTR_bits,     MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = DEFAULT_SPI_TARGET_BITS} },
-        { MP_QSTR_firstbit, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = MICROPY_PY_MACHINE_SPI_MSB} },
-    };
-
-    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
-    mp_arg_parse_all_kw_array(n_args, n_kw, all_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
-
-    machine_spi_target_obj_t *self = machine_spi_target_obj_alloc();
-    if (self == NULL) {
-        mp_raise_ValueError(MP_ERROR_TEXT("SPITarget: Maximum number of instances reached"));
+    machine_pin_af_unit_t spi_id = MACHINE_PIN_AF_UNIT_NONE;
+    size_t init_n_args = n_args;
+    const mp_obj_t *init_args = all_args;
+    if (n_args > 0 && mp_obj_is_int(all_args[0])) {
+        mp_int_t id = mp_obj_get_int(all_args[0]);
+        if (id < 0 || id >= MICROPY_PY_SCB_NUM_ENTRIES) {
+            mp_raise_ValueError(MP_ERROR_TEXT("SPITarget id out of range"));
+        }
+        spi_id = (machine_pin_af_unit_t)id;
+        init_n_args = n_args - 1;
+        init_args = all_args + 1;
+    } else if (n_args > 0) {
+        mp_raise_TypeError(MP_ERROR_TEXT("SPITarget id must be an integer"));
     }
 
-    self->sck = mp_hal_get_pin_obj(args[ARG_sck].u_obj);
-    self->mosi = mp_hal_get_pin_obj(args[ARG_mosi].u_obj);
-    self->miso = mp_hal_get_pin_obj(args[ARG_miso].u_obj);
-    self->ssel = mp_hal_get_pin_obj(args[ARG_ssel].u_obj);
-    self->polarity = args[ARG_polarity].u_int;
-    self->phase = args[ARG_phase].u_int;
-    self->bits = args[ARG_bits].u_int;
-    self->firstbit = args[ARG_firstbit].u_int;
-    self->timeout = DEFAULT_SPI_TARGET_TIMEOUT_MS;
-    self->pclk_div = NULL;
-    self->scb_obj = NULL;
+    machine_spi_target_obj_t *self = machine_spi_target_obj_get(spi_id);
+    if (self == NULL) {
+        self = machine_spi_target_obj_alloc();
+        if (self == NULL) {
+            mp_raise_ValueError(MP_ERROR_TEXT("failed to allocate SPITarget object"));
+        }
+    }
+
+    mp_map_t kw_args;
+    mp_map_init_fixed_table(&kw_args, n_kw, all_args + n_args);
 
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
-        machine_spi_target_hw_init(self);
+        machine_spi_target_init_impl(self, spi_id, init_n_args, init_args, &kw_args);
         nlr_pop();
     } else {
-        machine_spi_target_obj_free(self);
-        nlr_jump(nlr.ret_val);
+        machine_spi_target_deinit(MP_OBJ_FROM_PTR(self));
+        nlr_raise(nlr.ret_val);
     }
 
     return MP_OBJ_FROM_PTR(self);
 }
 
-static mp_obj_t machine_spi_target_deinit(mp_obj_t self_in) {
-    machine_spi_target_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (self->scb_obj != NULL) {
-        machine_spi_target_hw_deinit(self);
-    }
-    machine_spi_target_obj_free(self);
+// SPITarget.init(): reconfigures the object, keeping the id set by the constructor.
+static mp_obj_t machine_spi_target_init(size_t n_args, const mp_obj_t *args, mp_map_t *kw_args) {
+    machine_spi_target_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+    machine_spi_target_init_impl(self, self->id, n_args - 1, args + 1, kw_args);
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(machine_spi_target_deinit_obj, machine_spi_target_deinit);
+static MP_DEFINE_CONST_FUN_OBJ_KW(machine_spi_target_init_obj, 1, machine_spi_target_init);
 
 static mp_obj_t machine_spi_target_read(mp_obj_t self_in, mp_obj_t buf_in) {
     machine_spi_target_obj_t *self = MP_OBJ_TO_PTR(self_in);
@@ -407,13 +470,14 @@ static MP_DEFINE_CONST_FUN_OBJ_3(machine_spi_target_write_readinto_obj, machine_
 
 void machine_spi_target_deinit_all(void) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_SPI_TARGET_MAX; i++) {
-        if (machine_spi_target_obj[i] != NULL) {
-            machine_spi_target_deinit(MP_OBJ_FROM_PTR(machine_spi_target_obj[i]));
+        if (MP_STATE_PORT(machine_spi_target_obj[i]) != NULL) {
+            machine_spi_target_deinit(MP_OBJ_FROM_PTR(MP_STATE_PORT(machine_spi_target_obj[i])));
         }
     }
 }
 
 static const mp_rom_map_elem_t machine_spi_target_locals_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_init),           MP_ROM_PTR(&machine_spi_target_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_readinto),       MP_ROM_PTR(&machine_spi_target_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_write),          MP_ROM_PTR(&machine_spi_target_write_obj) },
     { MP_ROM_QSTR(MP_QSTR_write_readinto), MP_ROM_PTR(&machine_spi_target_write_readinto_obj) },
