@@ -448,7 +448,9 @@ Use the ``SPITarget`` class for target-mode communication::
 
     from machine import SPITarget
 
+    spi_t = SPITarget(10)           # SCB10 with its default pins (P16_0, P16_1, P16_2, P16_3)
     spi_t = SPITarget(
+        10,
         sck='P16_0',
         mosi='P16_1',
         miso='P16_2',
@@ -458,6 +460,7 @@ Use the ``SPITarget`` class for target-mode communication::
         bits=8,
         firstbit=SPITarget.MSB,
     )
+    spi_t.init(polarity=1, phase=1) # reconfigure; omitted arguments are reset to defaults
 
     tx = b'\x11\x22\x33\x44'
     rx = bytearray(4)
@@ -467,13 +470,19 @@ Use the ``SPITarget`` class for target-mode communication::
 
 Constructor arguments:
 
-    - ``sck``: SPI clock pin.
-    - ``mosi``: target TX pin.
-    - ``miso``: target RX pin.
+    - ``id``: SCB unit number. It identifies the SPITarget instance: constructing
+      ``SPITarget(id)`` again returns the same object. It can be omitted if the
+      pins are given, in which case it is resolved from the pins.
+    - ``sck``: SPI clock input pin.
+    - ``mosi``: target RX pin (data from the controller).
+    - ``miso``: target TX pin (data to the controller).
     - ``ssel``: chip-select input pin.
-    - ``polarity`` / ``phase``: must be ``0`` or ``1``.
+    - ``polarity`` / ``phase``: must be ``0`` or ``1``. Default is ``0``.
     - ``bits``: only ``8`` is supported.
-    - ``firstbit``: ``SPITarget.MSB`` or ``SPITarget.LSB``.
+    - ``firstbit``: ``SPITarget.MSB`` (default) or ``SPITarget.LSB``.
+
+    Each pin not given is resolved to the default pin of the ``id``. Pins given
+    must belong to the ``id``.
 
 Constants:
 
@@ -481,6 +490,12 @@ Constants:
     - ``SPITarget.LSB``: least-significant-bit first.
 
 Methods:
+
+.. method:: SPITarget.init(*, polarity=0, phase=0, bits=8, firstbit=SPITarget.MSB, sck=None, mosi=None, miso=None, ssel=None)
+
+    Reconfigure the SPITarget instance. Takes the same arguments as the
+    constructor except ``id``. The ``id`` set by the constructor cannot be
+    changed, and any argument not given is reset to its default.
 
 .. method:: SPITarget.readinto(buf)
 
@@ -513,11 +528,11 @@ Methods:
 
 The SPITarget implementation on PSOC Edge has the following port-specific details:
 
-- ``sck``, ``mosi``, ``miso``, and ``ssel`` are all required.
 - ``bits`` is fixed to 8.
 - ``readinto()``, ``write()``, and ``write_readinto()`` are blocking and use an
     internal timeout.
-- A single ``SPITarget`` instance is supported in this port configuration.
+- One ``SPITarget`` instance per SCB unit is supported. An SCB unit can only be
+  used by one ``SPI``, ``SPITarget``, ``I2C``, ``I2CTarget`` or ``UART`` instance at a time.
 
 
 
