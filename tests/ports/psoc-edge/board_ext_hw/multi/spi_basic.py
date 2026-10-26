@@ -265,17 +265,21 @@ def instance1():
 
     _spi_api_test()
 
+    # Construct in a different mode, then reconfigure with init() to the mode used by
+    # the target, before any transfer: all data tests depend on this re-init.
     spi = SPI(
         SPI_ID,
-        baudrate=1_000_000,
-        polarity=0,
-        phase=0,
+        baudrate=2_000_000,
+        polarity=1,
+        phase=1,
         bits=8,
-        firstbit=SPI.MSB,
+        firstbit=SPI.LSB,
         sck=SCK_PIN,
         mosi=MOSI_PIN,
         miso=MISO_PIN,
     )
+    print(spi)
+    spi.init(1_000_000)
     print(spi)
 
     # Wait for target to be ready
