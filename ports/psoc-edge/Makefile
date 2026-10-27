@@ -614,6 +614,7 @@ SRC_C += \
 	main.c \
 	mphalport.c \
 	scb.c \
+	spi.c \
 	systick.c \
 	sys_int.c \
 	tcpwm.c \
