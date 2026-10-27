@@ -360,8 +360,7 @@ function ci_nrf_build {
 
 function ci_psoc_edge_setup {
     ci_gcc_arm_setup
-    sudo apt remove python3-packaging python3-jsonschema python3-cryptography
-    sudo pip3 install edgeprotecttools
+    sudo pip3 install --break-system-packages --ignore-installed edgeprotecttools
 }
 
 function ci_psoc_edge_build {
