@@ -1,0 +1,75 @@
+/*
+ * This file is part of the MicroPython project, http://micropython.org/
+ *
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2026 Infineon Technologies AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
+#ifndef MICROPY_INCLUDED_PSOC_EDGE_SPI_H
+#define MICROPY_INCLUDED_PSOC_EDGE_SPI_H
+
+#include "sys_int.h"
+#include "py/obj.h"
+#include "py/mphal.h"
+
+#include "cy_scb_spi.h"
+
+#include "clk.h"
+#include "scb.h"
+
+#define SPI_SUPPORTED_BITS (8U)
+
+typedef struct _spi_obj_t {
+    uint8_t id;
+    scb_obj_t *scb_obj;
+    pclk_div_obj_t *pclk_div;
+    cy_stc_scb_spi_context_t ctx;
+} spi_obj_t;
+
+uint8_t spi_get_id(spi_obj_t *self);
+
+void spi_alloc(spi_obj_t *self, uint8_t id, mp_obj_t parent, void (*scb_isr)(mp_obj_t), bool *is_new);
+void spi_free(spi_obj_t *self);
+
+void spi_pins_get_from_kw(mp_map_t *kw_args, const qstr *pin_names, uint8_t num_pins, mp_obj_t *pins);
+machine_pin_af_unit_t spi_pins_resolve(mp_hal_pin_af_config_t *pins_af_config, uint8_t num_pins, machine_pin_af_unit_t spi_id, const mp_obj_t *pins);
+void spi_check_params(mp_int_t polarity, mp_int_t phase, mp_int_t bits, mp_int_t firstbit);
+
+void spi_hw_irq(spi_obj_t *self);
+
+void spi_hw_controller_init(spi_obj_t *self, uint32_t baudrate, uint8_t polarity, uint8_t phase, uint8_t bits, uint8_t firstbit);
+cy_en_scb_spi_status_t spi_hw_controller_transfer(spi_obj_t *self, const uint8_t *tx_buf, uint8_t *rx_buf, size_t len);
+bool spi_hw_controller_is_transfer_active(spi_obj_t *self);
+void spi_hw_controller_abort_transfer(spi_obj_t *self);
+
+void spi_hw_target_init(spi_obj_t *self, uint8_t polarity, uint8_t phase, uint8_t bits, uint8_t firstbit);
+void spi_hw_target_clear_tx_fifo(spi_obj_t *self);
+void spi_hw_target_clear_rx_fifo(spi_obj_t *self);
+bool spi_hw_target_tx_fifo_has_space(spi_obj_t *self);
+void spi_hw_target_write(spi_obj_t *self, uint8_t data);
+bool spi_hw_target_is_tx_complete(spi_obj_t *self);
+uint32_t spi_hw_target_get_num_in_rx_fifo(spi_obj_t *self);
+uint8_t spi_hw_target_read(spi_obj_t *self);
+
+void spi_hw_deinit(spi_obj_t *self);
+
+#endif // MICROPY_INCLUDED_PSOC_EDGE_SPI_H
