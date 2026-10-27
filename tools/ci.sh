@@ -408,12 +408,7 @@ function ci_pic16bit_build {
 
 function ci_psoc_edge_setup {
     ci_gcc_arm_setup
-    # installing edgeprotecttools requires uninstalling some default Python packages
-    # from the system, but then we need to reinstall pip so the binary is available
-    # (as on recent Ubuntu it's uninstalled with python3-packaging.)
-    sudo apt-get remove python3-packaging python3-jsonschema python3-cryptography
-    sudo apt-get install python3-pip
-    sudo pip3 install edgeprotecttools
+    sudo pip3 install --break-system-packages --ignore-installed edgeprotecttools
 }
 
 function ci_psoc_edge_build {
