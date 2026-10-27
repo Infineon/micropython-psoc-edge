@@ -29,21 +29,17 @@
 #include "py/mperrno.h"
 #include <string.h>
 #include "cybsp.h"
-#include "cy_scb_spi.h"
-#include "clk.h"
 #include "genhdr/pins_af.h"
-#include "scb.h"
 #include "modmachine.h"
+#include "spi.h"
 
 #if MICROPY_PY_MACHINE_SPI_TARGET
 
 #define DEFAULT_SPI_TARGET_POLARITY    (0)
 #define DEFAULT_SPI_TARGET_PHASE       (0)
-#define DEFAULT_SPI_TARGET_BITS        (8)
+#define DEFAULT_SPI_TARGET_BITS        (SPI_SUPPORTED_BITS)
 #define SPI_TARGET_TICKS_WRAP_MS       (15000U) // from mp_hal_ticks_ms source timer period in modtime.c
 #define DEFAULT_SPI_TARGET_TIMEOUT_MS  (5000U)  // must stay below SPI_TARGET_TICKS_WRAP_MS
-
-#define SPI_TARGET_CLK_DIV_BASE        (4U)
 
 // mp_hal_ticks_ms() on this port wraps every SPI_TARGET_TICKS_WRAP_MS.
 // This computes elapsed time across one wrap; caller keeps timeout < wrap period.
@@ -54,7 +50,6 @@ static inline uint32_t spi_target_elapsed_ms(uint32_t start_ms) {
 
 typedef struct _machine_spi_target_obj_t {
     mp_obj_base_t base;
-    machine_pin_af_unit_t id;
     mp_hal_pin_obj_t sck;
     mp_hal_pin_obj_t mosi;
     mp_hal_pin_obj_t miso;
@@ -64,10 +59,7 @@ typedef struct _machine_spi_target_obj_t {
     uint8_t bits;
     uint8_t firstbit;
     uint32_t timeout;
-    pclk_div_obj_t *pclk_div;
-    scb_obj_t *scb_obj;
-    cy_stc_scb_spi_config_t cfg;
-    cy_stc_scb_spi_context_t ctx;
+    spi_obj_t spi_obj;
 } machine_spi_target_obj_t;
 
 MP_REGISTER_ROOT_POINTER(struct _machine_spi_target_obj_t *machine_spi_target_obj[MICROPY_PY_MACHINE_SPI_TARGET_MAX]);
@@ -75,7 +67,7 @@ MP_REGISTER_ROOT_POINTER(struct _machine_spi_target_obj_t *machine_spi_target_ob
 static inline machine_spi_target_obj_t *machine_spi_target_obj_get(machine_pin_af_unit_t id) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_SPI_TARGET_MAX; i++) {
         if (MP_STATE_PORT(machine_spi_target_obj[i]) != NULL
-            && MP_STATE_PORT(machine_spi_target_obj[i])->id == id) {
+            && spi_get_id(&MP_STATE_PORT(machine_spi_target_obj[i])->spi_obj) == id) {
             return MP_STATE_PORT(machine_spi_target_obj[i]);
         }
     }
@@ -86,14 +78,13 @@ static inline machine_spi_target_obj_t *machine_spi_target_obj_alloc(void) {
     for (uint8_t i = 0; i < MICROPY_PY_MACHINE_SPI_TARGET_MAX; i++) {
         if (MP_STATE_PORT(machine_spi_target_obj[i]) == NULL) {
             machine_spi_target_obj_t *self = mp_obj_malloc(machine_spi_target_obj_t, &machine_spi_target_type);
-            self->id = MACHINE_PIN_AF_UNIT_NONE;
             self->sck = NULL;
             self->mosi = NULL;
             self->miso = NULL;
             self->ssel = NULL;
             self->timeout = DEFAULT_SPI_TARGET_TIMEOUT_MS;
-            self->pclk_div = NULL;
-            self->scb_obj = NULL;
+            memset(&self->spi_obj, 0, sizeof(spi_obj_t));
+            self->spi_obj.id = MACHINE_PIN_AF_UNIT_NONE;
             MP_STATE_PORT(machine_spi_target_obj[i]) = self;
             return self;
         }
@@ -111,100 +102,7 @@ static inline void machine_spi_target_obj_free(machine_spi_target_obj_t *obj) {
 
 static void machine_spi_target_scb_isr(mp_obj_t obj) {
     machine_spi_target_obj_t *self = MP_OBJ_TO_PTR(obj);
-    Cy_SCB_SPI_Interrupt(self->scb_obj->scb, &self->ctx);
-}
-
-// Claim the SCB unit for this object. Returns false if this object already owns it.
-static bool machine_spi_target_scb_alloc(machine_spi_target_obj_t *self, machine_pin_af_unit_t scb_unit) {
-    if (self->scb_obj != NULL) {
-        return false;
-    }
-    self->scb_obj = scb_obj_alloc((uint8_t)scb_unit, self, machine_spi_target_scb_isr);
-    self->id = scb_unit;
-    return true;
-}
-
-static void machine_spi_target_scb_free(machine_spi_target_obj_t *self) {
-    if (self->scb_obj != NULL) {
-        scb_obj_free(self->scb_obj);
-        self->scb_obj = NULL;
-    }
-}
-
-// Requires the SCB to be claimed. Raises on failure, cleanup is done by the caller.
-static void machine_spi_target_hw_init(machine_spi_target_obj_t *self) {
-    self->pclk_div = pclk_div_init(self->scb_obj->clk, SPI_TARGET_CLK_DIV_BASE, 0);
-    if (self->pclk_div == NULL) {
-        mp_raise_ValueError(MP_ERROR_TEXT("SPITarget clock dividers exhausted"));
-    }
-
-    // Select SPI clock polarity and phase
-    cy_en_scb_spi_sclk_mode_t sclk_mode;
-    if (self->polarity == 0 && self->phase == 0) {
-        sclk_mode = CY_SCB_SPI_CPHA0_CPOL0;
-    } else if (self->polarity == 0 && self->phase == 1) {
-        sclk_mode = CY_SCB_SPI_CPHA1_CPOL0;
-    } else if (self->polarity == 1 && self->phase == 0) {
-        sclk_mode = CY_SCB_SPI_CPHA0_CPOL1;
-    } else {
-        sclk_mode = CY_SCB_SPI_CPHA1_CPOL1;
-    }
-
-    // Populate PDL SPI configuration for slave/target mode
-    self->cfg = (cy_stc_scb_spi_config_t) {
-        .spiMode = CY_SCB_SPI_SLAVE,
-        .subMode = CY_SCB_SPI_MOTOROLA,
-        .sclkMode = sclk_mode,
-        .parity = CY_SCB_SPI_PARITY_NONE,
-        .dropOnParityError = false,
-        .oversample = 0U,
-        .rxDataWidth = self->bits,
-        .txDataWidth = self->bits,
-        .enableMsbFirst = (self->firstbit == MICROPY_PY_MACHINE_SPI_MSB),
-        .enableInputFilter = false,
-        .enableFreeRunSclk = false,
-        .enableMisoLateSample = false,
-        .enableTransferSeparation = false,
-        .ssPolarity =
-            ((CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT0) |
-                (CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT1) |
-                (CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT2) |
-                (CY_SCB_SPI_ACTIVE_LOW << CY_SCB_SPI_SLAVE_SELECT3)),
-        .ssSetupDelay = false,
-        .ssHoldDelay = false,
-        .ssInterFrameDelay = false,
-        .enableWakeFromSleep = false,
-        .rxFifoTriggerLevel = 0UL,
-        .rxFifoIntEnableMask = 0UL,
-        .txFifoTriggerLevel = 0UL,
-        .txFifoIntEnableMask = 0UL,
-        .masterSlaveIntEnableMask = 0UL,
-    };
-
-    // Initialize SPI hardware
-    cy_en_scb_spi_status_t result =
-        Cy_SCB_SPI_Init(self->scb_obj->scb, &self->cfg, &self->ctx);
-
-    if (result != CY_SCB_SPI_SUCCESS) {
-        mp_raise_msg_varg(&mp_type_ValueError,
-            MP_ERROR_TEXT("SPITarget init failed: 0x%lx"), (uint32_t)result);
-    }
-
-    sys_int_init(&self->scb_obj->irq);
-    Cy_SCB_SPI_Enable(self->scb_obj->scb);
-}
-
-// Stops the SPI hardware and releases the clock divider. The SCB stays claimed.
-static void machine_spi_target_hw_deinit(machine_spi_target_obj_t *self) {
-    if (self->scb_obj != NULL) {
-        Cy_SCB_SPI_Disable(self->scb_obj->scb, &self->ctx);
-        Cy_SCB_SPI_DeInit(self->scb_obj->scb);
-        sys_int_deinit(&self->scb_obj->irq);
-    }
-    if (self->pclk_div != NULL) {
-        pclk_div_deinit(self->pclk_div);
-        self->pclk_div = NULL;
-    }
+    spi_hw_irq(&self->spi_obj);
 }
 
 enum { ARG_polarity, ARG_phase, ARG_bits, ARG_firstbit, ARG_sck, ARG_mosi, ARG_miso, ARG_ssel };
@@ -222,26 +120,14 @@ static const mp_arg_t allowed_args[] = {
 
 #define SPI_TARGET_NUM_PINS (4)
 
-// Fills the pin AF config from the pins given (None if not given) and resolves the id.
-// Pins given must match spi_id (if not NONE), and pins not given are resolved from the id.
+// Resolves the id and the pin AF config from the pins given (None if not given).
 static machine_pin_af_unit_t machine_spi_target_pins_resolve(mp_hal_pin_af_config_t *spi_pins_af_config, machine_pin_af_unit_t spi_id, const mp_obj_t *pins) {
     /* -- Pins: SCK, MOSI and SSEL are inputs, MISO is an output -- */
     spi_pins_af_config[0] = MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_SPI_CLK);
     spi_pins_af_config[1] = MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_SPI_MOSI);
     spi_pins_af_config[2] = MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_STRONG_IN_OFF, 1, MACHINE_PIN_AF_SIGNAL_SPI_MISO);
     spi_pins_af_config[3] = MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_SPI_SELECT0);
-    for (uint8_t i = 0; i < SPI_TARGET_NUM_PINS; i++) {
-        if (pins[i] != mp_const_none) {
-            mp_hal_pin_obj_t pin = mp_hal_get_pin_obj(pins[i]);
-            MP_HAL_PIN_AF_CONF_SET_PIN_AF(spi_pins_af_config[i], pin);
-        }
-    }
-
-    /* -- Resolve ID - pin match, then the pins not provided -- */
-    machine_pin_af_unit_t fn_unit = spi_id;
-    mp_hal_periph_pins_af_resolve_fn_unit(spi_pins_af_config, SPI_TARGET_NUM_PINS, MACHINE_PIN_AF_FN_SPI, &fn_unit);
-    mp_hal_periph_pins_af_resolve_pin_af(spi_pins_af_config, SPI_TARGET_NUM_PINS, fn_unit);
-    return fn_unit;
+    return spi_pins_resolve(spi_pins_af_config, SPI_TARGET_NUM_PINS, spi_id, pins);
 }
 
 // (Re)configures the object. Arguments not given are reset to their defaults.
@@ -254,16 +140,7 @@ static void machine_spi_target_init_impl(machine_spi_target_obj_t *self, machine
     machine_pin_af_unit_t fn_unit = machine_spi_target_pins_resolve(spi_pins_af_config, spi_id, pins);
 
     /* -- Validate the remaining parameters before touching the hardware -- */
-    if ((args[ARG_polarity].u_int & ~1) != 0 || (args[ARG_phase].u_int & ~1) != 0) {
-        mp_raise_ValueError(MP_ERROR_TEXT("polarity/phase must be 0 or 1"));
-    }
-    if (args[ARG_bits].u_int != DEFAULT_SPI_TARGET_BITS) {
-        mp_raise_ValueError(MP_ERROR_TEXT("bits must be 8"));
-    }
-    if ((args[ARG_firstbit].u_int != MICROPY_PY_MACHINE_SPI_MSB) &&
-        (args[ARG_firstbit].u_int != MICROPY_PY_MACHINE_SPI_LSB)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("invalid firstbit"));
-    }
+    spi_check_params(args[ARG_polarity].u_int, args[ARG_phase].u_int, args[ARG_bits].u_int, args[ARG_firstbit].u_int);
 
     /* -- SPITarget params init -- */
     self->sck = spi_pins_af_config[0].pin;
@@ -278,16 +155,17 @@ static void machine_spi_target_init_impl(machine_spi_target_obj_t *self, machine
     /* -- Initialise hardware -- */
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
-        bool is_new = machine_spi_target_scb_alloc(self, fn_unit);
+        bool is_new;
+        spi_alloc(&self->spi_obj, fn_unit, MP_OBJ_FROM_PTR(self), machine_spi_target_scb_isr, &is_new);
         if (!is_new) {
-            machine_spi_target_hw_deinit(self);
+            spi_hw_deinit(&self->spi_obj);
         }
-        mp_hal_periph_pins_af_init(spi_pins_af_config, MP_ARRAY_SIZE(spi_pins_af_config));
-        machine_spi_target_hw_init(self);
+        mp_hal_periph_pins_af_init(spi_pins_af_config, SPI_TARGET_NUM_PINS);
+        spi_hw_target_init(&self->spi_obj, self->polarity, self->phase, self->bits, self->firstbit);
         nlr_pop();
     } else {
         // Leave the SCB claimed so that init() can be retried on this object.
-        machine_spi_target_hw_deinit(self);
+        spi_hw_deinit(&self->spi_obj);
         nlr_raise(nlr.ret_val);
     }
 }
@@ -298,15 +176,15 @@ static void machine_spi_target_init_impl(machine_spi_target_obj_t *self, machine
 static void machine_spi_target_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind_t kind) {
     machine_spi_target_obj_t *self = MP_OBJ_TO_PTR(self_in);
     mp_printf(print, "SPITarget(id=%u, sck='%q', mosi='%q', miso='%q', ssel='%q', polarity=%u, phase=%u, bits=%u, firstbit=%s)",
-        self->id, self->sck->name, self->mosi->name, self->miso->name, self->ssel->name,
+        spi_get_id(&self->spi_obj), self->sck->name, self->mosi->name, self->miso->name, self->ssel->name,
         self->polarity, self->phase, self->bits,
         self->firstbit == MICROPY_PY_MACHINE_SPI_MSB ? "MSB" : "LSB");
 }
 
 static mp_obj_t machine_spi_target_deinit(mp_obj_t self_in) {
     machine_spi_target_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    machine_spi_target_hw_deinit(self);
-    machine_spi_target_scb_free(self);
+    spi_hw_deinit(&self->spi_obj);
+    spi_free(&self->spi_obj);
     machine_spi_target_obj_free(self);
     return mp_const_none;
 }
@@ -338,10 +216,7 @@ static mp_obj_t machine_spi_target_make_new(const mp_obj_type_t *type, size_t n_
     if (spi_id == MACHINE_PIN_AF_UNIT_NONE) {
         const qstr pin_names[SPI_TARGET_NUM_PINS] = { MP_QSTR_sck, MP_QSTR_mosi, MP_QSTR_miso, MP_QSTR_ssel };
         mp_obj_t pins[SPI_TARGET_NUM_PINS];
-        for (uint8_t i = 0; i < SPI_TARGET_NUM_PINS; i++) {
-            mp_map_elem_t *elem = mp_map_lookup(&kw_args, MP_OBJ_NEW_QSTR(pin_names[i]), MP_MAP_LOOKUP);
-            pins[i] = (elem != NULL) ? elem->value : mp_const_none;
-        }
+        spi_pins_get_from_kw(&kw_args, pin_names, SPI_TARGET_NUM_PINS, pins);
         mp_hal_pin_af_config_t spi_pins_af_config[SPI_TARGET_NUM_PINS];
         spi_id = machine_spi_target_pins_resolve(spi_pins_af_config, spi_id, pins);
     }
@@ -373,7 +248,7 @@ static mp_obj_t machine_spi_target_make_new(const mp_obj_type_t *type, size_t n_
 // SPITarget.init(): reconfigures the object, keeping the id set by the constructor.
 static mp_obj_t machine_spi_target_init(size_t n_args, const mp_obj_t *args, mp_map_t *kw_args) {
     machine_spi_target_obj_t *self = MP_OBJ_TO_PTR(args[0]);
-    machine_spi_target_init_impl(self, self->id, n_args - 1, args + 1, kw_args);
+    machine_spi_target_init_impl(self, spi_get_id(&self->spi_obj), n_args - 1, args + 1, kw_args);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(machine_spi_target_init_obj, 1, machine_spi_target_init);
@@ -388,9 +263,9 @@ static mp_obj_t machine_spi_target_read(mp_obj_t self_in, mp_obj_t buf_in) {
     uint8_t *rx_buf = bufinfo.buf;
 
     while (received < bufinfo.len) {
-        uint32_t num_available = Cy_SCB_SPI_GetNumInRxFifo(self->scb_obj->scb);
+        uint32_t num_available = spi_hw_target_get_num_in_rx_fifo(&self->spi_obj);
         while (num_available > 0 && received < bufinfo.len) {
-            rx_buf[received++] = (uint8_t)Cy_SCB_SPI_Read(self->scb_obj->scb);
+            rx_buf[received++] = spi_hw_target_read(&self->spi_obj);
             num_available--;
         }
 
@@ -409,15 +284,15 @@ static mp_obj_t machine_spi_target_write(mp_obj_t self_in, mp_obj_t buf_in) {
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(buf_in, &bufinfo, MP_BUFFER_READ);
 
-    Cy_SCB_SPI_ClearTxFifo(self->scb_obj->scb);
+    spi_hw_target_clear_tx_fifo(&self->spi_obj);
 
     uint32_t start = mp_hal_ticks_ms();
     size_t written = 0;
     uint8_t *tx_buf = bufinfo.buf;
 
     while (written < bufinfo.len) {
-        if (Cy_SCB_GetNumInTxFifo(self->scb_obj->scb) < Cy_SCB_GetFifoSize(self->scb_obj->scb)) {
-            Cy_SCB_SPI_Write(self->scb_obj->scb, tx_buf[written++]);
+        if (spi_hw_target_tx_fifo_has_space(&self->spi_obj)) {
+            spi_hw_target_write(&self->spi_obj, tx_buf[written++]);
             // Timeout tracks FIFO stall time, not total transfer time.
             start = mp_hal_ticks_ms();
         } else {
@@ -429,7 +304,7 @@ static mp_obj_t machine_spi_target_write(mp_obj_t self_in, mp_obj_t buf_in) {
     }
 
     start = mp_hal_ticks_ms();
-    while (!Cy_SCB_SPI_IsTxComplete(self->scb_obj->scb)) {
+    while (!spi_hw_target_is_tx_complete(&self->spi_obj)) {
         if (spi_target_elapsed_ms(start) > self->timeout) {
             mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("SPITarget write timeout"));
         }
@@ -451,8 +326,8 @@ static mp_obj_t machine_spi_target_write_readinto(mp_obj_t self_in, mp_obj_t tx_
         mp_raise_ValueError(MP_ERROR_TEXT("buffers must be the same length"));
     }
 
-    Cy_SCB_SPI_ClearTxFifo(self->scb_obj->scb);
-    Cy_SCB_SPI_ClearRxFifo(self->scb_obj->scb);
+    spi_hw_target_clear_tx_fifo(&self->spi_obj);
+    spi_hw_target_clear_rx_fifo(&self->spi_obj);
 
     uint8_t *tx_buf = tx_bufinfo.buf;
     uint8_t *rx_buf = rx_bufinfo.buf;
@@ -465,15 +340,14 @@ static mp_obj_t machine_spi_target_write_readinto(mp_obj_t self_in, mp_obj_t tx_
         bool progressed = false;
 
         // Load TX FIFO
-        while (tx_idx < len &&
-               Cy_SCB_GetNumInTxFifo(self->scb_obj->scb) < Cy_SCB_GetFifoSize(self->scb_obj->scb)) {
-            Cy_SCB_SPI_Write(self->scb_obj->scb, tx_buf[tx_idx++]);
+        while (tx_idx < len && spi_hw_target_tx_fifo_has_space(&self->spi_obj)) {
+            spi_hw_target_write(&self->spi_obj, tx_buf[tx_idx++]);
             progressed = true;
         }
 
         // Read RX FIFO
-        while (rx_idx < len && Cy_SCB_SPI_GetNumInRxFifo(self->scb_obj->scb) > 0) {
-            rx_buf[rx_idx++] = (uint8_t)Cy_SCB_SPI_Read(self->scb_obj->scb);
+        while (rx_idx < len && spi_hw_target_get_num_in_rx_fifo(&self->spi_obj) > 0) {
+            rx_buf[rx_idx++] = spi_hw_target_read(&self->spi_obj);
             progressed = true;
         }
 
