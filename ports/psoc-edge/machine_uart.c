@@ -498,25 +498,7 @@ static void machine_uart_init_impl(machine_uart_obj_t **self_ptr, int uart_id, s
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
 
-    /* -- TX / RX pins -- */
-    uint8_t pin_num = 2U;
-    #define MAX_MACHINE_UART_OBJ_AF_PINS 4
-    mp_hal_pin_af_config_t uart_pins_af_config[MAX_MACHINE_UART_OBJ_AF_PINS] = {
-        /* TX */ MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_STRONG_IN_OFF, 1, MACHINE_PIN_AF_SIGNAL_UART_TX),
-        /* RX */ MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_UART_RX),
-    };
-
-    if (args[ARG_tx].u_obj != mp_const_none) {
-        mp_hal_pin_obj_t tx_pin = mp_hal_get_pin_obj(args[ARG_tx].u_obj);
-        MP_HAL_PIN_AF_CONF_SET_PIN_AF(uart_pins_af_config[0], tx_pin);
-    }
-
-    if (args[ARG_rx].u_obj != mp_const_none) {
-        mp_hal_pin_obj_t rx_pin = mp_hal_get_pin_obj(args[ARG_rx].u_obj);
-        MP_HAL_PIN_AF_CONF_SET_PIN_AF(uart_pins_af_config[1], rx_pin);
-    }
-
-    /* -- Flow control pins -- */
+    /* -- Flow control -- */
     uint32_t flow = (uint32_t)args[ARG_flow].u_int;
 
     if ((flow & ~(UART_FLOW_CONTROL_RTS | UART_FLOW_CONTROL_CTS)) != 0U) {
@@ -531,16 +513,23 @@ static void machine_uart_init_impl(machine_uart_obj_t **self_ptr, int uart_id, s
         mp_raise_ValueError(MP_ERROR_TEXT("flow must include UART.CTS when cts pin is provided"));
     }
 
+    /* -- TX / RX pins -- */
+    uint8_t pin_num = 2U;
+    #define MAX_MACHINE_UART_OBJ_AF_PINS 4
+    mp_hal_pin_af_config_t uart_pins_af_config[MAX_MACHINE_UART_OBJ_AF_PINS] = {
+        /* TX */ MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_STRONG_IN_OFF, 1, MACHINE_PIN_AF_SIGNAL_UART_TX),
+        /* RX */ MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_UART_RX),
+    };
+    mp_obj_t uart_pins[MAX_MACHINE_UART_OBJ_AF_PINS] = { args[ARG_tx].u_obj, args[ARG_rx].u_obj };
+
+    /* -- Flow control pins -- */
     #define PIN_AF_CONFIG_INDEX_NONE (0xFF)
     uint8_t pin_af_conf_rts_index = PIN_AF_CONFIG_INDEX_NONE;
     if (flow & UART_FLOW_CONTROL_RTS) {
         pin_af_conf_rts_index = pin_num;
         pin_num++;
         uart_pins_af_config[pin_af_conf_rts_index] = MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_STRONG_IN_OFF, 1, MACHINE_PIN_AF_SIGNAL_UART_RTS);
-        if (args[ARG_rts].u_obj != mp_const_none) {
-            mp_hal_pin_obj_t rts_pin = mp_hal_get_pin_obj(args[ARG_rts].u_obj);
-            MP_HAL_PIN_AF_CONF_SET_PIN_AF(uart_pins_af_config[pin_af_conf_rts_index], rts_pin);
-        }
+        uart_pins[pin_af_conf_rts_index] = args[ARG_rts].u_obj;
     }
 
     uint8_t pin_af_conf_cts_index = PIN_AF_CONFIG_INDEX_NONE;
@@ -548,18 +537,11 @@ static void machine_uart_init_impl(machine_uart_obj_t **self_ptr, int uart_id, s
         pin_af_conf_cts_index = pin_num;
         pin_num++;
         uart_pins_af_config[pin_af_conf_cts_index] = MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_UART_CTS);
-        if (args[ARG_cts].u_obj != mp_const_none) {
-            mp_hal_pin_obj_t cts_pin = mp_hal_get_pin_obj(args[ARG_cts].u_obj);
-            MP_HAL_PIN_AF_CONF_SET_PIN_AF(uart_pins_af_config[pin_af_conf_cts_index], cts_pin);
-        }
+        uart_pins[pin_af_conf_cts_index] = args[ARG_cts].u_obj;
     }
 
-    /* -- Resolve ID - pin match -- */
-    machine_pin_af_unit_t fn_unit = (machine_pin_af_unit_t)uart_id;
-    mp_hal_periph_pins_af_resolve_fn_unit(uart_pins_af_config, pin_num, MACHINE_PIN_AF_FN_UART, &fn_unit);
-
-    /* -- Resolve not provided AF pins -- */
-    mp_hal_periph_pins_af_resolve_pin_af(uart_pins_af_config, pin_num, fn_unit);
+    /* -- Resolve ID - pin match and not provided AF pins -- */
+    machine_pin_af_unit_t fn_unit = mp_hal_periph_pins_af_resolve(uart_pins_af_config, pin_num, MACHINE_PIN_AF_FN_UART, (machine_pin_af_unit_t)uart_id, uart_pins);
 
     /* -- Baudrate -- */
     uint32_t baudrate = (uint32_t)args[ARG_baudrate].u_int;
