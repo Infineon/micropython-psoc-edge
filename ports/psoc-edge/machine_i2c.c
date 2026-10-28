@@ -115,22 +115,9 @@ static void machine_i2c_init_impl(machine_i2c_obj_t *self, int i2c_id, size_t n_
         /* SDA */ MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_OD_DRIVESLOW, 1, MACHINE_PIN_AF_SIGNAL_I2C_SDA),
     };
 
-    if (args[ARG_scl].u_obj != mp_const_none) {
-        mp_hal_pin_obj_t scl_pin = mp_hal_get_pin_obj(args[ARG_scl].u_obj);
-        MP_HAL_PIN_AF_CONF_SET_PIN_AF(i2c_pins_af_config[0], scl_pin);
-    }
-
-    if (args[ARG_sda].u_obj != mp_const_none) {
-        mp_hal_pin_obj_t sda_pin = mp_hal_get_pin_obj(args[ARG_sda].u_obj);
-        MP_HAL_PIN_AF_CONF_SET_PIN_AF(i2c_pins_af_config[1], sda_pin);
-    }
-
-    /* -- Resolve ID - pin match -- */
-    machine_pin_af_unit_t fn_unit = (machine_pin_af_unit_t)i2c_id;
-    mp_hal_periph_pins_af_resolve_fn_unit(i2c_pins_af_config, 2, MACHINE_PIN_AF_FN_I2C, &fn_unit);
-
-    /* -- Resolve not provided AF pins -- */
-    mp_hal_periph_pins_af_resolve_pin_af(i2c_pins_af_config, 2, fn_unit);
+    /* -- Resolve ID - pin match and not provided AF pins -- */
+    const mp_obj_t i2c_pins[] = { args[ARG_scl].u_obj, args[ARG_sda].u_obj };
+    machine_pin_af_unit_t fn_unit = mp_hal_periph_pins_af_resolve(i2c_pins_af_config, 2, MACHINE_PIN_AF_FN_I2C, (machine_pin_af_unit_t)i2c_id, i2c_pins);
 
     /* -- Frequency -- */
     if (args[ARG_freq].u_int != 100000 && args[ARG_freq].u_int != 400000) {
