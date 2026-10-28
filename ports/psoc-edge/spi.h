@@ -50,10 +50,6 @@ uint8_t spi_get_id(spi_obj_t *self);
 void spi_alloc(spi_obj_t *self, uint8_t id, mp_obj_t parent, void (*scb_isr)(mp_obj_t), bool *is_new);
 void spi_free(spi_obj_t *self);
 
-void spi_pins_get_from_kw(mp_map_t *kw_args, const qstr *pin_names, uint8_t num_pins, mp_obj_t *pins);
-machine_pin_af_unit_t spi_pins_resolve(mp_hal_pin_af_config_t *pins_af_config, uint8_t num_pins, machine_pin_af_unit_t spi_id, const mp_obj_t *pins);
-void spi_check_params(mp_int_t polarity, mp_int_t phase, mp_int_t bits, mp_int_t firstbit);
-
 void spi_hw_irq(spi_obj_t *self);
 
 void spi_hw_controller_init(spi_obj_t *self, uint32_t baudrate, uint8_t polarity, uint8_t phase, uint8_t bits, uint8_t firstbit);
