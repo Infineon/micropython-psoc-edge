@@ -400,7 +400,9 @@ static const mp_arg_t allowed_args[] = {
     { MP_QSTR_sda, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
 };
 
-static void machine_i2c_target_init_impl(machine_i2c_target_obj_t *self, int i2c_id, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+
+
+static void machine_i2c_target_init_impl(machine_i2c_target_obj_t **self_ptr, int i2c_id, size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
 
@@ -411,7 +413,7 @@ static void machine_i2c_target_init_impl(machine_i2c_target_obj_t *self, int i2c
 
     /* -- Resolve ID - pin match and not provided AF pins -- */
     const mp_obj_t i2c_pins[] = { args[ARG_scl].u_obj, args[ARG_sda].u_obj };
-    machine_pin_af_unit_t fn_unit = mp_hal_periph_pins_af_resolve(i2c_pins_af_config, 2, MACHINE_PIN_AF_FN_I2C, (machine_pin_af_unit_t)i2c_id, i2c_pins);
+    machine_pin_af_unit_t fn_unit = mp_hal_periph_pins_af_resolve(i2c_pins_af_config, I2C_NUM_PINS, MACHINE_PIN_AF_FN_I2C, (machine_pin_af_unit_t)i2c_id, i2c_pins);
 
     /** -- Target address -- **/
     if (args[ARG_addrsize].u_int != 7 && args[ARG_addrsize].u_int != 10) {
@@ -425,6 +427,29 @@ static void machine_i2c_target_init_impl(machine_i2c_target_obj_t *self, int i2c
     }
     uint32_t mem_addrsize = args[ARG_mem_addrsize].u_int;
 
+    machine_i2c_target_obj_t *self = *self_ptr;
+
+    /* -- Object allocation -- */
+    bool is_new = false;
+    bool is_make_obj_required = (*self_ptr == NULL);
+    if (is_make_obj_required) {
+        *self_ptr = machine_i2c_target_obj_get(fn_unit);
+        if (*self_ptr == NULL) {
+            *self_ptr = machine_i2c_target_obj_alloc();
+            if (*self_ptr == NULL) {
+                mp_raise_ValueError(MP_ERROR_TEXT("failed to allocate I2CTarget object"));
+            }
+            is_new = true;
+        }
+        self = *self_ptr;
+    }
+
+    /* -- Reinitialization reset -- */
+    /* For reused I2CTarget() object or init() path */
+    if (!is_new) {
+        i2c_hw_deinit(&self->i2c_obj);
+    }
+
     /* -- I2C params init -- */
     self->scl = i2c_pins_af_config[0].pin;
     self->sda = i2c_pins_af_config[1].pin;
@@ -436,7 +461,7 @@ static void machine_i2c_target_init_impl(machine_i2c_target_obj_t *self, int i2c
     /* -- Initialise hardware -- */
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
-        mp_hal_periph_pins_af_init(i2c_pins_af_config, 2);
+        mp_hal_periph_pins_af_init(i2c_pins_af_config, I2C_NUM_PINS);
         bool is_new;
         i2c_alloc(&self->i2c_obj, fn_unit, self, machine_i2c_target_scb_isr, &is_new);
         if (!is_new) {
@@ -474,25 +499,17 @@ static mp_obj_t mp_machine_i2c_target_make_new(const mp_obj_type_t *type, size_t
         mp_raise_TypeError(MP_ERROR_TEXT("I2C id must be an integer"));
     }
 
-    machine_i2c_target_obj_t *self = machine_i2c_target_obj_get(i2c_id);
-    if (self == NULL) {
-        self = machine_i2c_target_obj_alloc();
-        if (self == NULL) {
-            mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("failed to allocate I2CTarget object"));
-        }
-    }
-
+    machine_i2c_target_obj_t *self = NULL;
     mp_map_t kw_args;
     mp_map_init_fixed_table(&kw_args, n_kw, args + n_args);
-
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
-        machine_i2c_target_init_impl(self, i2c_id, init_n_args, init_args, &kw_args);
+        machine_i2c_target_init_impl(&self, i2c_id, init_n_args, init_args, &kw_args);
         nlr_pop();
     } else {
-        i2c_hw_deinit(&self->i2c_obj);
-        i2c_free(&self->i2c_obj);
-        machine_i2c_target_obj_free(self);
+        if (self != NULL) {
+            mp_machine_i2c_target_deinit(self);
+        }
         nlr_raise(nlr.ret_val);
     }
 
