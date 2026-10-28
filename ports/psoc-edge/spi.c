@@ -69,13 +69,13 @@ void spi_hw_irq(spi_obj_t *self) {
     Cy_SCB_SPI_Interrupt(self->scb_obj->scb, &self->ctx);
 }
 
-static cy_en_scb_spi_status_t spi_hw_init(spi_obj_t *self, cy_en_scb_spi_mode_t mode, uint8_t polarity, uint8_t phase, uint8_t bits, uint8_t firstbit) {
+static cy_en_scb_spi_status_t spi_hw_init(spi_obj_t *self, cy_en_scb_spi_mode_t mode) {
     cy_en_scb_spi_sclk_mode_t sclk_mode;
-    if (polarity == 0 && phase == 0) {
+    if (self->polarity == 0 && self->phase == 0) {
         sclk_mode = CY_SCB_SPI_CPHA0_CPOL0;
-    } else if (polarity == 0 && phase == 1) {
+    } else if (self->polarity == 0 && self->phase == 1) {
         sclk_mode = CY_SCB_SPI_CPHA1_CPOL0;
-    } else if (polarity == 1 && phase == 0) {
+    } else if (self->polarity == 1 && self->phase == 0) {
         sclk_mode = CY_SCB_SPI_CPHA0_CPOL1;
     } else {
         sclk_mode = CY_SCB_SPI_CPHA1_CPOL1;
@@ -89,9 +89,9 @@ static cy_en_scb_spi_status_t spi_hw_init(spi_obj_t *self, cy_en_scb_spi_mode_t 
         .parity = CY_SCB_SPI_PARITY_NONE,
         .dropOnParityError = false,
         .oversample = is_controller ? SPI_CONTROLLER_OVERSAMPLE : 0U,
-        .rxDataWidth = bits,
-        .txDataWidth = bits,
-        .enableMsbFirst = (firstbit == MICROPY_PY_MACHINE_SPI_MSB),
+        .rxDataWidth = self->bits,
+        .txDataWidth = self->bits,
+        .enableMsbFirst = (self->firstbit == MICROPY_PY_MACHINE_SPI_MSB),
         .enableInputFilter = false,
         .enableFreeRunSclk = false,
         .enableMisoLateSample = is_controller,
@@ -120,8 +120,9 @@ static cy_en_scb_spi_status_t spi_hw_init(spi_obj_t *self, cy_en_scb_spi_mode_t 
     return result;
 }
 
-// Requires the SCB to be claimed. Raises on failure, cleanup (spi_hw_deinit) is done by the caller.
-void spi_hw_controller_init(spi_obj_t *self, uint32_t baudrate, uint8_t polarity, uint8_t phase, uint8_t bits, uint8_t firstbit) {
+// Requires the SCB to be claimed and polarity, phase, bits and firstbit to be set.
+// Raises on failure, cleanup (spi_hw_deinit) is done by the caller.
+void spi_hw_controller_init(spi_obj_t *self, uint32_t baudrate) {
     uint32_t clk_hf_freq = pclk_div_get_input_freq(self->scb_obj->clk);
     if (clk_hf_freq == 0U) {
         mp_raise_ValueError(MP_ERROR_TEXT("failed to get SPI input clock"));
@@ -140,7 +141,7 @@ void spi_hw_controller_init(spi_obj_t *self, uint32_t baudrate, uint8_t polarity
         mp_raise_ValueError(MP_ERROR_TEXT("SPI clock dividers exhausted"));
     }
 
-    cy_en_scb_spi_status_t result = spi_hw_init(self, CY_SCB_SPI_MASTER, polarity, phase, bits, firstbit);
+    cy_en_scb_spi_status_t result = spi_hw_init(self, CY_SCB_SPI_MASTER);
     if (result != CY_SCB_SPI_SUCCESS) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("SPI init failed: 0x%lx"), (uint32_t)result);
     }
@@ -158,14 +159,15 @@ void spi_hw_controller_abort_transfer(spi_obj_t *self) {
     Cy_SCB_SPI_AbortTransfer(self->scb_obj->scb, &self->ctx);
 }
 
-// Requires the SCB to be claimed. Raises on failure, cleanup (spi_hw_deinit) is done by the caller.
-void spi_hw_target_init(spi_obj_t *self, uint8_t polarity, uint8_t phase, uint8_t bits, uint8_t firstbit) {
+// Requires the SCB to be claimed and polarity, phase, bits and firstbit to be set.
+// Raises on failure, cleanup (spi_hw_deinit) is done by the caller.
+void spi_hw_target_init(spi_obj_t *self) {
     self->pclk_div = pclk_div_init(self->scb_obj->clk, SPI_CLK_DIV_BASE, 0);
     if (self->pclk_div == NULL) {
         mp_raise_ValueError(MP_ERROR_TEXT("SPITarget clock dividers exhausted"));
     }
 
-    cy_en_scb_spi_status_t result = spi_hw_init(self, CY_SCB_SPI_SLAVE, polarity, phase, bits, firstbit);
+    cy_en_scb_spi_status_t result = spi_hw_init(self, CY_SCB_SPI_SLAVE);
     if (result != CY_SCB_SPI_SUCCESS) {
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT("SPITarget init failed: 0x%lx"), (uint32_t)result);
     }

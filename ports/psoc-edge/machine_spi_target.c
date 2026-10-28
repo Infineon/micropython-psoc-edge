@@ -54,10 +54,6 @@ typedef struct _machine_spi_target_obj_t {
     mp_hal_pin_obj_t mosi;
     mp_hal_pin_obj_t miso;
     mp_hal_pin_obj_t ssel;
-    uint8_t polarity;
-    uint8_t phase;
-    uint8_t bits;
-    uint8_t firstbit;
     uint32_t timeout;
     spi_obj_t spi_obj;
 } machine_spi_target_obj_t;
@@ -156,10 +152,10 @@ static void machine_spi_target_init_impl(machine_spi_target_obj_t *self, machine
     self->mosi = spi_pins_af_config[1].pin;
     self->miso = spi_pins_af_config[2].pin;
     self->ssel = spi_pins_af_config[3].pin;
-    self->polarity = (uint8_t)args[ARG_polarity].u_int;
-    self->phase = (uint8_t)args[ARG_phase].u_int;
-    self->bits = (uint8_t)args[ARG_bits].u_int;
-    self->firstbit = (uint8_t)args[ARG_firstbit].u_int;
+    self->spi_obj.polarity = (uint8_t)args[ARG_polarity].u_int;
+    self->spi_obj.phase = (uint8_t)args[ARG_phase].u_int;
+    self->spi_obj.bits = (uint8_t)args[ARG_bits].u_int;
+    self->spi_obj.firstbit = (uint8_t)args[ARG_firstbit].u_int;
 
     /* -- Initialise hardware -- */
     nlr_buf_t nlr;
@@ -170,7 +166,7 @@ static void machine_spi_target_init_impl(machine_spi_target_obj_t *self, machine
             spi_hw_deinit(&self->spi_obj);
         }
         mp_hal_periph_pins_af_init(spi_pins_af_config, SPI_TARGET_NUM_PINS);
-        spi_hw_target_init(&self->spi_obj, self->polarity, self->phase, self->bits, self->firstbit);
+        spi_hw_target_init(&self->spi_obj);
         nlr_pop();
     } else {
         // Leave the SCB claimed so that init() can be retried on this object.
@@ -186,8 +182,8 @@ static void machine_spi_target_print(const mp_print_t *print, mp_obj_t self_in, 
     machine_spi_target_obj_t *self = MP_OBJ_TO_PTR(self_in);
     mp_printf(print, "SPITarget(id=%u, sck='%q', mosi='%q', miso='%q', ssel='%q', polarity=%u, phase=%u, bits=%u, firstbit=%s)",
         spi_get_id(&self->spi_obj), self->sck->name, self->mosi->name, self->miso->name, self->ssel->name,
-        self->polarity, self->phase, self->bits,
-        self->firstbit == MICROPY_PY_MACHINE_SPI_MSB ? "MSB" : "LSB");
+        self->spi_obj.polarity, self->spi_obj.phase, self->spi_obj.bits,
+        self->spi_obj.firstbit == MICROPY_PY_MACHINE_SPI_MSB ? "MSB" : "LSB");
 }
 
 static mp_obj_t machine_spi_target_deinit(mp_obj_t self_in) {
