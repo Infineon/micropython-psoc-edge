@@ -39,6 +39,8 @@ typedef struct _i2c_obj_t {
     cy_stc_scb_i2c_context_t ctx;
 } i2c_obj_t;
 
+#define I2C_NUM_PINS (2)
+
 uint8_t i2c_get_id(i2c_obj_t *self);
 
 void i2c_alloc(i2c_obj_t *self, uint8_t id, mp_obj_t parent, void (*scb_isr)(mp_obj_t), bool *is_new);
