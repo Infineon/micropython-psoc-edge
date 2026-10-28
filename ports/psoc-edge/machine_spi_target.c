@@ -127,7 +127,7 @@ static machine_pin_af_unit_t machine_spi_target_pins_resolve(mp_hal_pin_af_confi
     spi_pins_af_config[1] = MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_SPI_MOSI);
     spi_pins_af_config[2] = MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_STRONG_IN_OFF, 1, MACHINE_PIN_AF_SIGNAL_SPI_MISO);
     spi_pins_af_config[3] = MP_HAL_PIN_AF_CONF_INIT_GPIO_SIGNAL(CY_GPIO_DM_HIGHZ, 0, MACHINE_PIN_AF_SIGNAL_SPI_SELECT0);
-    return spi_pins_resolve(spi_pins_af_config, SPI_TARGET_NUM_PINS, spi_id, pins);
+    return mp_hal_periph_pins_af_resolve(spi_pins_af_config, SPI_TARGET_NUM_PINS, MACHINE_PIN_AF_FN_SPI, spi_id, pins);
 }
 
 // (Re)configures the object. Arguments not given are reset to their defaults.
@@ -140,7 +140,16 @@ static void machine_spi_target_init_impl(machine_spi_target_obj_t *self, machine
     machine_pin_af_unit_t fn_unit = machine_spi_target_pins_resolve(spi_pins_af_config, spi_id, pins);
 
     /* -- Validate the remaining parameters before touching the hardware -- */
-    spi_check_params(args[ARG_polarity].u_int, args[ARG_phase].u_int, args[ARG_bits].u_int, args[ARG_firstbit].u_int);
+    if ((args[ARG_polarity].u_int & ~1) != 0 || (args[ARG_phase].u_int & ~1) != 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("polarity/phase must be 0 or 1"));
+    }
+    if (args[ARG_bits].u_int != SPI_SUPPORTED_BITS) {
+        mp_raise_ValueError(MP_ERROR_TEXT("bits must be 8"));
+    }
+    if ((args[ARG_firstbit].u_int != MICROPY_PY_MACHINE_SPI_MSB) &&
+        (args[ARG_firstbit].u_int != MICROPY_PY_MACHINE_SPI_LSB)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("invalid firstbit"));
+    }
 
     /* -- SPITarget params init -- */
     self->sck = spi_pins_af_config[0].pin;
@@ -216,7 +225,7 @@ static mp_obj_t machine_spi_target_make_new(const mp_obj_type_t *type, size_t n_
     if (spi_id == MACHINE_PIN_AF_UNIT_NONE) {
         const qstr pin_names[SPI_TARGET_NUM_PINS] = { MP_QSTR_sck, MP_QSTR_mosi, MP_QSTR_miso, MP_QSTR_ssel };
         mp_obj_t pins[SPI_TARGET_NUM_PINS];
-        spi_pins_get_from_kw(&kw_args, pin_names, SPI_TARGET_NUM_PINS, pins);
+        mp_hal_periph_pins_get_from_kw(&kw_args, pin_names, SPI_TARGET_NUM_PINS, pins);
         mp_hal_pin_af_config_t spi_pins_af_config[SPI_TARGET_NUM_PINS];
         spi_id = machine_spi_target_pins_resolve(spi_pins_af_config, spi_id, pins);
     }

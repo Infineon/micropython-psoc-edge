@@ -32,7 +32,6 @@
 #include "cy_scb_spi.h"
 
 // port-specific includes
-#include "genhdr/pins_af.h"
 #include "clk.h"
 #include "spi.h"
 
@@ -63,42 +62,6 @@ void spi_free(spi_obj_t *self) {
     if (self->scb_obj != NULL) {
         scb_obj_free(self->scb_obj);
         self->scb_obj = NULL;
-    }
-}
-
-// Fills pins with the values of the pin_names keyword arguments (None if not given).
-void spi_pins_get_from_kw(mp_map_t *kw_args, const qstr *pin_names, uint8_t num_pins, mp_obj_t *pins) {
-    for (uint8_t i = 0; i < num_pins; i++) {
-        mp_map_elem_t *elem = mp_map_lookup(kw_args, MP_OBJ_NEW_QSTR(pin_names[i]), MP_MAP_LOOKUP);
-        pins[i] = (elem != NULL) ? elem->value : mp_const_none;
-    }
-}
-
-// Sets the pins given (None if not given) in the pin AF config, initialised by the caller, and
-// resolves the id. Pins given must match spi_id (if not NONE), pins not given are resolved from the id.
-machine_pin_af_unit_t spi_pins_resolve(mp_hal_pin_af_config_t *pins_af_config, uint8_t num_pins, machine_pin_af_unit_t spi_id, const mp_obj_t *pins) {
-    for (uint8_t i = 0; i < num_pins; i++) {
-        if (pins[i] != mp_const_none) {
-            mp_hal_pin_obj_t pin = mp_hal_get_pin_obj(pins[i]);
-            MP_HAL_PIN_AF_CONF_SET_PIN_AF(pins_af_config[i], pin);
-        }
-    }
-
-    machine_pin_af_unit_t fn_unit = spi_id;
-    mp_hal_periph_pins_af_resolve_fn_unit(pins_af_config, num_pins, MACHINE_PIN_AF_FN_SPI, &fn_unit);
-    mp_hal_periph_pins_af_resolve_pin_af(pins_af_config, num_pins, fn_unit);
-    return fn_unit;
-}
-
-void spi_check_params(mp_int_t polarity, mp_int_t phase, mp_int_t bits, mp_int_t firstbit) {
-    if ((polarity & ~1) != 0 || (phase & ~1) != 0) {
-        mp_raise_ValueError(MP_ERROR_TEXT("polarity/phase must be 0 or 1"));
-    }
-    if (bits != SPI_SUPPORTED_BITS) {
-        mp_raise_ValueError(MP_ERROR_TEXT("bits must be 8"));
-    }
-    if ((firstbit != MICROPY_PY_MACHINE_SPI_MSB) && (firstbit != MICROPY_PY_MACHINE_SPI_LSB)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("invalid firstbit"));
     }
 }
 
