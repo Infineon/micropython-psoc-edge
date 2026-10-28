@@ -43,6 +43,10 @@ typedef struct _spi_obj_t {
     scb_obj_t *scb_obj;
     pclk_div_obj_t *pclk_div;
     cy_stc_scb_spi_context_t ctx;
+    uint8_t polarity;
+    uint8_t phase;
+    uint8_t bits;
+    uint8_t firstbit;
 } spi_obj_t;
 
 uint8_t spi_get_id(spi_obj_t *self);
@@ -52,12 +56,12 @@ void spi_free(spi_obj_t *self);
 
 void spi_hw_irq(spi_obj_t *self);
 
-void spi_hw_controller_init(spi_obj_t *self, uint32_t baudrate, uint8_t polarity, uint8_t phase, uint8_t bits, uint8_t firstbit);
+void spi_hw_controller_init(spi_obj_t *self, uint32_t baudrate);
 cy_en_scb_spi_status_t spi_hw_controller_transfer(spi_obj_t *self, const uint8_t *tx_buf, uint8_t *rx_buf, size_t len);
 bool spi_hw_controller_is_transfer_active(spi_obj_t *self);
 void spi_hw_controller_abort_transfer(spi_obj_t *self);
 
-void spi_hw_target_init(spi_obj_t *self, uint8_t polarity, uint8_t phase, uint8_t bits, uint8_t firstbit);
+void spi_hw_target_init(spi_obj_t *self);
 void spi_hw_target_clear_tx_fifo(spi_obj_t *self);
 void spi_hw_target_clear_rx_fifo(spi_obj_t *self);
 bool spi_hw_target_tx_fifo_has_space(spi_obj_t *self);
