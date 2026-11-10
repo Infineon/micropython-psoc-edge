@@ -1,4 +1,4 @@
-import argparse, os, sys, shlex, shutil, subprocess, requests, tempfile, zipfile, tarfile
+import argparse, os, re, sys, shlex, shutil, subprocess, requests, tempfile, zipfile, tarfile
 
 boards = [
     {"name": "KIT_PSE84_AI", "ocd_cfg_file": "pse84xgxs2.cfg"},
@@ -9,6 +9,9 @@ version = "0.1.0"
 
 # Erase, program and verify of a full firmware image takes about 40 s.
 OPENOCD_FLASH_TIMEOUT_S = 180
+
+# Infineon OpenOCD release accepted: same major, at least this minor/patch.
+OPENOCD_MIN_VERSION = (5, 8, 0)
 
 
 # Decorator to flush every print
@@ -101,13 +104,11 @@ def openocd_download_install():
             if err:
                 return False
             out_str = out.decode()
-            supported_versions = [
-                "0.12.0+dev-5.8.0.3960",
-                "0.12.0+dev-5.11.0.4042",
-                "0.12.0+dev-5.12.0.4170",
-            ]
-            for ver in supported_versions:
-                if ver in out_str:
+            # Infineon builds report e.g. "0.12.0+dev-5.16.1.4486", stock OpenOCD does not.
+            match = re.search(r"\+dev-(\d+)\.(\d+)\.(\d+)\.\d+", out_str)
+            if match:
+                ver = tuple(int(g) for g in match.groups())
+                if ver[0] == OPENOCD_MIN_VERSION[0] and ver >= OPENOCD_MIN_VERSION:
                     print_f(f"openocd found in system path : {shutil.which('openocd')}")
                     return True
         except:
