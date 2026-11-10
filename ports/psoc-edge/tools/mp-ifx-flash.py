@@ -82,7 +82,7 @@ def openocd_download_install():
             os.environ["PATH"] = os.path.join("openocd", "bin") + os.pathsep + os.environ["PATH"]
             valid_openocd_version = is_openocd_already_in_sys_path()
             if not valid_openocd_version:
-                clean_openocd()
+                openocd_remove()
 
             return valid_openocd_version
 
@@ -126,8 +126,13 @@ def openocd_download_install():
             os.remove(file_name)
 
     def download_openocd(file_url, file_name):
-        res = requests.get(file_url)
-        open(file_name, "wb").write(res.content)
+        try:
+            res = requests.get(file_url, timeout=60)
+            res.raise_for_status()
+        except requests.RequestException as e:
+            sys.exit(colour_str_error(f"error: failed to download openocd: {e}"))
+        with open(file_name, "wb") as f:
+            f.write(res.content)
         os.replace(file_name, openocd_compressed)
 
     def extract_openocd():
@@ -260,6 +265,7 @@ def validate_board_name(board_name):
 
 def flash_from_files(board, hex_file, cfg_file, flm_file, serial_adapter_sn):
     cfg_dir = os.path.dirname(cfg_file)
+    openocd_download_install()
     print(f"Flashing board '{board}' with hex file '{os.path.basename(hex_file)}'...")
     openocd_program(board, hex_file, cfg_dir, flm_file, serial_adapter_sn)
     print(colour_str_success("Device setup completed :)"))
@@ -275,8 +281,12 @@ def flash_from_package(board, zip_package, serial_adapter_sn):
             sys.exit(colour_str_error("error: zip package not found"))
 
         tmpdirname = tempfile.mkdtemp()
-        with zipfile.ZipFile(zip_package, "r") as zip_ref:
-            zip_ref.extractall(tmpdirname)
+        try:
+            with zipfile.ZipFile(zip_package, "r") as zip_ref:
+                zip_ref.extractall(tmpdirname)
+        except zipfile.BadZipFile:
+            shutil.rmtree(tmpdirname)
+            sys.exit(colour_str_error("error: zip package is not a valid zip file"))
         for root, dirs, files in os.walk(tmpdirname):
             for file in files:
                 if file.endswith(".hex"):
