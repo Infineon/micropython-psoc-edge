@@ -7,6 +7,9 @@ boards = [
 opsys = ""
 version = "0.1.0"
 
+# Erase, program and verify of a full firmware image takes about 40 s.
+OPENOCD_FLASH_TIMEOUT_S = 180
+
 
 # Decorator to flush every print
 def flush_print(func):
@@ -227,10 +230,11 @@ def openocd_program(board, hex_file, cfg_dir, flm_file, serial_adapter_sn=None):
 
     ocd_proc = subprocess.Popen(openocd_args, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
     try:
-        out, err = ocd_proc.communicate(timeout=30)
-    except:
+        out, err = ocd_proc.communicate(timeout=OPENOCD_FLASH_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
         ocd_proc.kill()
-        sys.exit(colour_str_error("openocd error."))
+        ocd_proc.communicate()
+        sys.exit(colour_str_error(f"error: openocd timed out after {OPENOCD_FLASH_TIMEOUT_S} s."))
     if err:
         sys.exit(colour_str_error(err.decode() + "Are you sure the board is connected?"))
 
