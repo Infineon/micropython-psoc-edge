@@ -268,15 +268,16 @@ def validate_board_name(board_name):
         sys.exit(colour_str_error("error: board is not supported"))
 
 
-def flash_from_files(board, hex_file, cfg_file, flm_file, serial_adapter_sn):
+def flash_from_files(board, hex_file, cfg_file, flm_file, serial_adapter_sn_list):
     cfg_dir = os.path.dirname(cfg_file)
     openocd_download_install()
-    print(f"Flashing board '{board}' with hex file '{os.path.basename(hex_file)}'...")
-    openocd_program(board, hex_file, cfg_dir, flm_file, serial_adapter_sn)
-    print(colour_str_success("Device setup completed :)"))
+    for sn in serial_adapter_sn_list:
+        print(f"Deploying hex file {hex_file} ...")
+        openocd_program(board, hex_file, cfg_dir, flm_file, sn)
+        print(colour_str_success("Device setup completed :)"))
 
 
-def flash_from_package(board, zip_package, serial_adapter_sn):
+def flash_from_package(board, zip_package, serial_adapter_sn_list):
     def get_files_from_package(zip_package):
         hex_file = None
         cfg_file = None
@@ -310,17 +311,71 @@ def flash_from_package(board, zip_package, serial_adapter_sn):
 
     hex_file, cfg_file, flm_file, tmpdirname = get_files_from_package(zip_package)
     try:
-        flash_from_files(board, hex_file, cfg_file, flm_file, serial_adapter_sn)
+        flash_from_files(board, hex_file, cfg_file, flm_file, serial_adapter_sn_list)
     finally:
         shutil.rmtree(tmpdirname)
+
+
+####################################################################################################
+# Multiple devices support (CI and test setups), based on a devices YAML file.
+
+
+def get_serial_nums_from_devs_file(board, serial_adapter_sn, devs_file):
+    if devs_file is None:
+        return [serial_adapter_sn]
+
+    if opsys == "win":
+        print_f(
+            colour_str_warn(
+                "warning: Device YAML file usage is not currently supported on Windows systems. Proceed at your own risk."
+            )
+        )
+
+    try:
+        from etdevs.devs import Device
+    except ImportError:
+        sys.exit(
+            colour_str_error(
+                "error: etdevs package not found. Please install it with 'pip install etdevs'"
+            )
+        )
+
+    all_available_devs = Device.load_device_list_from_yml(devs_file)
+    available_devs_board = [dev for dev in all_available_devs if dev.name == board]
+
+    if serial_adapter_sn:
+        serial_adapter_sn_list = [
+            dev.uid for dev in available_devs_board if dev.uid == serial_adapter_sn
+        ]
+        if not serial_adapter_sn_list:
+            sys.exit(
+                colour_str_error("error: serial adapter sn not found in devs file for that board")
+            )
+    else:
+        serial_adapter_sn_list = [dev.uid for dev in available_devs_board]
+        if not serial_adapter_sn_list:
+            sys.exit(colour_str_error("error: no devices found in devs file for that board"))
+
+    print_f(
+        f"Found {len(serial_adapter_sn_list)} devices "
+        f"with serial number:  {serial_adapter_sn_list}"
+    )
+    return serial_adapter_sn_list
+
+
+####################################################################################################
 
 
 def flash_command_args(args):
     # TODO: if no command (None) implement interactive mode to gather the values.
     validate_board_name(args.board)
+    print_f("MicroPython PSOC Edge Board :: ", args.board)
+    serial_adapter_sn_list = get_serial_nums_from_devs_file(
+        args.board, args.serial_num, args.devs_file
+    )
 
     if args.command == "from-package":
-        flash_from_package(args.board, args.zip_package, args.serial_num)
+        flash_from_package(args.board, args.zip_package, serial_adapter_sn_list)
     elif args.command == "from-files":
         for label, path in (
             ("hex", args.hex_file),
@@ -329,7 +384,9 @@ def flash_command_args(args):
         ):
             if not os.path.isfile(path):
                 sys.exit(colour_str_error(f"error: {label} file not found: {path}"))
-        flash_from_files(args.board, args.hex_file, args.cfg_file, args.flm_file, args.serial_num)
+        flash_from_files(
+            args.board, args.hex_file, args.cfg_file, args.flm_file, serial_adapter_sn_list
+        )
 
 
 def parser():
@@ -360,6 +417,15 @@ def parser():
         default=None,
         type=str,
         help="Serial number of the board serial adapter",
+    )
+    common.add_argument(
+        "-d", "--devs-file", type=str, help="Devices file for multiple device deployment"
+    )
+    common.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Quiet. Do not prompt any user confirmation request",
     )
 
     # Subcommand: from-package
