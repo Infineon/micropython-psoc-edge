@@ -316,6 +316,15 @@ def flash_command_args(args):
 
     if args.command == "from-package":
         flash_from_package(args.board, args.zip_package, args.serial_num)
+    elif args.command == "from-files":
+        for label, path in (
+            ("hex", args.hex_file),
+            ("cfg", args.cfg_file),
+            ("FLM", args.flm_file),
+        ):
+            if not os.path.isfile(path):
+                sys.exit(colour_str_error(f"error: {label} file not found: {path}"))
+        flash_from_files(args.board, args.hex_file, args.cfg_file, args.flm_file, args.serial_num)
 
 
 def parser():
@@ -364,7 +373,22 @@ def parser():
         help="Firmware zip package containing .hex, .cfg and .FLM files",
     )
 
-    # TODO: Subcommand: from-files (pass directly the .hex, .cfg and .FLM files)
+    # Subcommand: from-files
+    sp_files = subparsers.add_parser(
+        "from-files",
+        parents=[common],
+        formatter_class=argparse.RawTextHelpFormatter,
+        help="Flash from individual .hex, .cfg and .FLM files",
+        description="Flash passing directly the .hex, .cfg and .FLM files.",
+    )
+    sp_files.add_argument("-f", "--hex-file", required=True, type=str, help="Firmware .hex file")
+    sp_files.add_argument(
+        "-c", "--cfg-file", required=True, type=str, help="QSPI configuration .cfg file"
+    )
+    sp_files.add_argument(
+        "-l", "--flm-file", required=True, type=str, help="Flash loader .FLM file"
+    )
+
     # TODO: Subcommand: from-remote (just pass the board and optionally the version, and the tool will fetch the latest firmware from Infineon fork and flash it)
 
     args = p.parse_args()
