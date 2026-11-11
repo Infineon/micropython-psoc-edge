@@ -268,11 +268,16 @@ def validate_board_name(board_name):
         sys.exit(colour_str_error("error: board is not supported"))
 
 
-def flash_from_files(board, hex_file, cfg_file, flm_file, serial_adapter_sn_list):
+def flash_from_files(board, hex_file, cfg_file, flm_file, serial_adapter_sn_list, source=None):
     cfg_dir = os.path.dirname(cfg_file)
     openocd_download_install()
+    if source is None:
+        deploying = f"Deploying hex file {hex_file} ..."
+    else:
+        # The files come from a temporary dir, so name the origin instead of its path.
+        deploying = f"Deploying hex file {os.path.basename(hex_file)} (from {source}) ..."
     for sn in serial_adapter_sn_list:
-        print(f"Deploying hex file {hex_file} ...")
+        print(deploying)
         openocd_program(board, hex_file, cfg_dir, flm_file, sn)
         print(colour_str_success("Device setup completed :)"))
 
@@ -311,7 +316,14 @@ def flash_from_package(board, zip_package, serial_adapter_sn_list):
 
     hex_file, cfg_file, flm_file, tmpdirname = get_files_from_package(zip_package)
     try:
-        flash_from_files(board, hex_file, cfg_file, flm_file, serial_adapter_sn_list)
+        flash_from_files(
+            board,
+            hex_file,
+            cfg_file,
+            flm_file,
+            serial_adapter_sn_list,
+            os.path.basename(zip_package),
+        )
     finally:
         shutil.rmtree(tmpdirname)
 
@@ -456,22 +468,177 @@ def flash_from_remote(board, fw_version, serial_adapter_sn_list, quiet=False):
 
     tmpdirname = tempfile.mkdtemp()
     try:
-        _, files = fork_download_package(board, fw_version, tmpdirname)
+        tag, files = fork_download_package(board, fw_version, tmpdirname)
         if "zip" in files:
             flash_from_package(board, files["zip"], serial_adapter_sn_list)
         else:
             flash_from_files(
-                board, files["hex"], files["cfg"], files["flm"], serial_adapter_sn_list
+                board, files["hex"], files["cfg"], files["flm"], serial_adapter_sn_list, tag
             )
     finally:
         shutil.rmtree(tmpdirname)
 
 
 ####################################################################################################
+# Official MicroPython downloads (micropython.org), parsed from the board download page.
+
+MPY_DOWNLOADS_URL = "https://micropython.org"
+
+
+def mpy_list_builds(board):
+    """Return the builds listed for the board, releases first, newest first."""
+    try:
+        res = requests.get(f"{MPY_DOWNLOADS_URL}/download/{board}/", timeout=30)
+        res.raise_for_status()
+    except requests.RequestException as e:
+        sys.exit(colour_str_error(f"error: failed to query micropython.org downloads: {e}"))
+
+    pattern = (
+        rf'href="(/resources/firmware/{re.escape(board)}-'
+        rf'(\d{{4}})(\d{{2}})(\d{{2}})-([^"]+)\.zip)"'
+    )
+    builds = [
+        {
+            "version": m.group(5),
+            "date": f"{m.group(2)}-{m.group(3)}-{m.group(4)}",
+            "url": MPY_DOWNLOADS_URL + m.group(1),
+            "preview": "preview" in m.group(5),
+        }
+        for m in re.finditer(pattern, res.text)
+    ]
+    if not builds:
+        sys.exit(colour_str_error(f"error: no builds found for {board} at micropython.org"))
+    return builds
+
+
+def mpy_get_build(board, version):
+    builds = mpy_list_builds(board)
+    if version == "latest":
+        releases = [b for b in builds if not b["preview"]]
+        if not releases:
+            sys.exit(colour_str_error(f"error: no release found for {board} at micropython.org"))
+        return releases[0]
+    tag = version if version.startswith("v") else "v" + version
+    for b in builds:
+        if b["version"] == tag:
+            return b
+    sys.exit(colour_str_error(f"error: MicroPython build '{version}' not found"))
+
+
+def flash_from_micropython(board, fw_version, serial_adapter_sn_list, quiet=False):
+    build = mpy_get_build(board, fw_version)
+    print_f("MicroPython PSOC Edge Version :: ", build["version"])
+    if not quiet:
+        print_f(f"Downloading MicroPython {build['version']} for {board} board...")
+
+    tmpdirname = tempfile.mkdtemp()
+    try:
+        zip_name = os.path.basename(build["url"])
+        zip_package = download_file(build["url"], os.path.join(tmpdirname, zip_name))
+        flash_from_package(board, zip_package, serial_adapter_sn_list)
+    finally:
+        shutil.rmtree(tmpdirname)
+
+
+####################################################################################################
+# Interactive mode, used when no command is given.
+
+
+def select_board():
+    print_f("")
+    print_f("     Supported MicroPython PSOC EDGE boards    ")
+    print_f("+---------+-----------------------------------+")
+    print_f("|   ID    |              Board                |")
+    print_f("+---------+-----------------------------------+")
+    for i, brd in enumerate(boards):
+        print_f(f"|   {i:<6}|{brd['name']:^35}|")
+        print_f("+---------+-----------------------------------+")
+    print_f("")
+    print_f("")
+
+    if len(boards) == 1:
+        board = boards[0]["name"]
+        print_f(colour_str_highlight(f"Auto-selecting the only supported board: {board}\n"))
+        return board
+
+    try:
+        board_index = int(input(colour_str_highlight("Please type the desired board ID: ")))
+        if not 0 <= board_index < len(boards):
+            raise ValueError
+    except ValueError:
+        sys.exit(colour_str_error("error: board ID is not valid"))
+    return boards[board_index]["name"]
+
+
+def ask(prompt, default=None):
+    return input(colour_str_highlight(prompt)).strip() or default
+
+
+def ask_path(prompt):
+    path = ask(prompt)
+    if path is None:
+        sys.exit(colour_str_error("error: a path is required"))
+    return os.path.expanduser(path.strip("\"'"))
+
+
+def interactive_args():
+    """Gather the values of the commands from the user. Returns the same fields as the parser."""
+    board = select_board()
+
+    print_f("Firmware source:")
+    print_f("  1) Download a release from the Infineon fork")
+    print_f("  2) Download an official MicroPython release (micropython.org)")
+    print_f("  3) Local package (.zip)")
+    print_f("  4) Local files (.hex, .cfg, .FLM)")
+    source = ask("Please type the firmware source [1]: ", "1")
+
+    args = argparse.Namespace(
+        board=board,
+        serial_num=None,
+        devs_file=None,
+        quiet=False,
+        fw_version="latest",
+        zip_package=None,
+        hex_file=None,
+        cfg_file=None,
+        flm_file=None,
+    )
+    if source == "1":
+        args.command = "from-remote"
+        print_f("Available releases: " + ", ".join(["latest"] + fork_list_versions()))
+        args.fw_version = ask("Please type the desired version [latest]: ", "latest")
+    elif source == "2":
+        args.command = "from-micropython"
+        builds = mpy_list_builds(board)
+        print_f("Available builds:")
+        for i, b in enumerate(builds, 1):
+            kind = "preview" if b["preview"] else "release"
+            print_f(f"  {i}) {b['version']} ({b['date']}) [{kind}]")
+        choice = ask("Please type the build number [1]: ", "1")
+        if not choice.isdigit() or not 1 <= int(choice) <= len(builds):
+            sys.exit(colour_str_error("error: build number is not valid"))
+        args.fw_version = builds[int(choice) - 1]["version"]
+    elif source == "3":
+        args.command = "from-package"
+        args.zip_package = ask_path("Please type the path of the package .zip: ")
+    elif source == "4":
+        args.command = "from-files"
+        args.hex_file = ask_path("Please type the path of the .hex file: ")
+        args.cfg_file = ask_path("Please type the path of the .cfg file: ")
+        args.flm_file = ask_path("Please type the path of the .FLM file: ")
+    else:
+        sys.exit(colour_str_error("error: firmware source is not valid"))
+
+    args.serial_num = ask(
+        "Serial number of the board serial adapter (empty if only one board is connected): "
+    )
+    return args
+
+
+####################################################################################################
 
 
 def flash_command_args(args):
-    # TODO: if no command (None) implement interactive mode to gather the values.
     validate_board_name(args.board)
     print_f("MicroPython PSOC Edge Board :: ", args.board)
     serial_adapter_sn_list = get_serial_nums_from_devs_file(
@@ -493,6 +660,8 @@ def flash_command_args(args):
         )
     elif args.command == "from-remote":
         flash_from_remote(args.board, args.fw_version, serial_adapter_sn_list, args.quiet)
+    elif args.command == "from-micropython":
+        flash_from_micropython(args.board, args.fw_version, serial_adapter_sn_list, args.quiet)
 
 
 def parser():
@@ -585,9 +754,8 @@ def parser():
 
     args = p.parse_args()
 
-    # Print help if no command is provided
-    # TODO: Future interactive mode.
-    if args.command is None:
+    # Without a command and a terminal to ask the user, print the help.
+    if args.command is None and not sys.stdin.isatty():
         p.print_help(sys.stderr)
         sys.exit(1)
 
@@ -598,6 +766,12 @@ if __name__ == "__main__":
     try:
         set_environment()
         args = parser()
+        if args.command is None:
+            try:
+                args = interactive_args()
+            except KeyboardInterrupt:
+                # Nothing downloaded yet, so keep any previously installed openocd.
+                sys.exit(colour_str_error("error: keyboard interrupt"))
         flash_command_args(args)
     except KeyboardInterrupt:
         print_f(colour_str_error("error: keyboard interrupt"))
