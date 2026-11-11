@@ -449,6 +449,24 @@ def fork_download_package(board, version, dest_dir):
     }
 
 
+def flash_from_remote(board, fw_version, serial_adapter_sn_list, quiet=False):
+    print_f("MicroPython PSOC Edge Version :: ", fw_version)
+    if not quiet:
+        print_f(f"Downloading mpy-psoc-edge {fw_version} for {board} board...")
+
+    tmpdirname = tempfile.mkdtemp()
+    try:
+        _, files = fork_download_package(board, fw_version, tmpdirname)
+        if "zip" in files:
+            flash_from_package(board, files["zip"], serial_adapter_sn_list)
+        else:
+            flash_from_files(
+                board, files["hex"], files["cfg"], files["flm"], serial_adapter_sn_list
+            )
+    finally:
+        shutil.rmtree(tmpdirname)
+
+
 ####################################################################################################
 
 
@@ -473,6 +491,8 @@ def flash_command_args(args):
         flash_from_files(
             args.board, args.hex_file, args.cfg_file, args.flm_file, serial_adapter_sn_list
         )
+    elif args.command == "from-remote":
+        flash_from_remote(args.board, args.fw_version, serial_adapter_sn_list, args.quiet)
 
 
 def parser():
@@ -546,7 +566,22 @@ def parser():
         "-l", "--flm-file", required=True, type=str, help="Flash loader .FLM file"
     )
 
-    # TODO: Subcommand: from-remote (just pass the board and optionally the version, and the tool will fetch the latest firmware from Infineon fork and flash it)
+    # Subcommand: from-remote
+    sp_remote = subparsers.add_parser(
+        "from-remote",
+        parents=[common],
+        formatter_class=argparse.RawTextHelpFormatter,
+        help="Download a release from the Infineon fork and flash it",
+        description="Download a release from the Infineon fork and flash it.",
+    )
+    sp_remote.add_argument(
+        "-v",
+        "--version",
+        dest="fw_version",
+        default="latest",
+        type=str,
+        help="MicroPython PSOC Edge firmware version, e.g. v1.0.0 (default: latest)",
+    )
 
     args = p.parse_args()
 
