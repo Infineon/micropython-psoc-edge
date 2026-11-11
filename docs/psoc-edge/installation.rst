@@ -3,7 +3,7 @@
 Installing MicroPython 
 ======================
 
-To facilitate the installation of the MicroPython PSOC™ Edge port, the ``mpy-pse.py`` Python script is provided. It is compatible with Windows,
+To facilitate the installation of the MicroPython PSOC™ Edge port, the ``mp-ifx-flash.py`` Python script is provided. It is compatible with Windows,
 Linux and MacOS.
 
 Before downloading and running the script, it is recommended to create a new folder to keep all the related files together.
@@ -18,7 +18,7 @@ You can easily download the script from the terminal using the following command
 
 .. code-block:: bash
     
-    $ curl -s -L https://raw.githubusercontent.com/infineon/micropython-psoc-edge/psoc-edge-main/tools/psoc-edge/mpy-pse.py > mpy-pse.py
+    $ curl -s -L https://raw.githubusercontent.com/infineon/micropython-psoc-edge/psoc-edge-main/ports/psoc-edge/tools/mp-ifx-flash.py > mp-ifx-flash.py
 
 Ensure you have a recent version of `Python3.x <https://www.python.org/downloads/>`_  installed and the `pip <https://pip.pypa.io/en/stable/installation/>`_ package installer.
 Then install the following packages:
@@ -31,70 +31,78 @@ Find all available commands and options by running the script with the following
 
 .. code-block:: bash
     
-    $ python mpy-pse.py --help
+    $ python mp-ifx-flash.py --help
 
 .. _pse_device_setup:
 
 Device setup
 -------------
 
-In order to setup MicroPython in a PSOC™ Edge board, the ``device-setup`` command of the ``mpy-pse.py``
-utility can be executed. Follow the instructions to select the target PSOC™ Edge board, and deploy the latest
-MicroPython firmware version:
+In order to setup MicroPython in a PSOC™ Edge board, run the ``mp-ifx-flash.py`` script without any command.
+It starts the interactive mode: follow the instructions to select the target PSOC™ Edge board, the firmware source
+and, optionally, the serial number of the board debugger:
 
 .. code-block:: bash
     
-    $ python mpy-pse.py device-setup
+    $ python mp-ifx-flash.py
 
-You can run this command whenever you want to upgrade to the latest MicroPython firmware version.
-This command will take care of the following steps:
+The interactive mode needs a terminal and takes care of the following steps:
 
-* Download and install openocd, which is the software required to deploy a firmware file on PSOC™ Edge controllers
-* Download the latest ``.hex`` file for your selected board
-* Deploy the latest version of MicroPython firmware on your board
+* Install openocd, which is the software required to deploy a firmware file on PSOC™ Edge controllers (an Infineon openocd version 5.8 or newer already available in the ``PATH`` is used instead)
+* Download the selected firmware
+* Deploy the firmware on your board
 
-To flash a specific ``.hex`` to CM55 core of this device:
+The firmware source can be a release from the Infineon fork, an official MicroPython release or preview build from the
+`MicroPython download page <https://micropython.org/download/KIT_PSE84_AI/>`_, or local files. The commands described in the
+following sections skip the questions, so they can be used in scripts.
+
+Flash a firmware package
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+A firmware package is a *.zip* file containing the *.hex*, *.cfg* and *.FLM* files. Use the ``from-package`` command to flash
+a package you already have, for example one downloaded from the MicroPython download page:
+
 .. code-block:: bash
     
-    $ python mpy-pse.py device-setup --hex-file pathtodir/mpy-psoc-edge_KIT_PSE84_AI_CM55.hex
+    $ python mp-ifx-flash.py from-package -b KIT_PSE84_AI -z pathtodir/firmware.zip
 
-Install a specific version
+Download a fork release
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you want to setup the device with a specific firmware version, you can check the list of available releases in the `GitHub release section <https://github.com/infineon/micropython-psoc-edge/releases>`_. 
+The ``from-remote`` command downloads a release from the Infineon fork and flashes it. The latest release is used by default. You can check the list of available releases in the `GitHub release section <https://github.com/infineon/micropython-psoc-edge/releases>`_. 
 
-The ``device-setup`` command can also assist you with this process. In this case, the board and the desired
-version needs to be passed as arguments.
+To flash the latest release, pass the board. To flash a specific version, also pass it with the ``-v`` flag:
 
 .. code-block:: bash
     
-    $ python mpy-pse.py device-setup -b KIT_PSE84_AI -v v0.1.0
+    $ python mp-ifx-flash.py from-remote -b KIT_PSE84_AI
+    $ python mp-ifx-flash.py from-remote -b KIT_PSE84_AI -v v0.1.0
 
-.. warning::
+.. note::
     
-    Be sure to provide the board name as shown in the ``device-setup`` command when running in interactive mode.
-    Also, provide a valid tag that exists in the release section, in the format *vx.y.z*.
-    No fail-safe mechanisms or error verifications are (yet) implemented on the ``mpy-pse.py`` utility, and the script will fail to retrieve the necessary firmware file.
+    The version must be a tag that exists in the release section, in the format *vx.y.z*.
+    The script reports an error if the release is not found.
 
-Direct binary deployment
+Flash individual files
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Another way to program the board is by directly providing the binary file. This can be also done using the ``device-setup`` command.
-Specify the board and the path and name of the ``.hex`` file using the ``-f`` flag as shown below:
+The ``from-files`` command flashes a *.hex* file together with the *.cfg* and *.FLM* files that openocd needs. These two files are part of the
+firmware package, and are also available in the *ports/psoc-edge/boards/KIT_PSE84_AI/bsp-cfg* folder of the repository.
+This is also the way to flash any other *.hex* file, like the CM55 application. Specify the board and the paths of the three files:
 
 .. code-block:: bash
     
-    $ python mpy-pse.py firmware-deploy -b KIT_PSE84_AI -f pathtodir/mpy-psoc-edge_KIT_PSE84_AI.hex
+    $ python mp-ifx-flash.py from-files -b KIT_PSE84_AI -f pathtodir/firmware.hex -c pathtodir/qspi_config.cfg -l pathtodir/PSE84_SMIF.FLM
 
 Multiple devices deployment
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If you have multiple PSOC™ Edge boards connected to your computer, you can distinguish them by their serial number, and flash them one by one.
-To do so, use the ``-n`` flag to provide the serial number of the target board as shown below:
+To do so, use the ``-n`` flag to provide the serial number of the target board as shown below (all the commands support it):
 
 .. code-block:: bash
     
-    $ python mpy-pse.py device-setup -b KIT_PSE84_AI -n 181F0D5A01212300
+    $ python mp-ifx-flash.py from-remote -b KIT_PSE84_AI -n 181F0D5A01212300
 
 Alternatively, you can deploy a firmware file to all connected boards if you have a device YAML file following the `etdevs <https://pypi.org/project/etdevs/>`_ specification.
 
@@ -121,17 +129,19 @@ Then, create a YAML file (e.g., *devs.yaml*) with the board ``name`` and the ``u
     ...
       
 
-Finally, run the ``device-setup`` command providing the YAML file with the ``-d`` flag:
+Finally, run any of the commands providing the YAML file with the ``-d`` flag. The firmware is deployed to all the boards of the file that match
+the selected board name (or only to the one selected with ``-n``):
 
 .. code-block:: bash
     
-    $ python mpy-pse.py device-setup -b KIT_PSE84_AI -d devs.yml
+    $ python mp-ifx-flash.py from-package -b KIT_PSE84_AI -z pathtodir/firmware.zip -d devs.yml
 
 Getting the firmware
 ^^^^^^^^^^^^^^^^^^^^
 
-The binary *.hex* files are available in the `GitHub release section <https://github.com/infineon/micropython-psoc-edge/releases>`_. 
-All PSOC™ Edge firmware versions for each of the supported boards can be found there. 
+The firmware of the Infineon fork (a *.hex* file for each board and, in newer releases, also the *.zip* package) is available in the `GitHub release section <https://github.com/infineon/micropython-psoc-edge/releases>`_.
+The official MicroPython firmware packages (*.zip*) are available in the `MicroPython download page <https://micropython.org/download/KIT_PSE84_AI/>`_. 
+All PSOC™ Edge firmware versions of the fork for each of the supported boards can be found in the release section. 
 
 
     .. image:: img/gh-releases.png

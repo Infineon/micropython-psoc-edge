@@ -32,6 +32,28 @@ Flashing can be done using the `from-package` command. Specify the board using t
 python mp-ifx-flash.py from-package --board KIT_PSE84_AI --zip-package pathtodir/psoc-edge-package.zip
 ```
 
+#### Interactive mode
+
+Running the script without any command starts the interactive mode, which asks for the board, the firmware
+source and, optionally, the serial number of the board debugger:
+
+```bash
+python mp-ifx-flash.py
+```
+
+The firmware source can be an official MicroPython release or preview build downloaded from
+[micropython.org](https://micropython.org/download/KIT_PSE84_AI/), a release of the Infineon fork, a local
+`.zip` package or local files. The interactive mode needs a terminal.
+
+#### Individual files
+
+The `from-files` command flashes a `.hex` file together with the `.cfg` and `.FLM` files that openocd needs.
+They are all included in the `.zip` package:
+
+```bash
+python mp-ifx-flash.py from-files --board KIT_PSE84_AI --hex-file firmware.hex --cfg-file qspi_config.cfg --flm-file PSE84_SMIF.FLM
+```
+
 #### Multiple connected devices
 
 If you have multiple PSOC™ Edge boards connected to your computer, you can identify them by their
