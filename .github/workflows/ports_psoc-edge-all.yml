@@ -13,6 +13,7 @@ concurrency:
 
 env:
   mpy_hex_file: firmware.hex
+  mpy_zip_file: firmware.zip
 
 jobs:
   server-build:
@@ -39,7 +40,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mpy-psoc-edge_${{ matrix.board }}_${{ steps.commit_sha.outputs.sha_short }}
-          path: ports/psoc-edge/build-${{ matrix.board }}/${{ env.mpy_hex_file }}
+          path: |
+            ports/psoc-edge/build-${{ matrix.board }}/${{ env.mpy_hex_file }}
+            ports/psoc-edge/build-${{ matrix.board }}/${{ env.mpy_zip_file }}
 
   on-target-test:
     runs-on:
@@ -64,8 +67,7 @@ jobs:
           source tools/ci.sh && ci_psoc_edge_setup_hil ${{ matrix.board }}
       - name: Setup devices
         run: |
-          cp mpy-psoc-edge_${{ matrix.board }}_${{ needs.server-build.outputs.commit_sha }}/${{ env.mpy_hex_file }} tools/psoc-edge
-          source tools/ci.sh && ci_psoc_edge_deploy_hil ${{ matrix.board }} ${{ env.mpy_hex_file }} tests/ports/psoc-edge/${{ runner.name }}-devs.yml
+          source tools/ci.sh && ci_psoc_edge_deploy_hil ${{ matrix.board }} mpy-psoc-edge_${{ matrix.board }}_${{ needs.server-build.outputs.commit_sha }}/${{ env.mpy_zip_file }} tests/ports/psoc-edge/${{ runner.name }}-devs.yml
       - name: Run all tests
         env:
           pse_test_dir: tests/ports/psoc-edge
