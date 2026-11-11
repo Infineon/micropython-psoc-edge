@@ -1,7 +1,7 @@
 import argparse, os, re, sys, shlex, shutil, subprocess, requests, tempfile, zipfile, tarfile
 
 boards = [
-    {"name": "KIT_PSE84_AI", "ocd_cfg_file": "pse84xgxs2.cfg"},
+    {"name": "KIT_PSE84_AI", "ocd_cfg_file": "pse84xgxs2.cfg", "flm_file": "PSE84_SMIF.FLM"},
 ]
 
 opsys = ""
@@ -361,6 +361,92 @@ def get_serial_nums_from_devs_file(board, serial_adapter_sn, devs_file):
         f"with serial number:  {serial_adapter_sn_list}"
     )
     return serial_adapter_sn_list
+
+
+####################################################################################################
+# Infineon fork releases (source of the from-remote command)
+
+FORK_API_URL = "https://api.github.com/repos/Infineon/micropython-psoc-edge"
+
+# Holds the openocd config files for the releases published without a zip package.
+FORK_CONFIG_RELEASE = "v0.0.0"
+
+
+def fork_api_get(path):
+    try:
+        res = requests.get(FORK_API_URL + path, timeout=30)
+        res.raise_for_status()
+    except requests.HTTPError as e:
+        if e.response.status_code == 404:
+            return None
+        sys.exit(colour_str_error(f"error: failed to query the Infineon releases: {e}"))
+    except requests.RequestException as e:
+        sys.exit(colour_str_error(f"error: failed to query the Infineon releases: {e}"))
+    return res.json()
+
+
+def fork_list_versions():
+    releases = fork_api_get("/releases?per_page=100") or []
+    return [
+        r["tag_name"] for r in releases if not r["draft"] and r["tag_name"] != FORK_CONFIG_RELEASE
+    ]
+
+
+def fork_get_release(version):
+    if version == "latest":
+        release = fork_api_get("/releases/latest")
+    else:
+        tag = version if version.startswith("v") else "v" + version
+        release = fork_api_get(f"/releases/tags/{tag}")
+    if release is None:
+        sys.exit(colour_str_error(f"error: Infineon release '{version}' not found"))
+    return release
+
+
+def download_file(url, dest_path):
+    try:
+        res = requests.get(url, timeout=60)
+        res.raise_for_status()
+    except requests.RequestException as e:
+        sys.exit(colour_str_error(f"error: failed to download {url}: {e}"))
+    with open(dest_path, "wb") as f:
+        f.write(res.content)
+    return dest_path
+
+
+def fork_download_package(board, version, dest_dir):
+    """Download a fork release into dest_dir.
+
+    Returns the release tag and either {"zip": path} or {"hex": path, "cfg": path, "flm": path}.
+    """
+    release = fork_get_release(version)
+    tag = release["tag_name"]
+    assets = {a["name"]: a["browser_download_url"] for a in release["assets"]}
+
+    zip_name = f"mpy-psoc-edge_{board}.zip"
+    if zip_name in assets:
+        return tag, {"zip": download_file(assets[zip_name], os.path.join(dest_dir, zip_name))}
+
+    hex_name = f"mpy-psoc-edge_{board}.hex"
+    if hex_name not in assets:
+        sys.exit(colour_str_error(f"error: release {tag} has no firmware for board {board}"))
+
+    cfg_name = f"qspi_config_{board}.cfg"
+    flm_name = next(b["flm_file"] for b in boards if b["name"] == board)
+    cfg_assets = {
+        a["name"]: a["browser_download_url"]
+        for a in fork_get_release(FORK_CONFIG_RELEASE)["assets"]
+    }
+    for name in (cfg_name, flm_name):
+        if name not in cfg_assets:
+            sys.exit(colour_str_error(f"error: openocd config file {name} not found"))
+
+    return tag, {
+        "hex": download_file(assets[hex_name], os.path.join(dest_dir, hex_name)),
+        # openocd looks the QSPI config up by its generic name.
+        "cfg": download_file(cfg_assets[cfg_name], os.path.join(dest_dir, "qspi_config.cfg")),
+        "flm": download_file(cfg_assets[flm_name], os.path.join(dest_dir, flm_name)),
+    }
 
 
 ####################################################################################################
