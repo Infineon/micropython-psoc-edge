@@ -1,4 +1,4 @@
-import argparse, os, re, sys, shlex, shutil, subprocess, requests, tempfile, zipfile, tarfile
+import argparse, os, re, sys, shutil, subprocess, requests, tempfile, zipfile, tarfile
 
 boards = [
     {"name": "KIT_PSE84_AI", "ocd_cfg_file": "pse84xgxs2.cfg", "flm_file": "PSE84_SMIF.FLM"},
@@ -200,34 +200,35 @@ def openocd_program(board, hex_file, cfg_dir, flm_file, serial_adapter_sn=None):
     if serial_adapter_sn is not None:
         serial_adapter_opt = "adapter serial " + str(serial_adapter_sn)
 
-    openocd_cmd = (
-        openocd
-        + " -s "
-        + str(openocd_root_dir)
-        + "/scripts"
-        + " -s "
-        + str(cfg_dir)
-        + ' -c "set QSPI_FLASHLOADER '
-        + str(flm_file)
-        + '"'
-        + ' -c "source [find interface/kitprog3.cfg]; '
-        + str(serial_adapter_opt)
+    def tcl_path(path):
+        # In Tcl a backslash starts an escape ("\t" is a tab) and a space splits the word.
+        return "{" + str(path).replace("\\", "/") + "}"
+
+    openocd_args = [
+        openocd,
+        "-s",
+        openocd_root_dir + "/scripts",
+        "-s",
+        str(cfg_dir).replace("\\", "/"),
+        "-c",
+        "set QSPI_FLASHLOADER " + tcl_path(flm_file),
+        "-c",
+        "source [find interface/kitprog3.cfg]; "
+        + serial_adapter_opt
         + ";"
         + " transport select swd;"
         + " source [find target/infineon/"
-        + str(ocd_cfg_file)
+        + ocd_cfg_file
         + "];"
         + " init; reset init; adapter speed 12000;"
         + " flash write_image erase "
-        + str(hex_file)
+        + tcl_path(hex_file)
         + ";"
         + " verify_image "
-        + str(hex_file)
+        + tcl_path(hex_file)
         + ";"
-        + ' reset run; shutdown;"'
-    )
-
-    openocd_args = shlex.split(openocd_cmd)
+        + " reset run; shutdown;",
+    ]
 
     ocd_proc = subprocess.Popen(openocd_args, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
     try:
