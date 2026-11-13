@@ -1,11 +1,17 @@
-import argparse, os, sys, shlex, shutil, subprocess, requests, tempfile, zipfile, tarfile
+import argparse, os, re, sys, shutil, subprocess, requests, tempfile, zipfile, tarfile
 
 boards = [
-    {"name": "KIT_PSE84_AI", "ocd_cfg_file": "pse84xgxs2.cfg"},
+    {"name": "KIT_PSE84_AI", "ocd_cfg_file": "pse84xgxs2.cfg", "flm_file": "PSE84_SMIF.FLM"},
 ]
 
 opsys = ""
 version = "0.1.0"
+
+# Erase, program and verify of a full firmware image takes about 40 s.
+OPENOCD_FLASH_TIMEOUT_S = 180
+
+# Infineon OpenOCD release accepted: same major, at least this minor/patch.
+OPENOCD_MIN_VERSION = (5, 8, 0)
 
 
 # Decorator to flush every print
@@ -82,7 +88,7 @@ def openocd_download_install():
             os.environ["PATH"] = os.path.join("openocd", "bin") + os.pathsep + os.environ["PATH"]
             valid_openocd_version = is_openocd_already_in_sys_path()
             if not valid_openocd_version:
-                clean_openocd()
+                openocd_remove()
 
             return valid_openocd_version
 
@@ -98,13 +104,11 @@ def openocd_download_install():
             if err:
                 return False
             out_str = out.decode()
-            supported_versions = [
-                "0.12.0+dev-5.8.0.3960",
-                "0.12.0+dev-5.11.0.4042",
-                "0.12.0+dev-5.12.0.4170",
-            ]
-            for ver in supported_versions:
-                if ver in out_str:
+            # Infineon builds report e.g. "0.12.0+dev-5.16.1.4486", stock OpenOCD does not.
+            match = re.search(r"\+dev-(\d+)\.(\d+)\.(\d+)\.\d+", out_str)
+            if match:
+                ver = tuple(int(g) for g in match.groups())
+                if ver[0] == OPENOCD_MIN_VERSION[0] and ver >= OPENOCD_MIN_VERSION:
                     print_f(f"openocd found in system path : {shutil.which('openocd')}")
                     return True
         except:
@@ -126,8 +130,13 @@ def openocd_download_install():
             os.remove(file_name)
 
     def download_openocd(file_url, file_name):
-        res = requests.get(file_url)
-        open(file_name, "wb").write(res.content)
+        try:
+            res = requests.get(file_url, timeout=60)
+            res.raise_for_status()
+        except requests.RequestException as e:
+            sys.exit(colour_str_error(f"error: failed to download openocd: {e}"))
+        with open(file_name, "wb") as f:
+            f.write(res.content)
         os.replace(file_name, openocd_compressed)
 
     def extract_openocd():
@@ -191,43 +200,48 @@ def openocd_program(board, hex_file, cfg_dir, flm_file, serial_adapter_sn=None):
     if serial_adapter_sn is not None:
         serial_adapter_opt = "adapter serial " + str(serial_adapter_sn)
 
-    openocd_cmd = (
-        openocd
-        + " -s "
-        + str(openocd_root_dir)
-        + "/scripts"
-        + " -s "
-        + str(cfg_dir)
-        + ' -c "set QSPI_FLASHLOADER '
-        + str(flm_file)
-        + '"'
-        + ' -c "source [find interface/kitprog3.cfg]; '
-        + str(serial_adapter_opt)
+    def tcl_path(path):
+        # In Tcl a backslash starts an escape ("\t" is a tab) and a space splits the word.
+        return "{" + str(path).replace("\\", "/") + "}"
+
+    openocd_args = [
+        openocd,
+        "-s",
+        openocd_root_dir + "/scripts",
+        "-s",
+        str(cfg_dir).replace("\\", "/"),
+        "-c",
+        "set QSPI_FLASHLOADER " + tcl_path(flm_file),
+        "-c",
+        "source [find interface/kitprog3.cfg]; "
+        + serial_adapter_opt
         + ";"
         + " transport select swd;"
         + " source [find target/infineon/"
-        + str(ocd_cfg_file)
+        + ocd_cfg_file
         + "];"
         + " init; reset init; adapter speed 12000;"
         + " flash write_image erase "
-        + str(hex_file)
-        + ";"
+        + tcl_path(hex_file)
+        + " 0 ihex;"
         + " verify_image "
-        + str(hex_file)
-        + ";"
-        + ' reset run; shutdown;"'
-    )
-
-    openocd_args = shlex.split(openocd_cmd)
+        + tcl_path(hex_file)
+        + " 0 ihex;"
+        + " reset run; shutdown;",
+    ]
 
     ocd_proc = subprocess.Popen(openocd_args, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
     try:
-        out, err = ocd_proc.communicate(timeout=30)
-    except:
+        out, err = ocd_proc.communicate(timeout=OPENOCD_FLASH_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
         ocd_proc.kill()
-        sys.exit(colour_str_error("openocd error."))
+        ocd_proc.communicate()
+        sys.exit(colour_str_error(f"error: openocd timed out after {OPENOCD_FLASH_TIMEOUT_S} s."))
     if err:
-        sys.exit(colour_str_error(err.decode() + "Are you sure the board is connected?"))
+        err_str = err.decode()
+        if "CMSIS-DAP" in err_str:
+            err_str += "Are you sure the board is connected?"
+        sys.exit(colour_str_error(err_str))
 
 
 def openocd_remove():
@@ -258,14 +272,31 @@ def validate_board_name(board_name):
         sys.exit(colour_str_error("error: board is not supported"))
 
 
-def flash_from_files(board, hex_file, cfg_file, flm_file, serial_adapter_sn):
+def flash_from_files(board, hex_file, cfg_file, flm_file, serial_adapter_sn_list, source=None):
     cfg_dir = os.path.dirname(cfg_file)
-    print(f"Flashing board '{board}' with hex file '{os.path.basename(hex_file)}'...")
-    openocd_program(board, hex_file, cfg_dir, flm_file, serial_adapter_sn)
-    print(colour_str_success("Device setup completed :)"))
+    tmp_cfg_dir = None
+    if os.path.basename(cfg_file) != "qspi_config.cfg":
+        # openocd silently ignores a QSPI config that is not found as "qspi_config.cfg".
+        tmp_cfg_dir = tempfile.mkdtemp()
+        shutil.copy(cfg_file, os.path.join(tmp_cfg_dir, "qspi_config.cfg"))
+        cfg_dir = tmp_cfg_dir
+    openocd_download_install()
+    if source is None:
+        deploying = f"Deploying hex file {hex_file} ..."
+    else:
+        # The files come from a temporary dir, so name the origin instead of its path.
+        deploying = f"Deploying hex file {os.path.basename(hex_file)} (from {source}) ..."
+    try:
+        for sn in serial_adapter_sn_list:
+            print(deploying)
+            openocd_program(board, hex_file, cfg_dir, flm_file, sn)
+            print(colour_str_success("Device setup completed :)"))
+    finally:
+        if tmp_cfg_dir is not None:
+            shutil.rmtree(tmp_cfg_dir)
 
 
-def flash_from_package(board, zip_package, serial_adapter_sn):
+def flash_from_package(board, zip_package, serial_adapter_sn_list):
     def get_files_from_package(zip_package):
         hex_file = None
         cfg_file = None
@@ -275,8 +306,12 @@ def flash_from_package(board, zip_package, serial_adapter_sn):
             sys.exit(colour_str_error("error: zip package not found"))
 
         tmpdirname = tempfile.mkdtemp()
-        with zipfile.ZipFile(zip_package, "r") as zip_ref:
-            zip_ref.extractall(tmpdirname)
+        try:
+            with zipfile.ZipFile(zip_package, "r") as zip_ref:
+                zip_ref.extractall(tmpdirname)
+        except zipfile.BadZipFile:
+            shutil.rmtree(tmpdirname)
+            sys.exit(colour_str_error("error: zip package is not a valid zip file"))
         for root, dirs, files in os.walk(tmpdirname):
             for file in files:
                 if file.endswith(".hex"):
@@ -295,17 +330,352 @@ def flash_from_package(board, zip_package, serial_adapter_sn):
 
     hex_file, cfg_file, flm_file, tmpdirname = get_files_from_package(zip_package)
     try:
-        flash_from_files(board, hex_file, cfg_file, flm_file, serial_adapter_sn)
+        flash_from_files(
+            board,
+            hex_file,
+            cfg_file,
+            flm_file,
+            serial_adapter_sn_list,
+            os.path.basename(zip_package),
+        )
     finally:
         shutil.rmtree(tmpdirname)
 
 
+####################################################################################################
+# Multiple devices support (CI and test setups), based on a devices YAML file.
+
+
+def get_serial_nums_from_devs_file(board, serial_adapter_sn, devs_file):
+    if devs_file is None:
+        return [serial_adapter_sn]
+
+    if opsys == "win":
+        print_f(
+            colour_str_warn(
+                "warning: Device YAML file usage is not currently supported on Windows systems. Proceed at your own risk."
+            )
+        )
+
+    try:
+        from etdevs.devs import Device
+    except ImportError:
+        sys.exit(
+            colour_str_error(
+                "error: etdevs package not found. Please install it with 'pip install etdevs'"
+            )
+        )
+
+    all_available_devs = Device.load_device_list_from_yml(devs_file)
+    available_devs_board = [dev for dev in all_available_devs if dev.name == board]
+
+    if serial_adapter_sn:
+        serial_adapter_sn_list = [
+            dev.uid for dev in available_devs_board if dev.uid == serial_adapter_sn
+        ]
+        if not serial_adapter_sn_list:
+            sys.exit(
+                colour_str_error("error: serial adapter sn not found in devs file for that board")
+            )
+    else:
+        serial_adapter_sn_list = [dev.uid for dev in available_devs_board]
+        if not serial_adapter_sn_list:
+            sys.exit(colour_str_error("error: no devices found in devs file for that board"))
+
+    print_f(
+        f"Found {len(serial_adapter_sn_list)} devices "
+        f"with serial number:  {serial_adapter_sn_list}"
+    )
+    return serial_adapter_sn_list
+
+
+####################################################################################################
+# Infineon fork releases (source of the from-remote command)
+
+FORK_API_URL = "https://api.github.com/repos/Infineon/micropython-psoc-edge"
+
+# Holds the openocd config files for the releases published without a zip package.
+FORK_CONFIG_RELEASE = "v0.0.0"
+
+
+def fork_api_get(path):
+    try:
+        res = requests.get(FORK_API_URL + path, timeout=30)
+        res.raise_for_status()
+    except requests.HTTPError as e:
+        if e.response.status_code == 404:
+            return None
+        sys.exit(colour_str_error(f"error: failed to query the Infineon releases: {e}"))
+    except requests.RequestException as e:
+        sys.exit(colour_str_error(f"error: failed to query the Infineon releases: {e}"))
+    return res.json()
+
+
+def fork_list_versions():
+    releases = fork_api_get("/releases?per_page=100") or []
+    return [
+        r["tag_name"] for r in releases if not r["draft"] and r["tag_name"] != FORK_CONFIG_RELEASE
+    ]
+
+
+def fork_get_release(version):
+    if version == "latest":
+        release = fork_api_get("/releases/latest")
+    else:
+        tag = version if version.startswith("v") else "v" + version
+        release = fork_api_get(f"/releases/tags/{tag}")
+    if release is None:
+        sys.exit(colour_str_error(f"error: Infineon release '{version}' not found"))
+    return release
+
+
+def download_file(url, dest_path):
+    try:
+        res = requests.get(url, timeout=60)
+        res.raise_for_status()
+    except requests.RequestException as e:
+        sys.exit(colour_str_error(f"error: failed to download {url}: {e}"))
+    with open(dest_path, "wb") as f:
+        f.write(res.content)
+    return dest_path
+
+
+def fork_download_package(board, version, dest_dir):
+    """Download a fork release into dest_dir.
+
+    Returns the release tag and either {"zip": path} or {"hex": path, "cfg": path, "flm": path}.
+    """
+    release = fork_get_release(version)
+    tag = release["tag_name"]
+    assets = {a["name"]: a["browser_download_url"] for a in release["assets"]}
+
+    zip_name = f"mpy-psoc-edge_{board}.zip"
+    if zip_name in assets:
+        return tag, {"zip": download_file(assets[zip_name], os.path.join(dest_dir, zip_name))}
+
+    hex_name = f"mpy-psoc-edge_{board}.hex"
+    if hex_name not in assets:
+        sys.exit(colour_str_error(f"error: release {tag} has no firmware for board {board}"))
+
+    cfg_name = f"qspi_config_{board}.cfg"
+    flm_name = next(b["flm_file"] for b in boards if b["name"] == board)
+    cfg_assets = {
+        a["name"]: a["browser_download_url"]
+        for a in fork_get_release(FORK_CONFIG_RELEASE)["assets"]
+    }
+    for name in (cfg_name, flm_name):
+        if name not in cfg_assets:
+            sys.exit(colour_str_error(f"error: openocd config file {name} not found"))
+
+    return tag, {
+        "hex": download_file(assets[hex_name], os.path.join(dest_dir, hex_name)),
+        # openocd looks the QSPI config up by its generic name.
+        "cfg": download_file(cfg_assets[cfg_name], os.path.join(dest_dir, "qspi_config.cfg")),
+        "flm": download_file(cfg_assets[flm_name], os.path.join(dest_dir, flm_name)),
+    }
+
+
+def flash_from_remote(board, fw_version, serial_adapter_sn_list, quiet=False):
+    print_f("MicroPython PSOC Edge Version :: ", fw_version)
+    if not quiet:
+        print_f(f"Downloading mpy-psoc-edge {fw_version} for {board} board...")
+
+    tmpdirname = tempfile.mkdtemp()
+    try:
+        tag, files = fork_download_package(board, fw_version, tmpdirname)
+        if "zip" in files:
+            flash_from_package(board, files["zip"], serial_adapter_sn_list)
+        else:
+            flash_from_files(
+                board, files["hex"], files["cfg"], files["flm"], serial_adapter_sn_list, tag
+            )
+    finally:
+        shutil.rmtree(tmpdirname)
+
+
+####################################################################################################
+# Official MicroPython downloads (micropython.org), parsed from the board download page.
+
+MPY_DOWNLOADS_URL = "https://micropython.org"
+
+
+def mpy_list_builds(board):
+    """Return the builds listed for the board, releases first, newest first."""
+    try:
+        res = requests.get(f"{MPY_DOWNLOADS_URL}/download/{board}/", timeout=30)
+        res.raise_for_status()
+    except requests.RequestException as e:
+        sys.exit(colour_str_error(f"error: failed to query micropython.org downloads: {e}"))
+
+    pattern = (
+        rf'href="(/resources/firmware/{re.escape(board)}-'
+        rf'(\d{{4}})(\d{{2}})(\d{{2}})-([^"]+)\.zip)"'
+    )
+    builds = [
+        {
+            "version": m.group(5),
+            "date": f"{m.group(2)}-{m.group(3)}-{m.group(4)}",
+            "url": MPY_DOWNLOADS_URL + m.group(1),
+            "preview": "preview" in m.group(5),
+        }
+        for m in re.finditer(pattern, res.text)
+    ]
+    if not builds:
+        sys.exit(colour_str_error(f"error: no builds found for {board} at micropython.org"))
+    return builds
+
+
+def mpy_get_build(board, version):
+    builds = mpy_list_builds(board)
+    if version == "latest":
+        releases = [b for b in builds if not b["preview"]]
+        if not releases:
+            sys.exit(colour_str_error(f"error: no release found for {board} at micropython.org"))
+        return releases[0]
+    tag = version if version.startswith("v") else "v" + version
+    for b in builds:
+        if b["version"] == tag:
+            return b
+    sys.exit(colour_str_error(f"error: MicroPython build '{version}' not found"))
+
+
+def flash_from_micropython(board, fw_version, serial_adapter_sn_list, quiet=False):
+    build = mpy_get_build(board, fw_version)
+    print_f("MicroPython PSOC Edge Version :: ", build["version"])
+    if not quiet:
+        print_f(f"Downloading MicroPython {build['version']} for {board} board...")
+
+    tmpdirname = tempfile.mkdtemp()
+    try:
+        zip_name = os.path.basename(build["url"])
+        zip_package = download_file(build["url"], os.path.join(tmpdirname, zip_name))
+        flash_from_package(board, zip_package, serial_adapter_sn_list)
+    finally:
+        shutil.rmtree(tmpdirname)
+
+
+####################################################################################################
+# Interactive mode, used when no command is given.
+
+
+def select_board():
+    print_f("")
+    print_f("     Supported MicroPython PSOC EDGE boards    ")
+    print_f("+---------+-----------------------------------+")
+    print_f("|   ID    |              Board                |")
+    print_f("+---------+-----------------------------------+")
+    for i, brd in enumerate(boards):
+        print_f(f"|   {i:<6}|{brd['name']:^35}|")
+        print_f("+---------+-----------------------------------+")
+    print_f("")
+    print_f("")
+
+    if len(boards) == 1:
+        board = boards[0]["name"]
+        print_f(colour_str_highlight(f"Auto-selecting the only supported board: {board}\n"))
+        return board
+
+    try:
+        board_index = int(input(colour_str_highlight("Please type the desired board ID: ")))
+        if not 0 <= board_index < len(boards):
+            raise ValueError
+    except ValueError:
+        sys.exit(colour_str_error("error: board ID is not valid"))
+    return boards[board_index]["name"]
+
+
+def ask(prompt, default=None):
+    return input(colour_str_highlight(prompt)).strip() or default
+
+
+def ask_path(prompt):
+    path = ask(prompt)
+    if path is None:
+        sys.exit(colour_str_error("error: a path is required"))
+    return os.path.expanduser(path.strip("\"'"))
+
+
+def interactive_args():
+    """Gather the values of the commands from the user. Returns the same fields as the parser."""
+    board = select_board()
+
+    print_f("Firmware source:")
+    print_f("  1) Download a release from the Infineon fork")
+    print_f("  2) Download an official MicroPython release (micropython.org)")
+    print_f("  3) Local package (.zip)")
+    print_f("  4) Local files (.hex, .cfg, .FLM)")
+    source = ask("Please type the firmware source [1]: ", "1")
+
+    args = argparse.Namespace(
+        board=board,
+        serial_num=None,
+        devs_file=None,
+        quiet=False,
+        fw_version="latest",
+        zip_package=None,
+        hex_file=None,
+        cfg_file=None,
+        flm_file=None,
+    )
+    if source == "1":
+        args.command = "from-remote"
+        print_f("Available releases: " + ", ".join(["latest"] + fork_list_versions()))
+        args.fw_version = ask("Please type the desired version [latest]: ", "latest")
+    elif source == "2":
+        args.command = "from-micropython"
+        builds = mpy_list_builds(board)
+        print_f("Available builds:")
+        for i, b in enumerate(builds, 1):
+            kind = "preview" if b["preview"] else "release"
+            print_f(f"  {i}) {b['version']} ({b['date']}) [{kind}]")
+        choice = ask("Please type the build number [1]: ", "1")
+        if not choice.isdigit() or not 1 <= int(choice) <= len(builds):
+            sys.exit(colour_str_error("error: build number is not valid"))
+        args.fw_version = builds[int(choice) - 1]["version"]
+    elif source == "3":
+        args.command = "from-package"
+        args.zip_package = ask_path("Please type the path of the package .zip: ")
+    elif source == "4":
+        args.command = "from-files"
+        args.hex_file = ask_path("Please type the path of the .hex file: ")
+        args.cfg_file = ask_path("Please type the path of the .cfg file: ")
+        args.flm_file = ask_path("Please type the path of the .FLM file: ")
+    else:
+        sys.exit(colour_str_error("error: firmware source is not valid"))
+
+    args.serial_num = ask(
+        "Serial number of the board serial adapter (empty if only one board is connected): "
+    )
+    return args
+
+
+####################################################################################################
+
+
 def flash_command_args(args):
-    # TODO: if no command (None) implement interactive mode to gather the values.
     validate_board_name(args.board)
+    print_f("MicroPython PSOC Edge Board :: ", args.board)
+    serial_adapter_sn_list = get_serial_nums_from_devs_file(
+        args.board, args.serial_num, args.devs_file
+    )
 
     if args.command == "from-package":
-        flash_from_package(args.board, args.zip_package, args.serial_num)
+        flash_from_package(args.board, args.zip_package, serial_adapter_sn_list)
+    elif args.command == "from-files":
+        for label, path in (
+            ("hex", args.hex_file),
+            ("cfg", args.cfg_file),
+            ("FLM", args.flm_file),
+        ):
+            if not os.path.isfile(path):
+                sys.exit(colour_str_error(f"error: {label} file not found: {path}"))
+        flash_from_files(
+            args.board, args.hex_file, args.cfg_file, args.flm_file, serial_adapter_sn_list
+        )
+    elif args.command == "from-remote":
+        flash_from_remote(args.board, args.fw_version, serial_adapter_sn_list, args.quiet)
+    elif args.command == "from-micropython":
+        flash_from_micropython(args.board, args.fw_version, serial_adapter_sn_list, args.quiet)
 
 
 def parser():
@@ -337,6 +707,15 @@ def parser():
         type=str,
         help="Serial number of the board serial adapter",
     )
+    common.add_argument(
+        "-d", "--devs-file", type=str, help="Devices file for multiple device deployment"
+    )
+    common.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Quiet. Do not prompt any user confirmation request",
+    )
 
     # Subcommand: from-package
     sp_zip = subparsers.add_parser(
@@ -354,14 +733,43 @@ def parser():
         help="Firmware zip package containing .hex, .cfg and .FLM files",
     )
 
-    # TODO: Subcommand: from-files (pass directly the .hex, .cfg and .FLM files)
-    # TODO: Subcommand: from-remote (just pass the board and optionally the version, and the tool will fetch the latest firmware from Infineon fork and flash it)
+    # Subcommand: from-files
+    sp_files = subparsers.add_parser(
+        "from-files",
+        parents=[common],
+        formatter_class=argparse.RawTextHelpFormatter,
+        help="Flash from individual .hex, .cfg and .FLM files",
+        description="Flash passing directly the .hex, .cfg and .FLM files.",
+    )
+    sp_files.add_argument("-f", "--hex-file", required=True, type=str, help="Firmware .hex file")
+    sp_files.add_argument(
+        "-c", "--cfg-file", required=True, type=str, help="QSPI configuration .cfg file"
+    )
+    sp_files.add_argument(
+        "-l", "--flm-file", required=True, type=str, help="Flash loader .FLM file"
+    )
+
+    # Subcommand: from-remote
+    sp_remote = subparsers.add_parser(
+        "from-remote",
+        parents=[common],
+        formatter_class=argparse.RawTextHelpFormatter,
+        help="Download a release from the Infineon fork and flash it",
+        description="Download a release from the Infineon fork and flash it.",
+    )
+    sp_remote.add_argument(
+        "-v",
+        "--version",
+        dest="fw_version",
+        default="latest",
+        type=str,
+        help="MicroPython PSOC Edge firmware version, e.g. v1.0.0 (default: latest)",
+    )
 
     args = p.parse_args()
 
-    # Print help if no command is provided
-    # TODO: Future interactive mode.
-    if args.command is None:
+    # Without a command and a terminal to ask the user, print the help.
+    if args.command is None and not sys.stdin.isatty():
         p.print_help(sys.stderr)
         sys.exit(1)
 
@@ -372,6 +780,12 @@ if __name__ == "__main__":
     try:
         set_environment()
         args = parser()
+        if args.command is None:
+            try:
+                args = interactive_args()
+            except KeyboardInterrupt:
+                # Nothing downloaded yet, so keep any previously installed openocd.
+                sys.exit(colour_str_error("error: keyboard interrupt"))
         flash_command_args(args)
     except KeyboardInterrupt:
         print_f(colour_str_error("error: keyboard interrupt"))

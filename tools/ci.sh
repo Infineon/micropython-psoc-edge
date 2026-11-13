@@ -411,8 +411,8 @@ function ci_psoc_edge_build_hil {
 
 function ci_psoc_edge_deploy_mpy_hil {
     board=$1
-    # hex file including path with respect to micropython root
-    hex_file=$2
+    # firmware zip package including path with respect to micropython root
+    zip_file=$2
     devs_file=$3
 
     # if no devices file is provided, don´t add the --devs-file argument to the command
@@ -422,7 +422,7 @@ function ci_psoc_edge_deploy_mpy_hil {
         dev_files_arg="--devs-file ../../${devs_file}"
     fi
 
-    docker exec mpy-ci /bin/bash -c "cd ../../tools/psoc-edge && python3 mpy-pse.py device-setup --board ${board} --hex-file ${hex_file} ${dev_files_arg} -q"
+    docker exec mpy-ci /bin/bash -c "cd ../../tools/psoc-edge && python3 ../../ports/psoc-edge/tools/mp-ifx-flash.py from-package --board ${board} --zip-package ../../${zip_file} ${dev_files_arg} -q"
 }
 
 function ci_psoc_edge_deploy_cm55_hil {
@@ -461,11 +461,11 @@ function ci_psoc_edge_install_libs_hil {
 
 function ci_psoc_edge_deploy_hil {
     board=$1
-    # hex file including path with respect to micropython root
-    hex_file=$2
+    # firmware zip package including path with respect to micropython root
+    zip_file=$2
     devs_file=$3
 
-    ci_psoc_edge_deploy_mpy_hil "${board}" "${hex_file}" "${devs_file}"
+    ci_psoc_edge_deploy_mpy_hil "${board}" "${zip_file}" "${devs_file}"
     ci_psoc_edge_deploy_cm55_hil "${board}" "${devs_file}"
     ci_psoc_edge_install_libs_hil "${board}" "${devs_file}"
 }
