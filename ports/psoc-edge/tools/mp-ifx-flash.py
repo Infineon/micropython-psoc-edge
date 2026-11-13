@@ -223,10 +223,10 @@ def openocd_program(board, hex_file, cfg_dir, flm_file, serial_adapter_sn=None):
         + " init; reset init; adapter speed 12000;"
         + " flash write_image erase "
         + tcl_path(hex_file)
-        + ";"
+        + " 0 ihex;"
         + " verify_image "
         + tcl_path(hex_file)
-        + ";"
+        + " 0 ihex;"
         + " reset run; shutdown;",
     ]
 
@@ -238,7 +238,10 @@ def openocd_program(board, hex_file, cfg_dir, flm_file, serial_adapter_sn=None):
         ocd_proc.communicate()
         sys.exit(colour_str_error(f"error: openocd timed out after {OPENOCD_FLASH_TIMEOUT_S} s."))
     if err:
-        sys.exit(colour_str_error(err.decode() + "Are you sure the board is connected?"))
+        err_str = err.decode()
+        if "CMSIS-DAP" in err_str:
+            err_str += "Are you sure the board is connected?"
+        sys.exit(colour_str_error(err_str))
 
 
 def openocd_remove():
@@ -271,16 +274,26 @@ def validate_board_name(board_name):
 
 def flash_from_files(board, hex_file, cfg_file, flm_file, serial_adapter_sn_list, source=None):
     cfg_dir = os.path.dirname(cfg_file)
+    tmp_cfg_dir = None
+    if os.path.basename(cfg_file) != "qspi_config.cfg":
+        # openocd silently ignores a QSPI config that is not found as "qspi_config.cfg".
+        tmp_cfg_dir = tempfile.mkdtemp()
+        shutil.copy(cfg_file, os.path.join(tmp_cfg_dir, "qspi_config.cfg"))
+        cfg_dir = tmp_cfg_dir
     openocd_download_install()
     if source is None:
         deploying = f"Deploying hex file {hex_file} ..."
     else:
         # The files come from a temporary dir, so name the origin instead of its path.
         deploying = f"Deploying hex file {os.path.basename(hex_file)} (from {source}) ..."
-    for sn in serial_adapter_sn_list:
-        print(deploying)
-        openocd_program(board, hex_file, cfg_dir, flm_file, sn)
-        print(colour_str_success("Device setup completed :)"))
+    try:
+        for sn in serial_adapter_sn_list:
+            print(deploying)
+            openocd_program(board, hex_file, cfg_dir, flm_file, sn)
+            print(colour_str_success("Device setup completed :)"))
+    finally:
+        if tmp_cfg_dir is not None:
+            shutil.rmtree(tmp_cfg_dir)
 
 
 def flash_from_package(board, zip_package, serial_adapter_sn_list):
