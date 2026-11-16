@@ -737,16 +737,18 @@ def parser():
     sp_files = subparsers.add_parser(
         "from-files",
         parents=[common],
+        add_help=False,  # -h is the hex file here
         formatter_class=argparse.RawTextHelpFormatter,
         help="Flash from individual .hex, .cfg and .FLM files",
         description="Flash passing directly the .hex, .cfg and .FLM files.",
     )
-    sp_files.add_argument("-f", "--hex-file", required=True, type=str, help="Firmware .hex file")
+    sp_files.add_argument("--help", action="help", help="Show this help message and exit")
+    sp_files.add_argument("-h", "--hex-file", required=True, type=str, help="Firmware .hex file")
     sp_files.add_argument(
         "-c", "--cfg-file", required=True, type=str, help="QSPI configuration .cfg file"
     )
     sp_files.add_argument(
-        "-l", "--flm-file", required=True, type=str, help="Flash loader .FLM file"
+        "-f", "--flm-file", required=True, type=str, help="Flash loader .FLM file"
     )
 
     # Subcommand: from-remote
