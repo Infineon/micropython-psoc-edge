@@ -52,7 +52,7 @@ The interactive mode needs a terminal and takes care of the following steps:
 * Download the selected firmware
 * Deploy the firmware on your board
 
-The firmware source can be a release from the Infineon fork, an official MicroPython release or preview build from the
+The firmware source can be a release from the Infineon fork, an official MicroPython release, preview build from the
 `MicroPython download page <https://micropython.org/download/KIT_PSE84_AI/>`_, or local files. The commands described in the
 following sections skip the questions, so they can be used in scripts.
 
@@ -92,7 +92,7 @@ This is also the way to flash any other *.hex* file, like the CM55 application. 
 
 .. code-block:: bash
     
-    $ python mp-ifx-flash.py from-files -b KIT_PSE84_AI -f pathtodir/firmware.hex -c pathtodir/qspi_config.cfg -l pathtodir/PSE84_SMIF.FLM
+    $ python mp-ifx-flash.py from-files -b KIT_PSE84_AI -h pathtodir/firmware.hex -c pathtodir/qspi_config.cfg -f pathtodir/PSE84_SMIF.FLM
 
 Multiple devices deployment
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
