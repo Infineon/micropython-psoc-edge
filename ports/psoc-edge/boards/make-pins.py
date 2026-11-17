@@ -257,10 +257,9 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self._unhidden_spi = []
         self._unhidden_uart = []
 
-        # TCPWM LINE tracking
-        self._pwm_pin_count = 0  # unique exposed pins with a TCPWM LINE AF
-        self._tcpwm_counter_max = 0  # highest counter number seen across all LINE AFs
-        self._tcpwm_counters = []  # sorted unique TCPWM counter IDs seen in LINE AFs
+        # TCPWM0 counter tracking
+        self._tcpwm0_counters = []  # sorted unique TCPWM0 counter numbers of the device
+        self._pwm_counter_count = 0  # unique TCPWM0 counters with a LINE AF on an available pin
 
         # Trigger routing
         self._unhidden_peri0_tr_io_input = []
@@ -380,21 +379,24 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self._unhidden_spi.sort(key=int)
         self._unhidden_uart.sort(key=int)
 
-    # Collect TCPWM LINE statistics across all available pins:
-    # - count of unique TCPWM counter IDs visible through at least one LINE AF
-    #   (this equals the maximum number of concurrent PWM instances)
-    # - highest counter number seen (used to compute compact array size)
-    def add_tcpwm(self):
-        seen_counters = set()
-        for pin in self.available_pins():
+    @staticmethod
+    def _tcpwm0_line_counters(pins):
+        counters = set()
+        for pin in pins:
             for af in pin._afs:
-                if af.af_fn == "TCPWM" and af.af_signal == "LINE" and af.af_supported:
-                    counter_num = int(af.af_unit)
-                    seen_counters.add(counter_num)
-                    if counter_num > self._tcpwm_counter_max:
-                        self._tcpwm_counter_max = counter_num
-        self._tcpwm_counters = sorted(seen_counters)
-        self._pwm_pin_count = len(seen_counters)
+                if af.af_ptr == "TCPWM0" and af.af_signal == "LINE" and af.af_supported:
+                    counters.add(int(af.af_unit))
+        return counters
+
+    # Collect the TCPWM0 counters:
+    # - The device counters are collected from the LINE AFs of all the pins in
+    #   the AF csv file (regardless of board availability). These provide the
+    #   stable Timer/Counter ids, which must not depend on the board pins.
+    # - The amount of PWM capable counters is collected from the LINE AFs of the
+    #   pins available in the board csv file.
+    def add_tcpwm(self):
+        self._tcpwm0_counters = sorted(self._tcpwm0_line_counters(self._pins))
+        self._pwm_counter_count = len(self._tcpwm0_line_counters(self.available_pins()))
 
     def add_peri_tr_ios(self):
         for pin in self.available_pins(exclude_hidden=True):
@@ -503,92 +505,31 @@ class PSE84PinGenerator(boardgen.PinGenerator):
         self.print_port_defines(out_header)
 
     def print_tcpwm_defines(self, out_header):
-        # TCPWM counter ownership array must be large enough to index the highest
-        # counter number seen. Counters 0-7 map to indices 0-7, counters 256+ map
-        # to indices 8+, so the compact array size is (max_counter - 256 + 8 + 1)
-        # for high counters, or simply (max_counter + 1) for low ones.
-        max_c = self._tcpwm_counter_max
-        if max_c >= 256:
-            num_counters = (max_c - 256 + 8) + 1
-        else:
-            num_counters = max_c + 1
-
         print(file=out_header)
         print(
-            "// Number of entries in the compact TCPWM0 counter ownership array.",
+            f"#define MICROPY_PY_MACHINE_TCPWM0_NUM_COUNTERS ({len(self._tcpwm0_counters)})",
             file=out_header,
         )
         print(
-            f"#define MICROPY_PY_MACHINE_TCPWM0_NUM_COUNTERS ({num_counters}U)",
+            f"#define MICROPY_PY_MACHINE_PWM_MAX_OBJS ({self._pwm_counter_count})",
             file=out_header,
         )
-        print(
-            "// Number of exposed GPIO pins that support at least one TCPWM LINE AF.",
-            file=out_header,
-        )
-        print(
-            f"#define MICROPY_PY_MACHINE_PWM_MAX_OBJS ({self._pwm_pin_count})",
-            file=out_header,
-        )
-        print(file=out_header)
-
-    def print_tcpwm_hw_map(self, out_header):
-        # Unified TCPWM hardware map combining timer-id, counter, IRQ and PCLK.
-        # Both the timer map and the counter map cover the same 32 counters, so
-        # a single source-of-truth macro is sufficient.
-        # Each row: X(timer_id, tcpwm_counter_num, irq, pclk_dst)
-        hw_entries = [
-            # Group 0 (32-bit): Timer IDs 0-7 -> counters 0-7.
-            (0, "0U", "tcpwm_0_interrupts_0_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN0"),
-            (1, "1U", "tcpwm_0_interrupts_1_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN1"),
-            (2, "2U", "tcpwm_0_interrupts_2_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN2"),
-            (3, "3U", "tcpwm_0_interrupts_3_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN3"),
-            (4, "4U", "tcpwm_0_interrupts_4_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN4"),
-            (5, "5U", "tcpwm_0_interrupts_5_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN5"),
-            (6, "6U", "tcpwm_0_interrupts_6_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN6"),
-            (7, "7U", "tcpwm_0_interrupts_7_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN7"),
-            # Group 1 (16-bit): Timer IDs 8-31 -> counters 256-279.
-            (8, "256U", "tcpwm_0_interrupts_256_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN256"),
-            (9, "257U", "tcpwm_0_interrupts_257_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN257"),
-            (10, "258U", "tcpwm_0_interrupts_258_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN258"),
-            (11, "259U", "tcpwm_0_interrupts_259_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN259"),
-            (12, "260U", "tcpwm_0_interrupts_260_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN260"),
-            (13, "261U", "tcpwm_0_interrupts_261_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN261"),
-            (14, "262U", "tcpwm_0_interrupts_262_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN262"),
-            (15, "263U", "tcpwm_0_interrupts_263_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN263"),
-            (16, "264U", "tcpwm_0_interrupts_264_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN264"),
-            (17, "265U", "tcpwm_0_interrupts_265_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN265"),
-            (18, "266U", "tcpwm_0_interrupts_266_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN266"),
-            (19, "267U", "tcpwm_0_interrupts_267_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN267"),
-            (20, "268U", "tcpwm_0_interrupts_268_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN268"),
-            (21, "269U", "tcpwm_0_interrupts_269_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN269"),
-            (22, "270U", "tcpwm_0_interrupts_270_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN270"),
-            (23, "271U", "tcpwm_0_interrupts_271_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN271"),
-            (24, "272U", "tcpwm_0_interrupts_272_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN272"),
-            (25, "273U", "tcpwm_0_interrupts_273_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN273"),
-            (26, "274U", "tcpwm_0_interrupts_274_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN274"),
-            (27, "275U", "tcpwm_0_interrupts_275_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN275"),
-            (28, "276U", "tcpwm_0_interrupts_276_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN276"),
-            (29, "277U", "tcpwm_0_interrupts_277_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN277"),
-            (30, "278U", "tcpwm_0_interrupts_278_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN278"),
-            (31, "279U", "tcpwm_0_interrupts_279_IRQn", "PCLK_TCPWM0_CLOCK_COUNTER_EN279"),
-        ]
 
         print(file=out_header)
-        print(
-            "// Unified TCPWM map: timer_id, counter_num, IRQ, PCLK destination, and one-to-one trigger input route.",
-            file=out_header,
-        )
-        print(
-            "// Each row: X(timer_id, tcpwm_counter_num, irq, pclk_dst, trig_out_enum)",
-            file=out_header,
-        )
-        print("#define MICROPY_PY_MACHINE_TCPWM_MAP(X) \\", file=out_header)
-        for i, (tid, counter, irq, pclk) in enumerate(hw_entries):
-            counter_token = counter[:-1] if counter.endswith("U") else counter
-            trig = f"PERI_0_TRIG_OUT_MUX_3_TCPWM0_ONE_CNT_TR_IN{counter_token}"
-            suffix = " \\" if i < len(hw_entries) - 1 else ""
-            print(f"    X({tid:2d}, {counter}, {irq}, {pclk}, {trig}){suffix}", file=out_header)
+        print("// The MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(DO) macro will", file=out_header)
+        print("// apply the DO macro to all the TCPWM0 counters of the device.", file=out_header)
+        print("// The DO macro takes as arguments: DO(idx, grp, cnt).", file=out_header)
+        print("// - idx: index of the counter (0 to NUM_COUNTERS - 1).", file=out_header)
+        print("// - grp: TCPWM0 group of the counter.", file=out_header)
+        print("// - cnt: TCPWM0 counter number ((grp << 8) | counter in group).", file=out_header)
+        print("#define MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(DO) \\", file=out_header)
+
+        # The TCPWM counter number encodes the group in the bits above the 8-bit
+        # counter in group index.
+        lines = [f"DO({idx}, {cnt >> 8}, {cnt})" for idx, cnt in enumerate(self._tcpwm0_counters)]
+        macro_body = " \\\n".join(lines)
+        print(macro_body, file=out_header)
+
         print(file=out_header)
 
     def print_peri_tr_io_defines(self, out_header):
@@ -655,7 +596,6 @@ class PSE84PinGenerator(boardgen.PinGenerator):
     def print_af_header(self, out_af_header):
         self.print_scb_defines(out_af_header)
         self.print_tcpwm_defines(out_af_header)
-        self.print_tcpwm_hw_map(out_af_header)
         self.print_peri_tr_io_defines(out_af_header)
         self.print_adc_defines(out_af_header)
 
