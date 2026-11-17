@@ -59,7 +59,6 @@ typedef struct _machine_pwm_obj_t {
 // Sentinel value meaning "no trigger"; masked with 0x3U when assigned to 2-bit inputMode fields.
 #define CYBSP_PWM_LED_CTRL_INPUT_DISABLED 0x7U
 #define PWM_TCPWM_CLK_HZ        1000000UL
-#define PWM_GROUP1_PERIOD_MAX   (0xFFFFU)
 
 #define pwm_assert_raise_val(msg, ret)   if (ret != CY_RSLT_SUCCESS) { \
         mp_raise_msg_varg(&mp_type_ValueError, MP_ERROR_TEXT(msg), ret); \
@@ -166,12 +165,13 @@ static void pwm_config(machine_pwm_obj_t *self) {
         mp_raise_ValueError(MP_ERROR_TEXT("PWM frequency must be greater than 0"));
     }
     uint32_t period = PWM_TCPWM_CLK_HZ / self->frequency;
-    if (self->counter_num >= 256U && period > PWM_GROUP1_PERIOD_MAX) {
+    uint32_t period_max = machine_tcpwm_counter_period_max(self->counter_num);
+    if (period > period_max) {
         mp_raise_msg_varg(&mp_type_ValueError,
             MP_ERROR_TEXT("PWM frequency too low for 16-bit counter %lu; period %lu exceeds %lu ticks"),
             (unsigned long)self->counter_num,
             (unsigned long)period,
-            (unsigned long)PWM_GROUP1_PERIOD_MAX);
+            (unsigned long)period_max);
     }
     self->pwm_obj.period0 = period;
     self->pwm_obj.period1 = period;
