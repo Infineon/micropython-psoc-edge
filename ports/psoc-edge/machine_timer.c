@@ -44,7 +44,7 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-#define MACHINE_TIMER_NUM_INSTANCES  (32)
+#define MACHINE_TIMER_NUM_INSTANCES  MICROPY_PY_MACHINE_TCPWM0_NUM_COUNTERS
 
 // Shared general-purpose timer divider target frequency used by this module.
 #define TIMER_CLK_HZ  (1000000UL)
@@ -75,27 +75,23 @@ typedef struct _machine_timer_obj_t {
 
 const mp_obj_type_t machine_timer_type;  // forward declaration
 
-// Maximum period register value for each counter group.
-#define TIMER_GROUP0_PERIOD_MAX  (UINT32_MAX)  // 32-bit counters
-#define TIMER_GROUP1_PERIOD_MAX  (0xFFFFU)     // 16-bit counters
-
 // ---------------------------------------------------------------------------
-// Per-ID hardware mapping — generated from the board AF configuration.
-// Macro is defined in pins_af.h as MICROPY_PY_MACHINE_TCPWM_MAP(X).
-// Each row: X(timer_id, tcpwm_counter_num, irq, pclk_dst, trig_out_enum)
+// Per-ID hardware mapping from the generated TCPWM0 counters.
+// Macro is defined in pins_af.h as MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(DO).
+// Each entry: DO(idx, grp, cnt)
 // ---------------------------------------------------------------------------
 
-#define TIMER_HW_ENTRY(id, counter, irq, pclk, trig) counter,
+#define TIMER_HW_ENTRY(idx, grp, cnt) [idx] = cnt,
 static const uint32_t timer_hw[MACHINE_TIMER_NUM_INSTANCES] = {
-    MICROPY_PY_MACHINE_TCPWM_MAP(TIMER_HW_ENTRY)
+    MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(TIMER_HW_ENTRY)
 };
 #undef TIMER_HW_ENTRY
 
-#define TIMER_IRQ_CASE(id, counter, irq, pclk, trig) case counter: \
-        return irq;
+#define TIMER_IRQ_CASE(idx, grp, cnt) case cnt: \
+        return tcpwm_0_interrupts_##cnt##_IRQn;
 static IRQn_Type machine_timer_counter_irq(uint32_t counter_num) {
     switch (counter_num) {
-        MICROPY_PY_MACHINE_TCPWM_MAP(TIMER_IRQ_CASE)
+        MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(TIMER_IRQ_CASE)
         default:
             mp_raise_msg_varg(&mp_type_ValueError,
                 MP_ERROR_TEXT("Timer counter %lu does not have an IRQ mapping"),
@@ -162,19 +158,19 @@ static void machine_timer_isr(machine_timer_obj_t *self) {
 }
 
 // Generate one IRQ handler per timer id for direct dispatch without scanning.
-#define TIMER_IRQ_HANDLER_DECL(id, counter, irq, pclk, trig) \
-    static void machine_timer_irq_handler_##id(void) { \
-        machine_timer_obj_t *self = timer_obj[id]; \
+#define TIMER_IRQ_HANDLER_DECL(idx, grp, cnt) \
+    static void machine_timer_irq_handler_##idx(void) { \
+        machine_timer_obj_t *self = timer_obj[idx]; \
         if (self != NULL) { \
             machine_timer_isr(self); \
         } \
     }
-MICROPY_PY_MACHINE_TCPWM_MAP(TIMER_IRQ_HANDLER_DECL)
+MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(TIMER_IRQ_HANDLER_DECL)
 #undef TIMER_IRQ_HANDLER_DECL
 
-#define TIMER_IRQ_HANDLER_ENTRY(id, counter, irq, pclk, trig) machine_timer_irq_handler_##id,
+#define TIMER_IRQ_HANDLER_ENTRY(idx, grp, cnt) [idx] = machine_timer_irq_handler_##idx,
 static const cy_israddress machine_timer_irq_handlers[MACHINE_TIMER_NUM_INSTANCES] = {
-    MICROPY_PY_MACHINE_TCPWM_MAP(TIMER_IRQ_HANDLER_ENTRY)
+    MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(TIMER_IRQ_HANDLER_ENTRY)
 };
 #undef TIMER_IRQ_HANDLER_ENTRY
 
@@ -306,12 +302,13 @@ static mp_obj_t machine_timer_init_helper(machine_timer_obj_t *self,
         mp_raise_ValueError(MP_ERROR_TEXT("period out of range for 32-bit counter"));
     }
 
-    // Group 1 counters (num >= 256) are 16-bit; reject values that would overflow their period register.
-    if (self->counter_num >= 256U && period_ticks_64 > TIMER_GROUP1_PERIOD_MAX) {
+    // Group 1 counters are 16-bit; reject values that would overflow their period register.
+    uint32_t period_max = machine_tcpwm_counter_period_max(self->counter_num);
+    if (period_ticks_64 > period_max) {
         mp_raise_msg_varg(&mp_type_ValueError,
             MP_ERROR_TEXT("16-bit Timer(%u) period exceeds %lu ticks; use a shorter period/higher freq, or use a 32-bit Timer (id 0-7)"),
             (unsigned)self->id,
-            (unsigned long)TIMER_GROUP1_PERIOD_MAX);
+            (unsigned long)period_max);
     }
 
     period_ticks = (uint32_t)period_ticks_64;
