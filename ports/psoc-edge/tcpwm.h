@@ -36,6 +36,7 @@ void machine_tcpwm_counter_alloc(uint32_t counter_num, mp_obj_t owner);
 bool machine_tcpwm_counter_try_alloc(uint32_t counter_num, mp_obj_t owner);
 void machine_tcpwm_counter_free(uint32_t counter_num, mp_obj_t owner);
 en_clk_dst_t machine_tcpwm_counter_pclk(uint32_t counter_num);
+uint32_t machine_tcpwm_counter_period_max(uint32_t counter_num);
 
 void machine_tcpwm_slave_init(en_clk_dst_t pclk_dst);
 void machine_tcpwm_slave_deinit(void);

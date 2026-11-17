@@ -28,32 +28,55 @@
 #include "tcpwm.h"
 #include "clk.h"
 
+/**
+ * The file build-<board>/genhdr/pins_af.h contains the macro
+ *
+ *  MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(DO)
+ *
+ *  which uses the X-macro (as argument) pattern to pass a worker
+ *  macro DO(idx, grp, cnt) for the list of all the TCPWM0 counters
+ *  of the device, where:
+ *  - idx: index of the counter (0 to MICROPY_PY_MACHINE_TCPWM0_NUM_COUNTERS - 1).
+ *  - grp: TCPWM0 group of the counter.
+ *  - cnt: TCPWM0 counter number.
+ *
+ * The counters are those TCPWM0 LINE alternate functions defined
+ * in the boards/pse8x_af.csv file.
+ * See tools/boardgen.py and psoc-edge/boards/make-pins.py
+ * for more information.
+ */
+
 static mp_obj_t machine_tcpwm0_counter[MICROPY_PY_MACHINE_TCPWM0_NUM_COUNTERS] = { MP_OBJ_NULL };
 
 // Shared reference count for the TCPWM0 slave TCPWM_0_SLAVE_NR.
 static uint32_t machine_tcpwm0_slave_ref_count = 0;
 
-// Helper function to validate if a counter is supported
-static bool machine_tcpwm_counter_is_valid(uint32_t counter_num) {
-    return (counter_num <= 7) || (counter_num >= 256 && counter_num <= 279);
-}
+// Map a TCPWM0 counter number to its index in the counter ownership array.
+// Returns -1 if the counter is not available in the device.
+#define TCPWM_COUNTER_INDEX_CASE(idx, grp, cnt) case cnt: \
+        return idx;
+static int machine_tcpwm_counter_to_index(uint32_t counter_num) {
+    // All the device counters (from the PDL) must be collected by make-pins.py.
+    MP_STATIC_ASSERT(MICROPY_PY_MACHINE_TCPWM0_NUM_COUNTERS == TCPWM_GRP_NR0_GRP_GRP_CNT_NR + TCPWM_GRP_NR1_GRP_GRP_CNT_NR);
 
-// Helper function to map counter number to array index
-// Counters 0-7 map to indices 0-7
-// Counters 256-279 map to indices 8-31
-static uint32_t machine_tcpwm_counter_to_index(uint32_t counter_num) {
-    if (counter_num <= 7) {
-        return counter_num;
-    } else {
-        return counter_num - 256 + 8;
+    switch (counter_num) {
+        MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(TCPWM_COUNTER_INDEX_CASE)
+        default:
+            return -1;
     }
+}
+#undef TCPWM_COUNTER_INDEX_CASE
+
+static MP_NORETURN void machine_tcpwm_counter_raise_not_supported(uint32_t counter_num) {
+    mp_raise_msg_varg(&mp_type_ValueError,
+        MP_ERROR_TEXT("TCPWM0 counter %lu is not supported"), counter_num);
 }
 
 bool machine_tcpwm_counter_try_alloc(uint32_t counter_num, mp_obj_t owner) {
-    if (!machine_tcpwm_counter_is_valid(counter_num)) {
+    int idx = machine_tcpwm_counter_to_index(counter_num);
+    if (idx < 0) {
         return false;
     }
-    uint32_t idx = machine_tcpwm_counter_to_index(counter_num);
     if (machine_tcpwm0_counter[idx] != MP_OBJ_NULL) {
         return false;
     }
@@ -62,9 +85,8 @@ bool machine_tcpwm_counter_try_alloc(uint32_t counter_num, mp_obj_t owner) {
 }
 
 void machine_tcpwm_counter_alloc(uint32_t counter_num, mp_obj_t owner) {
-    if (!machine_tcpwm_counter_is_valid(counter_num)) {
-        mp_raise_msg_varg(&mp_type_ValueError,
-            MP_ERROR_TEXT("TCPWM0 counter %lu is not supported"), counter_num);
+    if (machine_tcpwm_counter_to_index(counter_num) < 0) {
+        machine_tcpwm_counter_raise_not_supported(counter_num);
     }
     if (!machine_tcpwm_counter_try_alloc(counter_num, owner)) {
         mp_raise_msg_varg(&mp_type_ValueError,
@@ -73,26 +95,39 @@ void machine_tcpwm_counter_alloc(uint32_t counter_num, mp_obj_t owner) {
 }
 
 void machine_tcpwm_counter_free(uint32_t counter_num, mp_obj_t owner) {
-    if (!machine_tcpwm_counter_is_valid(counter_num)) {
+    int idx = machine_tcpwm_counter_to_index(counter_num);
+    if (idx < 0) {
         return;
     }
-    uint32_t idx = machine_tcpwm_counter_to_index(counter_num);
     if (machine_tcpwm0_counter[idx] == owner) {
         machine_tcpwm0_counter[idx] = MP_OBJ_NULL;
     }
 }
 
+#define TCPWM_PCLK_CASE(idx, grp, cnt) case cnt: \
+        return PCLK_TCPWM0_CLOCK_COUNTER_EN##cnt;
 en_clk_dst_t machine_tcpwm_counter_pclk(uint32_t counter_num) {
-#define TCPWM_PCLK_CASE(id, counter, irq, pclk_dst, trig) case counter: \
-        return pclk_dst;
     switch (counter_num) {
-        MICROPY_PY_MACHINE_TCPWM_MAP(TCPWM_PCLK_CASE)
+        MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(TCPWM_PCLK_CASE)
         default:
-            mp_raise_msg_varg(&mp_type_ValueError,
-                MP_ERROR_TEXT("TCPWM0 counter %lu is not supported"), counter_num);
+            machine_tcpwm_counter_raise_not_supported(counter_num);
     }
-#undef TCPWM_PCLK_CASE
 }
+#undef TCPWM_PCLK_CASE
+
+// The maximum period of a counter is given by the counter width of its group.
+#define TCPWM_GRP_PERIOD_MAX(grp) ((uint32_t)((1ULL << TCPWM_GRP_NR##grp##_CNT_GRP_CNT_WIDTH) - 1ULL))
+#define TCPWM_PERIOD_MAX_CASE(idx, grp, cnt) case cnt: \
+        return TCPWM_GRP_PERIOD_MAX(grp);
+uint32_t machine_tcpwm_counter_period_max(uint32_t counter_num) {
+    switch (counter_num) {
+        MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(TCPWM_PERIOD_MAX_CASE)
+        default:
+            machine_tcpwm_counter_raise_not_supported(counter_num);
+    }
+}
+#undef TCPWM_PERIOD_MAX_CASE
+#undef TCPWM_GRP_PERIOD_MAX
 
 void machine_tcpwm_slave_init(en_clk_dst_t pclk_dst) {
     pclk_div_slave_init(pclk_dst, CY_MMIO_TCPWM0_PERI_NR, CY_MMIO_TCPWM0_GROUP_NR, CY_MMIO_TCPWM0_SLAVE_NR);
