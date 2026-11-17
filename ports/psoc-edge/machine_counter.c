@@ -110,27 +110,29 @@ typedef struct _machine_counter_obj_t {
 static machine_counter_obj_t *counter_obj[MACHINE_COUNTER_NUM_INSTANCES] = { NULL };
 
 // ---------------------------------------------------------------------------
-// Per-ID hardware mapping from generated AF data.
+// Per-ID hardware mapping from the generated TCPWM0 counters.
+// Macro is defined in pins_af.h as MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(DO).
+// Each entry: DO(idx, grp, cnt)
 // ---------------------------------------------------------------------------
 
-// Expands generated map entries into id->hardware-counter lookup.
-#define COUNTER_HW_ENTRY(id, counter, irq, pclk, trig) counter,
+// Expands generated counters into id->hardware-counter lookup.
+#define COUNTER_HW_ENTRY(idx, grp, cnt) [idx] = cnt,
 static const uint32_t counter_hw[MACHINE_COUNTER_NUM_INSTANCES] = {
-    MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_HW_ENTRY)
+    MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(COUNTER_HW_ENTRY)
 };
 #undef COUNTER_HW_ENTRY
 
-// Expands generated map entries into id->output-trigger-line lookup.
-#define COUNTER_OUT_TRIG_ENTRY(id, counter, irq, pclk, trig) trig,
+// Expands generated counters into id->output-trigger-line lookup.
+#define COUNTER_OUT_TRIG_ENTRY(idx, grp, cnt) [idx] = PERI_0_TRIG_OUT_MUX_3_TCPWM0_ONE_CNT_TR_IN##cnt,
 static const uint32_t counter_out_trig[MACHINE_COUNTER_NUM_INSTANCES] = {
-    MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_OUT_TRIG_ENTRY)
+    MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(COUNTER_OUT_TRIG_ENTRY)
 };
 #undef COUNTER_OUT_TRIG_ENTRY
 
-// Expands generated map entries into id->counter-IRQ lookup.
-#define COUNTER_IRQ_ENTRY(id, counter, irq, pclk, trig) irq,
+// Expands generated counters into id->counter-IRQ lookup.
+#define COUNTER_IRQ_ENTRY(idx, grp, cnt) [idx] = tcpwm_0_interrupts_##cnt##_IRQn,
 static const IRQn_Type counter_irq[MACHINE_COUNTER_NUM_INSTANCES] = {
-    MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_IRQ_ENTRY)
+    MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(COUNTER_IRQ_ENTRY)
 };
 #undef COUNTER_IRQ_ENTRY
 
@@ -159,11 +161,6 @@ static void machine_counter_configure_clock(machine_counter_obj_t *self) {
     if (self->pclk_div == NULL) {
         mp_raise_ValueError(MP_ERROR_TEXT("Counter clock dividers exhausted"));
     }
-}
-
-// Return the max period for this counter width (16-bit or 32-bit).
-static uint32_t machine_counter_period_max(uint32_t counter_num) {
-    return (counter_num >= 256U) ? 0xFFFFU : UINT32_MAX;
 }
 
 /**
@@ -375,86 +372,86 @@ static inline void machine_counter_on_aux_event(machine_counter_obj_t *self, boo
 // -------------------------------------------------------------------------- //
 
 // Generate one IRQ handler per Counter id for direct dispatch.
-#define COUNTER_IRQ_HANDLER_DECL(id, counter, irq, pclk, trig) \
-    static void machine_counter_irq_handler_##id(void) { \
-        machine_counter_obj_t *self = counter_obj[id]; \
+#define COUNTER_IRQ_HANDLER_DECL(idx, grp, cnt) \
+    static void machine_counter_irq_handler_##idx(void) { \
+        machine_counter_obj_t *self = counter_obj[idx]; \
         if (self != NULL) { \
             machine_counter_isr(self); \
         } \
     }
-MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_IRQ_HANDLER_DECL)
+MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(COUNTER_IRQ_HANDLER_DECL)
 #undef COUNTER_IRQ_HANDLER_DECL
 
 // Generate one IRQ handler entry per Counter id for direct dispatch.
-#define COUNTER_IRQ_HANDLER_ENTRY(id, counter, irq, pclk, trig) machine_counter_irq_handler_##id,
+#define COUNTER_IRQ_HANDLER_ENTRY(idx, grp, cnt) [idx] = machine_counter_irq_handler_##idx,
 static const cy_israddress machine_counter_irq_handlers[MACHINE_COUNTER_NUM_INSTANCES] = {
-    MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_IRQ_HANDLER_ENTRY)
+    MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(COUNTER_IRQ_HANDLER_ENTRY)
 };
 #undef COUNTER_IRQ_HANDLER_ENTRY
 // -------------------------------------------------------------------------- //
 
 // -------------------------------------------------------------------------- //
 // Generate one index callback per Counter id (bound through machine.Pin.irq).
-#define COUNTER_INDEX_HANDLER_DECL(id, counter, irq, pclk, trig) \
-    static mp_obj_t machine_counter_index_handler_##id(mp_obj_t pin_in) { \
+#define COUNTER_INDEX_HANDLER_DECL(idx, grp, cnt) \
+    static mp_obj_t machine_counter_index_handler_##idx(mp_obj_t pin_in) { \
         (void)pin_in; \
-        machine_counter_obj_t *self = counter_obj[id]; \
+        machine_counter_obj_t *self = counter_obj[idx]; \
         if (self != NULL && self->index_pin != NULL) { \
             machine_counter_on_aux_event(self, true, MACHINE_COUNTER_IRQ_INDEX); \
         } \
         return mp_const_none; \
     }
-MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_INDEX_HANDLER_DECL)
+MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(COUNTER_INDEX_HANDLER_DECL)
 #undef COUNTER_INDEX_HANDLER_DECL
 
 // Generate one index callback object per Counter id (bound through machine.Pin.irq).
-#define COUNTER_INDEX_HANDLER_OBJ_DECL(id, counter, irq, pclk, trig) \
-    static MP_DEFINE_CONST_FUN_OBJ_1(machine_counter_index_handler_obj_##id, machine_counter_index_handler_##id);
-MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_INDEX_HANDLER_OBJ_DECL)
+#define COUNTER_INDEX_HANDLER_OBJ_DECL(idx, grp, cnt) \
+    static MP_DEFINE_CONST_FUN_OBJ_1(machine_counter_index_handler_obj_##idx, machine_counter_index_handler_##idx);
+MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(COUNTER_INDEX_HANDLER_OBJ_DECL)
 #undef COUNTER_INDEX_HANDLER_OBJ_DECL
 
 // Generate one index callback object entry per Counter id (bound through machine.Pin.irq).
-#define COUNTER_INDEX_HANDLER_OBJ_ENTRY(id, counter, irq, pclk, trig) MP_OBJ_FROM_PTR(&machine_counter_index_handler_obj_##id),
+#define COUNTER_INDEX_HANDLER_OBJ_ENTRY(idx, grp, cnt) [idx] = MP_OBJ_FROM_PTR(&machine_counter_index_handler_obj_##idx),
 static const mp_obj_t machine_counter_index_handler_obj[MACHINE_COUNTER_NUM_INSTANCES] = {
-    MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_INDEX_HANDLER_OBJ_ENTRY)
+    MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(COUNTER_INDEX_HANDLER_OBJ_ENTRY)
 };
 #undef COUNTER_INDEX_HANDLER_OBJ_ENTRY
 // -------------------------------------------------------------------------- //
 
 // -------------------------------------------------------------------------- //
 // Generate one reset callback per Counter id (bound through machine.Pin.irq).
-#define COUNTER_RESET_HANDLER_DECL(id, counter, irq, pclk, trig) \
-    static mp_obj_t machine_counter_reset_handler_##id(mp_obj_t pin_in) { \
+#define COUNTER_RESET_HANDLER_DECL(idx, grp, cnt) \
+    static mp_obj_t machine_counter_reset_handler_##idx(mp_obj_t pin_in) { \
         (void)pin_in; \
-        machine_counter_obj_t *self = counter_obj[id]; \
+        machine_counter_obj_t *self = counter_obj[idx]; \
         if (self != NULL && self->reset_pin != NULL) { \
             machine_counter_on_aux_event(self, false, MACHINE_COUNTER_IRQ_RESET); \
         } \
         return mp_const_none; \
     }
-MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_RESET_HANDLER_DECL)
+MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(COUNTER_RESET_HANDLER_DECL)
 #undef COUNTER_RESET_HANDLER_DECL
 
 // Generate one reset callback object per Counter id (bound through machine.Pin.irq).
-#define COUNTER_RESET_HANDLER_OBJ_DECL(id, counter, irq, pclk, trig) \
-    static MP_DEFINE_CONST_FUN_OBJ_1(machine_counter_reset_handler_obj_##id, machine_counter_reset_handler_##id);
-MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_RESET_HANDLER_OBJ_DECL)
+#define COUNTER_RESET_HANDLER_OBJ_DECL(idx, grp, cnt) \
+    static MP_DEFINE_CONST_FUN_OBJ_1(machine_counter_reset_handler_obj_##idx, machine_counter_reset_handler_##idx);
+MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(COUNTER_RESET_HANDLER_OBJ_DECL)
 #undef COUNTER_RESET_HANDLER_OBJ_DECL
 
 // Generate one reset callback object entry per Counter id (bound through machine.Pin.irq).
-#define COUNTER_RESET_HANDLER_OBJ_ENTRY(id, counter, irq, pclk, trig) MP_OBJ_FROM_PTR(&machine_counter_reset_handler_obj_##id),
+#define COUNTER_RESET_HANDLER_OBJ_ENTRY(idx, grp, cnt) [idx] = MP_OBJ_FROM_PTR(&machine_counter_reset_handler_obj_##idx),
 static const mp_obj_t machine_counter_reset_handler_obj[MACHINE_COUNTER_NUM_INSTANCES] = {
-    MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_RESET_HANDLER_OBJ_ENTRY)
+    MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(COUNTER_RESET_HANDLER_OBJ_ENTRY)
 };
 #undef COUNTER_RESET_HANDLER_OBJ_ENTRY
 // -------------------------------------------------------------------------- //
 
 // -------------------------------------------------------------------------- //
 // If index and reset share a pin, run both semantics from a single callback.
-#define COUNTER_INDEX_RESET_HANDLER_DECL(id, counter, irq, pclk, trig) \
-    static mp_obj_t machine_counter_index_reset_handler_##id(mp_obj_t pin_in) { \
+#define COUNTER_INDEX_RESET_HANDLER_DECL(idx, grp, cnt) \
+    static mp_obj_t machine_counter_index_reset_handler_##idx(mp_obj_t pin_in) { \
         (void)pin_in; \
-        machine_counter_obj_t *self = counter_obj[id]; \
+        machine_counter_obj_t *self = counter_obj[idx]; \
         if (self != NULL) { \
             if (self->index_pin != NULL) { \
                 machine_counter_on_aux_event(self, true, MACHINE_COUNTER_IRQ_INDEX); \
@@ -465,19 +462,19 @@ static const mp_obj_t machine_counter_reset_handler_obj[MACHINE_COUNTER_NUM_INST
         } \
         return mp_const_none; \
     }
-MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_INDEX_RESET_HANDLER_DECL)
+MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(COUNTER_INDEX_RESET_HANDLER_DECL)
 #undef COUNTER_INDEX_RESET_HANDLER_DECL
 
 // Generate one index/reset callback object per Counter id (bound through machine.Pin.irq).
-#define COUNTER_INDEX_RESET_HANDLER_OBJ_DECL(id, counter, irq, pclk, trig) \
-    static MP_DEFINE_CONST_FUN_OBJ_1(machine_counter_index_reset_handler_obj_##id, machine_counter_index_reset_handler_##id);
-MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_INDEX_RESET_HANDLER_OBJ_DECL)
+#define COUNTER_INDEX_RESET_HANDLER_OBJ_DECL(idx, grp, cnt) \
+    static MP_DEFINE_CONST_FUN_OBJ_1(machine_counter_index_reset_handler_obj_##idx, machine_counter_index_reset_handler_##idx);
+MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(COUNTER_INDEX_RESET_HANDLER_OBJ_DECL)
 #undef COUNTER_INDEX_RESET_HANDLER_OBJ_DECL
 
 // Generate one index/reset callback object entry per Counter id (bound through machine.Pin.irq).
-#define COUNTER_INDEX_RESET_HANDLER_OBJ_ENTRY(id, counter, irq, pclk, trig) MP_OBJ_FROM_PTR(&machine_counter_index_reset_handler_obj_##id),
+#define COUNTER_INDEX_RESET_HANDLER_OBJ_ENTRY(idx, grp, cnt) [idx] = MP_OBJ_FROM_PTR(&machine_counter_index_reset_handler_obj_##idx),
 static const mp_obj_t machine_counter_index_reset_handler_obj[MACHINE_COUNTER_NUM_INSTANCES] = {
-    MICROPY_PY_MACHINE_TCPWM_MAP(COUNTER_INDEX_RESET_HANDLER_OBJ_ENTRY)
+    MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(COUNTER_INDEX_RESET_HANDLER_OBJ_ENTRY)
 };
 #undef COUNTER_INDEX_RESET_HANDLER_OBJ_ENTRY
 
@@ -570,7 +567,7 @@ static void machine_counter_init_helper_impl(machine_counter_obj_t *self,
         mp_raise_NotImplementedError(MP_ERROR_TEXT("match_pin not supported"));
     }
 
-    uint32_t max_hw = machine_counter_period_max(self->counter_num);
+    uint32_t max_hw = machine_tcpwm_counter_period_max(self->counter_num);
     uint32_t range_max = max_hw;
     int64_t max_value = (int64_t)max_hw;
     if (args[ARG_max].u_obj != mp_const_none) {
@@ -788,7 +785,7 @@ static mp_obj_t machine_counter_make_new(const mp_obj_type_t *type,
     self->edge = COUNTER_EDGE_RISING;
     self->direction = COUNTER_DIR_UP;
     self->range_min = 0;
-    self->range_max = machine_counter_period_max(self->counter_num);
+    self->range_max = machine_tcpwm_counter_period_max(self->counter_num);
     self->range_min_negative = false;
     self->range_max_negative = false;
     self->cycles_u16 = 0;
