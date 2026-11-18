@@ -128,7 +128,7 @@
 	url = https://github.com/Infineon/lwip-network-interface-integration.git
 [submodule "lib/psoc-edge/lwip"]
 	path = lib/psoc-edge/lwip
-	url = https://git.savannah.nongnu.org/git/lwip
+	url = https://github.com/lwip-tcpip/lwip.git
 [submodule "lib/psoc-edge/secure-sockets"]
 	path = lib/psoc-edge/secure-sockets
 	url = https://github.com/cypresssemiconductorco/secure-sockets.git
