@@ -6,6 +6,8 @@ on:
     branches:
       - 'psoc-edge-*'
       - '!psoc-edge-main'
+  schedule:
+    - cron: '0 0 * * 0' # Sunday 00:00
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
