@@ -1,4 +1,5 @@
 from machine import Timer
+import gc
 import time
 
 oneshot_triggered = False
@@ -125,13 +126,19 @@ def test_negative_cases():
         lambda: Timer(8, period=1000, mode=Timer.ONE_SHOT, callback=call_oneshot),
     )
 
-    # Constructor check for duplicate object creation on the same Timer ID.
+    # Non-integer timer ID.
+    try:
+        Timer("0")
+    except TypeError as e:
+        print("invalid_id_type:", e)
+
+    # Constructing a Timer for an ID in use returns the live object, and
+    # additional arguments reconfigure it.
     tdup = Timer(2, period=10000, mode=Timer.ONE_SHOT, callback=call_oneshot)
     try:
-        expect_value_error(
-            "timer_vs_timer_conflict:",
-            lambda: Timer(2, period=1000, mode=Timer.ONE_SHOT, callback=call_oneshot),
-        )
+        print("same_id_same_obj:", Timer(2) is tdup)
+        tre = Timer(2, freq=1000, mode=Timer.PERIODIC, callback=call_periodic)
+        print("same_id_reinit:", tre is tdup, tdup)
     finally:
         tdup.deinit()
 
@@ -169,6 +176,61 @@ def test_recreate_after_deinit():
     tim_new = Timer(0, period=10000, mode=Timer.ONE_SHOT, callback=call_oneshot)
     tim_new.deinit()
     print("Recreate Timer(0) after deinit: OK")
+
+
+# Test the constructor/id and init() relationship.
+def test_id_init_lifecycle():
+    print("*****Timer id/init Lifecycle Tests*****")
+    fired = [0]
+
+    def cb(timer):
+        fired[0] += 1
+
+    # The constructor with the ID only does not start the timer.
+    tim = Timer(4)
+    print("id_only:", tim)
+
+    # init() after deinit() claims the timer again and the callback fires.
+    tim.deinit()
+    tim.init(mode=Timer.ONE_SHOT, period=10, callback=cb)
+    time.sleep_ms(100)
+    print("init_after_deinit:", fired[0] == 1)
+
+    # A failed init() keeps the previous configuration running.
+    tim.init(mode=Timer.PERIODIC, period=20, callback=cb)
+    expect_value_error(
+        "failed_init:", lambda: tim.init(mode=Timer.PERIODIC, period=0, callback=None)
+    )
+    fired[0] = 0
+    time.sleep_ms(200)
+    print("failed_init_keeps_running:", fired[0] > 0, tim)
+
+    # A failed construction for a live ID keeps the live object running.
+    expect_value_error("failed_reuse:", lambda: Timer(4, mode=99, period=10, callback=cb))
+    fired[0] = 0
+    time.sleep_ms(200)
+    print("failed_reuse_keeps_running:", Timer(4) is tim, fired[0] > 0)
+    tim.deinit()
+
+    # A stale object cannot take over a counter claimed by a newer Timer.
+    tim_new = Timer(4)
+    try:
+        print("new_obj_after_deinit:", tim_new is not tim)
+        expect_value_error("stale_init:", lambda: tim.init(period=10, callback=cb))
+        tim.deinit()  # must not release tim_new
+        print("stale_deinit_keeps_new:", Timer(4) is tim_new)
+    finally:
+        tim_new.deinit()
+
+    # A running timer without a Python reference survives garbage collection.
+    Timer(5, mode=Timer.PERIODIC, period=20, callback=cb)
+    gc.collect()
+    # Allocate over any freed heap blocks.
+    [bytearray(64) for _ in range(100)]
+    fired[0] = 0
+    time.sleep_ms(200)
+    print("unreferenced_timer_running:", fired[0] > 0)
+    Timer(5).deinit()
 
 
 def print_result(name, ok):
@@ -250,4 +312,5 @@ if __name__ == "__main__":
     test_frequency_input()
     test_negative_cases()
     test_recreate_after_deinit()
+    test_id_init_lifecycle()
     test_hard_parameter_checks()
