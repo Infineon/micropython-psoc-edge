@@ -592,10 +592,12 @@ MOD_SRC_C += \
 	machine_spi_target.c \
 	machine_rtc.c \
 	machine_ipc.c \
-	machine_timer.c \
+	machine_timer_alt.c \
 	machine_counter.c \
 	machine_bitstream.c \
 	modpsocedge.c \
+
+# 	machine_timer.c \
 
 ifeq ($(MICROPY_PY_EXT_FLASH),1)
 MOD_SRC_C += psoc_edge_qspi_flash.c 
@@ -618,6 +620,7 @@ SRC_C += \
 	systick.c \
 	sys_int.c \
 	tcpwm.c \
+	tcpwm_alt.c \
 
 
 # List of sources for qstr extraction

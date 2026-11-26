@@ -532,6 +532,28 @@ class PSE84PinGenerator(boardgen.PinGenerator):
 
         print(file=out_header)
 
+    def print_tcpwm_defines_alt(self, out_header):
+        counters_by_width = {
+            32: [(idx, cnt) for idx, cnt in enumerate(self._tcpwm0_counters) if cnt >> 8 == 0],
+            16: [(idx, cnt) for idx, cnt in enumerate(self._tcpwm0_counters) if cnt >> 8 == 1],
+        }
+
+        for width, counters in counters_by_width.items():
+            prefix = f"MICROPY_PY_MACHINE_TCPWM0_{width}BITS"
+            print(file=out_header)
+            print(f"#define {prefix}_NUM_COUNTERS ({len(counters)})", file=out_header)
+            if width == 16:
+                min_id = min((cnt for _, cnt in counters), default=-1)
+                print(f"#define {prefix}_MIN_ID ({min_id})", file=out_header)
+            lines = [f"DO({cnt})" for _, cnt in counters]
+            if lines:
+                print(f"#define {prefix}_FOR_ALL_COUNTERS(DO) \\", file=out_header)
+                print(" \\\n".join(lines), file=out_header)
+            else:
+                print(f"#define {prefix}_FOR_ALL_COUNTERS(DO)", file=out_header)
+
+        print(file=out_header)
+
     def print_peri_tr_io_defines(self, out_header):
         print(file=out_header)
         print(
@@ -596,6 +618,7 @@ class PSE84PinGenerator(boardgen.PinGenerator):
     def print_af_header(self, out_af_header):
         self.print_scb_defines(out_af_header)
         self.print_tcpwm_defines(out_af_header)
+        self.print_tcpwm_defines_alt(out_af_header)
         self.print_peri_tr_io_defines(out_af_header)
         self.print_adc_defines(out_af_header)
 
