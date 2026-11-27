@@ -63,78 +63,21 @@
 typedef struct _machine_timer_obj_t {
     mp_obj_base_t base;
     uint8_t id;                  // 0..31
-    uint32_t counter_num;        // TCPWM0 counter index mapped from timer_hw[]
+    uint8_t mode;                // TIMER_MODE_ONE_SHOT or TIMER_MODE_PERIODIC
+    bool ishard;
+    bool irq_active;             // counter IRQ registered with sys_int
+    uint32_t counter_num;        // TCPWM0 counter number for this id
+    uint32_t period_ticks;       // configured period in timer clock ticks, 0 if not started
     en_clk_dst_t pclk_dst;
     pclk_div_obj_t *pclk_div;
-    uint16_t mode;               // TIMER_MODE_ONE_SHOT or TIMER_MODE_PERIODIC
     mp_obj_t callback;
-    bool ishard;
-    bool active;
     sys_int_cfg_t irq_cfg;
 } machine_timer_obj_t;
 
 const mp_obj_type_t machine_timer_type;  // forward declaration
 
-// ---------------------------------------------------------------------------
-// Per-ID hardware mapping from the generated TCPWM0 counters.
-// Macro is defined in pins_af.h as MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(DO).
-// Each entry: DO(idx, grp, cnt)
-// ---------------------------------------------------------------------------
-
-#define TIMER_HW_ENTRY(idx, grp, cnt) [idx] = cnt,
-static const uint32_t timer_hw[MACHINE_TIMER_NUM_INSTANCES] = {
-    MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(TIMER_HW_ENTRY)
-};
-#undef TIMER_HW_ENTRY
-
-#define TIMER_IRQ_CASE(idx, grp, cnt) case cnt: \
-        return tcpwm_0_interrupts_##cnt##_IRQn;
-static IRQn_Type machine_timer_counter_irq(uint32_t counter_num) {
-    switch (counter_num) {
-        MICROPY_PY_MACHINE_TCPWM0_FOR_ALL_COUNTERS(TIMER_IRQ_CASE)
-        default:
-            mp_raise_msg_varg(&mp_type_ValueError,
-                MP_ERROR_TEXT("Timer counter %lu does not have an IRQ mapping"),
-                (unsigned long)counter_num);
-    }
-}
-#undef TIMER_IRQ_CASE
-
-// ---------------------------------------------------------------------------
-// Static instance pool — one entry per hardware timer
-// ---------------------------------------------------------------------------
-
-static machine_timer_obj_t *timer_obj[MACHINE_TIMER_NUM_INSTANCES] = { NULL };
-
-
-static void machine_timer_configure_clock(machine_timer_obj_t *self) {
-    if (self->pclk_div != NULL) {
-        return;
-    }
-
-    machine_tcpwm_slave_init(self->pclk_dst);
-
-    uint32_t clk_freq = pclk_div_get_input_freq(self->pclk_dst);
-
-    if (clk_freq == 0U) {
-        mp_raise_ValueError(MP_ERROR_TEXT("failed to get timer input clock"));
-    }
-
-    // HAL-like divider selection for f_out = f_in / ((divider + 1) + frac/32).
-    // Pick the smallest divisor that keeps output at or below TIMER_CLK_HZ.
-    uint64_t scaled_div = ((uint64_t)clk_freq * 32ULL + TIMER_CLK_HZ - 1ULL) / TIMER_CLK_HZ;
-    if (scaled_div < 32ULL) {
-        scaled_div = 32ULL;
-    }
-
-    uint32_t divider = (uint32_t)(scaled_div / 32ULL) - 1U;
-    uint8_t divider_frac = (uint8_t)(scaled_div % 32ULL);
-
-    self->pclk_div = pclk_div_init(self->pclk_dst, divider, divider_frac);
-    if (self->pclk_div == NULL) {
-        mp_raise_ValueError(MP_ERROR_TEXT("Timer clock dividers exhausted"));
-    }
-}
+// One Timer object per id, kept alive by the GC as a root pointer.
+MP_REGISTER_ROOT_POINTER(struct _machine_timer_obj_t *machine_timer_obj[MICROPY_PY_MACHINE_TCPWM0_NUM_COUNTERS]);
 
 // ---------------------------------------------------------------------------
 // IRQ handling helpers
@@ -145,13 +88,11 @@ static void machine_timer_isr(machine_timer_obj_t *self) {
         Cy_TCPWM_ClearInterrupt(TCPWM0, self->counter_num, CY_TCPWM_INT_ON_TC);
         if (self->mode == TIMER_MODE_ONE_SHOT) {
             Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
-            self->active = false;
         }
         if (self->callback != mp_const_none
             && mp_irq_dispatch(self->callback, MP_OBJ_FROM_PTR(self), self->ishard) < 0) {
             // Uncaught exception: stop timer and disable callback to avoid repeated IRQ spam.
             Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
-            self->active = false;
             self->callback = mp_const_none;
         }
     }
@@ -160,7 +101,7 @@ static void machine_timer_isr(machine_timer_obj_t *self) {
 // Generate one IRQ handler per timer id for direct dispatch without scanning.
 #define TIMER_IRQ_HANDLER_DECL(idx, grp, cnt) \
     static void machine_timer_irq_handler_##idx(void) { \
-        machine_timer_obj_t *self = timer_obj[idx]; \
+        machine_timer_obj_t *self = MP_STATE_PORT(machine_timer_obj[idx]); \
         if (self != NULL) { \
             machine_timer_isr(self); \
         } \
@@ -175,17 +116,41 @@ static const cy_israddress machine_timer_irq_handlers[MACHINE_TIMER_NUM_INSTANCE
 #undef TIMER_IRQ_HANDLER_ENTRY
 
 // ---------------------------------------------------------------------------
-// Start (or restart) a timer with the given period in clock ticks
+// Hardware helpers
 // ---------------------------------------------------------------------------
 
-static void machine_timer_start(machine_timer_obj_t *self, uint32_t period_ticks) {
-    machine_timer_configure_clock(self);
+// Claims the TCPWM0 counter and the id slot for this object. Safe to call
+// repeatedly, and raises if another object owns the counter.
+static void machine_timer_claim(machine_timer_obj_t *self) {
+    machine_tcpwm_counter_alloc(self->counter_num, MP_OBJ_FROM_PTR(self));
+    MP_STATE_PORT(machine_timer_obj[self->id]) = self;
+}
 
-    // Stop counter and unregister any existing IRQ before reconfiguring.
-    Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
-    if (self->active) {
+// Stops the counter and unregisters its IRQ.
+static void machine_timer_stop(machine_timer_obj_t *self) {
+    // Only touch the TCPWM0 block if this timer has its clock configured.
+    if (self->pclk_div != NULL) {
+        Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
+    }
+    if (self->irq_active) {
         sys_int_deinit(&self->irq_cfg);
-        self->active = false;
+        self->irq_active = false;
+    }
+    self->period_ticks = 0;
+}
+
+// Applies a validated configuration and (re)starts the counter.
+static void machine_timer_start(machine_timer_obj_t *self, uint8_t mode,
+    mp_obj_t callback, bool ishard, uint32_t period_ticks) {
+
+    // Stop the previous run before the new settings are visible to the ISR.
+    machine_timer_stop(self);
+    self->mode = mode;
+    self->callback = callback;
+    self->ishard = ishard;
+
+    if (self->pclk_div == NULL) {
+        self->pclk_div = machine_tcpwm_clock_init(self->pclk_dst, TIMER_CLK_HZ);
     }
 
     // The counter counts 0 → period_reg (inclusive) then fires TC.
@@ -193,7 +158,7 @@ static void machine_timer_start(machine_timer_obj_t *self, uint32_t period_ticks
     cy_stc_tcpwm_counter_config_t cfg = {
         .period = period_ticks - 1U,
         .clockPrescaler = CY_TCPWM_COUNTER_PRESCALER_DIVBY_1,
-        .runMode = (self->mode == TIMER_MODE_ONE_SHOT)
+        .runMode = (mode == TIMER_MODE_ONE_SHOT)
                               ? CY_TCPWM_COUNTER_ONESHOT
                               : CY_TCPWM_COUNTER_CONTINUOUS,
         .countDirection = CY_TCPWM_COUNTER_COUNT_UP,
@@ -228,13 +193,15 @@ static void machine_timer_start(machine_timer_obj_t *self, uint32_t period_ticks
             MP_ERROR_TEXT("Timer(%u) init failed (PDL error 0x%lx)"),
             (unsigned)self->id, (unsigned long)result);
     }
+    // Drop a TC left pending by the previous run, so the new callback is not called early.
+    Cy_TCPWM_ClearInterrupt(TCPWM0, self->counter_num, CY_TCPWM_INT_ON_TC);
 
     // Register IRQ before enabling so no TC edge is missed.
     self->irq_cfg.priority = SYS_INT_IRQ_LOWEST_PRIORITY;
-    self->irq_cfg.handler = machine_timer_irq_handlers[self->id];
     sys_int_init(&self->irq_cfg);
+    self->irq_active = true;
 
-    self->active = true;
+    self->period_ticks = period_ticks;
     Cy_TCPWM_Counter_Enable(TCPWM0, self->counter_num);
     Cy_TCPWM_TriggerReloadOrIndex_Single(TCPWM0, self->counter_num);
 }
@@ -243,7 +210,9 @@ static void machine_timer_start(machine_timer_obj_t *self, uint32_t period_ticks
 // Python init helper (shared by make_new and .init())
 // ---------------------------------------------------------------------------
 
-static mp_obj_t machine_timer_init_helper(machine_timer_obj_t *self,
+// Validates all the arguments before changing the object, so a failed init()
+// leaves a running timer untouched. Arguments not given take their defaults.
+static void machine_timer_init_helper(machine_timer_obj_t *self,
     size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
 
     enum { ARG_mode, ARG_callback, ARG_period, ARG_freq, ARG_hard };
@@ -259,29 +228,23 @@ static mp_obj_t machine_timer_init_helper(machine_timer_obj_t *self,
     mp_arg_parse_all(n_args, pos_args, kw_args,
         MP_ARRAY_SIZE(allowed_args), allowed_args, args);
 
-    // Validate mode
     mp_int_t mode = args[ARG_mode].u_int;
     if (mode != TIMER_MODE_ONE_SHOT && mode != TIMER_MODE_PERIODIC) {
         mp_raise_ValueError(MP_ERROR_TEXT("invalid mode"));
     }
-    self->mode = (uint16_t)mode;
 
-    // Validate callback
     mp_obj_t callback = args[ARG_callback].u_obj;
     if (callback != mp_const_none && !mp_obj_is_callable(callback)) {
         mp_raise_ValueError(MP_ERROR_TEXT("callback must be callable"));
     }
-    self->callback = callback;
 
     mp_obj_t hard = args[ARG_hard].u_obj;
     if (!mp_obj_is_bool(hard)) {
         mp_raise_ValueError(MP_ERROR_TEXT("hard must be bool"));
     }
-    self->ishard = (hard == mp_const_true);
 
     // Compute period in timer clock ticks in 64-bit, then range-check.
     uint64_t period_ticks_64;
-    uint32_t period_ticks;
     if (args[ARG_freq].u_obj != mp_const_none) {
         mp_int_t freq = mp_obj_get_int(args[ARG_freq].u_obj);
         if (freq <= 0) {
@@ -311,48 +274,64 @@ static mp_obj_t machine_timer_init_helper(machine_timer_obj_t *self,
             (unsigned long)period_max);
     }
 
-    period_ticks = (uint32_t)period_ticks_64;
+    // Claim again, in case init() is called after deinit().
+    machine_timer_claim(self);
+    machine_timer_start(self, (uint8_t)mode, callback, hard == mp_const_true, (uint32_t)period_ticks_64);
+}
 
-    machine_timer_start(self, period_ticks);
+// ---------------------------------------------------------------------------
+// timer.deinit()
+// ---------------------------------------------------------------------------
+
+static mp_obj_t machine_timer_deinit(mp_obj_t self_in) {
+    machine_timer_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    machine_timer_stop(self);
+    machine_tcpwm_clock_deinit(&self->pclk_div);
+    self->callback = mp_const_none;
+    self->ishard = false;
+    machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
+    // A stale object must not release a newer Timer created for the same id.
+    if (MP_STATE_PORT(machine_timer_obj[self->id]) == self) {
+        MP_STATE_PORT(machine_timer_obj[self->id]) = NULL;
+    }
     return mp_const_none;
 }
+static MP_DEFINE_CONST_FUN_OBJ_1(machine_timer_deinit_obj, machine_timer_deinit);
 
 // ---------------------------------------------------------------------------
 // machine.Timer(id [, mode=, freq=, period=, callback=, hard=])
 // ---------------------------------------------------------------------------
 
+// The constructor sets the identity, everything else is delegated to init.
+// Constructing an id already in use returns that same object.
 static mp_obj_t machine_timer_make_new(const mp_obj_type_t *type,
     size_t n_args, size_t n_kw, const mp_obj_t *args) {
 
     mp_arg_check_num(n_args, n_kw, 1, MP_OBJ_FUN_ARGS_MAX, true);
 
-    mp_int_t id = mp_obj_get_int(args[0]);
-    if (id < 0 || id >= MACHINE_TIMER_NUM_INSTANCES) {
-        mp_raise_msg_varg(&mp_type_ValueError,
-            MP_ERROR_TEXT("Timer id must be in range 0-%d"),
-            MACHINE_TIMER_NUM_INSTANCES - 1);
+    mp_int_t id = machine_tcpwm_id_from_obj(args[0], MP_QSTR_Timer);
+
+    machine_timer_obj_t *self = MP_STATE_PORT(machine_timer_obj[id]);
+    bool is_new_obj = (self == NULL);
+    if (is_new_obj) {
+        self = mp_obj_malloc(machine_timer_obj_t, &machine_timer_type);
+        self->id = (uint8_t)id;
+        self->mode = TIMER_MODE_PERIODIC;
+        self->ishard = false;
+        self->irq_active = false;
+        self->counter_num = machine_tcpwm_counter_num(id);
+        self->period_ticks = 0;
+        self->pclk_dst = machine_tcpwm_counter_pclk(self->counter_num);
+        self->pclk_div = NULL;
+        self->callback = mp_const_none;
+        self->irq_cfg.irq_num = machine_tcpwm_counter_irq(self->counter_num);
+        self->irq_cfg.priority = SYS_INT_IRQ_LOWEST_PRIORITY;
+        self->irq_cfg.handler = machine_timer_irq_handlers[id];
     }
 
-    if (timer_obj[id] != NULL) {
-        mp_raise_msg_varg(&mp_type_ValueError,
-            MP_ERROR_TEXT("Timer(%u) already created."), (unsigned)id);
-    }
-
-    machine_timer_obj_t *self = mp_obj_malloc(machine_timer_obj_t, &machine_timer_type);
-    timer_obj[id] = self;
-
-    self->id = (uint8_t)id;
-    self->counter_num = timer_hw[id];
-    self->pclk_dst = machine_tcpwm_counter_pclk(self->counter_num);
-    self->callback = mp_const_none;
-    self->ishard = false;
-    self->active = false;
-    self->pclk_div = NULL;
-    self->irq_cfg.irq_num = machine_timer_counter_irq(self->counter_num);
-
-    nlr_buf_t nl;
-    if (nlr_push(&nl) == 0) {
-        machine_tcpwm_counter_alloc(self->counter_num, MP_OBJ_FROM_PTR(self));
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        machine_timer_claim(self);
         if (n_args > 1 || n_kw > 0) {
             mp_map_t kw_map;
             mp_map_init_fixed_table(&kw_map, n_kw, args + n_args);
@@ -360,14 +339,11 @@ static mp_obj_t machine_timer_make_new(const mp_obj_type_t *type,
         }
         nlr_pop();
     } else {
-        if (self->pclk_div != NULL) {
-            pclk_div_deinit(self->pclk_div);
-            self->pclk_div = NULL;
-            machine_tcpwm_slave_deinit();
+        // Only release an object created here. A live object is kept, as on a failed init().
+        if (is_new_obj) {
+            machine_timer_deinit(MP_OBJ_FROM_PTR(self));
         }
-        machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
-        timer_obj[id] = NULL;
-        nlr_jump(nl.ret_val);
+        nlr_jump(nlr.ret_val);
     }
 
     return MP_OBJ_FROM_PTR(self);
@@ -379,37 +355,10 @@ static mp_obj_t machine_timer_make_new(const mp_obj_type_t *type,
 
 static mp_obj_t machine_timer_init(size_t n_args, const mp_obj_t *args,
     mp_map_t *kw_args) {
-    return machine_timer_init_helper(MP_OBJ_TO_PTR(args[0]),
-        n_args - 1, args + 1, kw_args);
-}
-static MP_DEFINE_CONST_FUN_OBJ_KW(machine_timer_init_obj, 1, machine_timer_init);
-
-// ---------------------------------------------------------------------------
-// timer.deinit()
-// ---------------------------------------------------------------------------
-
-static mp_obj_t machine_timer_deinit(mp_obj_t self_in) {
-    machine_timer_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    // Only touch the TCPWM0 block if this timer actually configured it.
-    if (self->pclk_div != NULL) {
-        Cy_TCPWM_Counter_Disable(TCPWM0, self->counter_num);
-    }
-    if (self->active) {
-        sys_int_deinit(&self->irq_cfg);
-    }
-    self->callback = mp_const_none;
-    self->ishard = false;
-    self->active = false;
-    if (self->pclk_div != NULL) {
-        pclk_div_deinit(self->pclk_div);
-        self->pclk_div = NULL;
-        machine_tcpwm_slave_deinit();
-    }
-    machine_tcpwm_counter_free(self->counter_num, MP_OBJ_FROM_PTR(self));
-    timer_obj[self->id] = NULL;
+    machine_timer_init_helper(MP_OBJ_TO_PTR(args[0]), n_args - 1, args + 1, kw_args);
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(machine_timer_deinit_obj, machine_timer_deinit);
+static MP_DEFINE_CONST_FUN_OBJ_KW(machine_timer_init_obj, 1, machine_timer_init);
 
 // ---------------------------------------------------------------------------
 // __repr__ / print
@@ -418,21 +367,24 @@ static MP_DEFINE_CONST_FUN_OBJ_1(machine_timer_deinit_obj, machine_timer_deinit)
 static void machine_timer_print(const mp_print_t *print, mp_obj_t self_in,
     mp_print_kind_t kind) {
     machine_timer_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    uint32_t period_ticks = Cy_TCPWM_Counter_GetPeriod(TCPWM0, self->counter_num) + 1U;
-    uint32_t freq = period_ticks != 0U ? (TIMER_CLK_HZ / period_ticks) : 0U;
+    // Printed from the stored config: the counter registers may not be clocked.
+    if (self->period_ticks == 0U) {
+        mp_printf(print, "Timer(id=%u)", (unsigned)self->id);
+        return;
+    }
     mp_printf(print, "Timer(id=%u, mode=Timer.%s, freq=%u)",
         (unsigned)self->id,
         self->mode == TIMER_MODE_ONE_SHOT ? "OneShot" : "Periodic",
-        (unsigned)freq);
+        (unsigned)(TIMER_CLK_HZ / self->period_ticks));
 }
 
 // ---------------------------------------------------------------------------
-// Module-level lifecycle called from main.c
+// Module-level lifecycle called from machine_deinit()
 // ---------------------------------------------------------------------------
 
 void machine_timer_deinit_all(void) {
     for (uint8_t i = 0; i < MACHINE_TIMER_NUM_INSTANCES; i++) {
-        machine_timer_obj_t *self = timer_obj[i];
+        machine_timer_obj_t *self = MP_STATE_PORT(machine_timer_obj[i]);
         if (self != NULL) {
             machine_timer_deinit(MP_OBJ_FROM_PTR(self));
         }

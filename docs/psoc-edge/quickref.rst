@@ -979,7 +979,8 @@ Hardware timer using the TCPWM0 peripheral on the PSOC™ Edge. See :ref:`machin
     - **32-bit timers**: IDs ``0`` through ``7`` (TCPWM0 counters ``0`` through ``7``).
     - **16-bit timers**: IDs ``8`` through ``31`` (TCPWM0 counters ``256`` through ``279``).
 
-    Only one instance per ID can exist at a time; constructing a second ``Timer(id)`` without calling ``deinit()`` first raises a ``ValueError``.
+    The TCPWM0 counters are shared with ``Counter`` and ``PWM``. Using a ``Timer`` ``id`` whose
+    counter is already used by a ``Counter`` or ``PWM`` raises a ``ValueError``.
 
 .. note::
 
